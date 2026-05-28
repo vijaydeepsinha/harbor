@@ -1,0 +1,41 @@
+# Large media (hosted on GitHub Releases)
+*.mp4
+
+# Build output
+dist/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs and local tool artifacts
+*.log
+pre-log.json
+post-log.json
+bench/*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Claude Code local settings
+.claude/
+
+# OS
+**/.DS_Store
+
+# Test / coverage
+.pytest_cache/
+coverage/
+
+# Internal working files — not for public repo
+.internal/
+reviews/
+__pycache__/

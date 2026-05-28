@@ -1,0 +1,182 @@
+openapi: 3.0.3
+info:
+  title: Task Service
+  version: 1.0.0
+  description: Task management — create, list, update, and delete tasks
+
+servers:
+  - url: http://localhost:3003
+
+paths:
+  /api/v1/tasks:
+    get:
+      operationId: listTasks
+      summary: List tasks
+      description: Returns all tasks. Optionally filter by status or projectId.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [todo, in_progress, done, cancelled]
+          description: Filter by task status
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by project ID
+      responses:
+        '200':
+          description: List of tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Task'
+                  total:
+                    type: integer
+
+    post:
+      operationId: createTask
+      summary: Create a task
+      description: Creates a new task. Title is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  description: Task title
+                projectId:
+                  type: string
+                  description: Project this task belongs to
+                assigneeId:
+                  type: string
+                  description: User ID to assign the task to
+                status:
+                  type: string
+                  enum: [todo, in_progress, done, cancelled]
+                  default: todo
+                priority:
+                  type: string
+                  enum: [low, medium, high, urgent]
+                  default: medium
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          description: Missing required fields
+
+  /api/v1/tasks/{id}:
+    get:
+      operationId: getTask
+      summary: Get task by ID
+      description: Returns full details for a single task.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task ID (e.g. task-0001)
+      responses:
+        '200':
+          description: Task details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '404':
+          description: Task not found
+
+    patch:
+      operationId: updateTask
+      summary: Update a task
+      description: Updates status, assignee, or priority of an existing task.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [todo, in_progress, done, cancelled]
+                assigneeId:
+                  type: string
+                priority:
+                  type: string
+                  enum: [low, medium, high, urgent]
+      responses:
+        '200':
+          description: Task updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          description: Invalid status value
+        '404':
+          description: Task not found
+
+    delete:
+      operationId: deleteTask
+      summary: Delete a task
+      description: Permanently removes a task.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task ID
+      responses:
+        '204':
+          description: Task deleted
+        '404':
+          description: Task not found
+
+components:
+  schemas:
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        projectId:
+          type: string
+        assigneeId:
+          type: string
+        status:
+          type: string
+          enum: [todo, in_progress, done, cancelled]
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+        createdAt:
+          type: string
+          format: date-time

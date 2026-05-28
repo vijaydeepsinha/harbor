@@ -1,0 +1,31 @@
+{
+  "description": "Product catalog service — browse and search available products. Use this service to list products, filter by category eg electronics, home etc, and retrieve product details including price and stock availability.",
+  "api": {
+    "protocol": "http",
+    "host": "localhost",
+    "port": 3001,
+    "basePath": "",
+    "requestTimeoutMs": 10000,
+    "maxRetries": 1
+  },
+  "enabled": true,
+  "auth": {
+    "type": "static-token",
+    "token": "demo-token-123"
+  },
+  "spec": {
+    "source": "file"
+  },
+  "serviceRefreshIntervalMs": 0,
+  "circuitBreaker": {
+    "type": "noop"
+  },
+  "idempotency": {
+    "type": "noop"
+  },
+  "sandbox": {
+    "executeTimeoutMs": 10000,
+    "maxApiCalls": 20,
+    "maxConcurrentCalls": 3
+  }
+}

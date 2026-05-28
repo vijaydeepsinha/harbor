@@ -1,0 +1,22 @@
+# gitleaks configuration for Harbor
+# https://github.com/gitleaks/gitleaks
+
+title = "Harbor gitleaks config"
+
+[allowlist]
+description = "Allowlisted demo/test values that are intentionally committed"
+
+# demo-token-123 is the documented example token used in services/*/config.json
+# and the getting-started guide. It is not a real credential — see README.md.
+regexes = [
+  "demo-token-123",
+]
+
+# Ignore the getting-started doc which also references the demo token by design
+paths = [
+  "docs/getting-started.md",
+  "docs/service-onboarding.md",
+  "services/tasks/config.json",
+  "services/order/config.json",
+  "services/product/config.json",
+]

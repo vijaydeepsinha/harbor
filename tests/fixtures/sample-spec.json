@@ -1,0 +1,467 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Ad Platform API",
+    "version": "3.0.0"
+  },
+  "paths": {
+    "/campaigns": {
+      "get": {
+        "operationId": "listCampaigns",
+        "summary": "List all campaigns",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["active", "paused", "archived", "draft"]
+            }
+          },
+          {
+            "name": "advertiser_id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "integer" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of campaigns",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Campaign" }
+                    },
+                    "hasNextPage": { "type": "boolean" },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCampaign",
+        "summary": "Create a new campaign",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "advertiser_id", "budget"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "advertiser_id": { "type": "integer" },
+                  "budget": {
+                    "type": "object",
+                    "required": ["amount", "currency", "type"],
+                    "properties": {
+                      "amount": { "type": "number" },
+                      "currency": {
+                        "type": "string",
+                        "enum": ["USD", "EUR", "GBP", "CAD"]
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["daily", "lifetime", "flight"]
+                      },
+                      "pacing": {
+                        "type": "object",
+                        "properties": {
+                          "strategy": {
+                            "type": "string",
+                            "enum": ["even", "accelerated", "frontloaded"]
+                          },
+                          "catchup_enabled": { "type": "boolean" },
+                          "override": {
+                            "type": "object",
+                            "properties": {
+                              "multiplier": { "type": "number" },
+                              "window_hours": { "type": "integer" }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "start_date": { "type": "string", "format": "date" },
+                  "end_date": { "type": "string", "format": "date" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Campaign created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Campaign" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/campaigns/{id}": {
+      "get": {
+        "operationId": "getCampaign",
+        "summary": "Get a campaign by ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Campaign details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Campaign" }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateCampaign",
+        "summary": "Update a campaign",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "status": {
+                    "type": "string",
+                    "enum": ["active", "paused", "archived"]
+                  },
+                  "budget": {
+                    "type": "object",
+                    "properties": {
+                      "amount": { "type": "number" },
+                      "type": {
+                        "type": "string",
+                        "enum": ["daily", "lifetime", "flight"]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated campaign",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Campaign" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCampaign",
+        "summary": "Delete a campaign",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Deleted" }
+        }
+      }
+    },
+    "/campaigns/{id}/lineitems": {
+      "get": {
+        "operationId": "listLineItems",
+        "summary": "List line items for a campaign",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["active", "paused", "completed", "draft"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Line items list"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createLineItem",
+        "summary": "Create a line item under a campaign",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "targeting", "bid"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "targeting": {
+                    "type": "object",
+                    "properties": {
+                      "geo": {
+                        "type": "object",
+                        "properties": {
+                          "countries": { "type": "array", "items": { "type": "string" } },
+                          "regions": { "type": "array", "items": { "type": "string" } },
+                          "dma_codes": { "type": "array", "items": { "type": "integer" } },
+                          "exclusions": {
+                            "type": "object",
+                            "properties": {
+                              "countries": { "type": "array", "items": { "type": "string" } },
+                              "postal_codes": { "type": "array", "items": { "type": "string" } }
+                            }
+                          }
+                        }
+                      },
+                      "audience": {
+                        "type": "object",
+                        "properties": {
+                          "segment_ids": { "type": "array", "items": { "type": "integer" } },
+                          "lookalike_enabled": { "type": "boolean" },
+                          "frequency_cap": {
+                            "type": "object",
+                            "properties": {
+                              "impressions": { "type": "integer" },
+                              "window": { "type": "string", "enum": ["hour", "day", "week"] }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "bid": {
+                    "type": "object",
+                    "required": ["type", "amount"],
+                    "properties": {
+                      "type": { "type": "string", "enum": ["cpm", "cpc", "cpa", "vcpm"] },
+                      "amount": { "type": "number" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Line item created" }
+        }
+      }
+    },
+    "/orders": {
+      "get": {
+        "operationId": "listOrders",
+        "summary": "List orders",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "processing", "completed", "cancelled", "refunded"]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Orders list"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createOrder",
+        "summary": "Create an order",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["product_id", "quantity"],
+                "properties": {
+                  "product_id": { "type": "integer" },
+                  "quantity": { "type": "integer" },
+                  "discount_code": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Order created" }
+        }
+      }
+    },
+    "/orders/{id}": {
+      "patch": {
+        "operationId": "updateOrder",
+        "summary": "Update an order status",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["processing", "completed", "cancelled"]
+                  },
+                  "notes": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Order updated" }
+        }
+      }
+    },
+    "/products": {
+      "get": {
+        "operationId": "listProducts",
+        "summary": "List products",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["display", "video", "native", "audio", "ctv"]
+            }
+          },
+          {
+            "name": "available",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Products list" }
+        }
+      }
+    },
+    "/products/{id}": {
+      "get": {
+        "operationId": "getProduct",
+        "summary": "Get a product by ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Product details" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Campaign": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "advertiser_id": { "type": "integer" },
+          "status": {
+            "type": "string",
+            "enum": ["active", "paused", "archived", "draft"]
+          },
+          "budget": {
+            "type": "object",
+            "properties": {
+              "amount": { "type": "number" },
+              "currency": { "type": "string" },
+              "type": { "type": "string" }
+            }
+          },
+          "start_date": { "type": "string", "format": "date" },
+          "end_date": { "type": "string", "format": "date" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

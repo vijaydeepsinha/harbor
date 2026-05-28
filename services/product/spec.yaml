@@ -1,0 +1,75 @@
+openapi: 3.0.3
+info:
+  title: Product Service
+  version: 1.0.0
+  description: Product catalog — list and retrieve products
+
+servers:
+  - url: http://localhost:3001
+
+paths:
+  /products:
+    get:
+      operationId: listProducts
+      summary: List all products
+      description: Returns all available products. Optionally filter by category.
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [electronics, home]
+          description: Filter products by category
+      responses:
+        '200':
+          description: List of products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  products:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Product'
+                  total:
+                    type: integer
+
+  /products/{id}:
+    get:
+      operationId: getProduct
+      summary: Get product by ID
+      description: Returns full details for a single product including price and stock status.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Product ID (e.g. p001)
+      responses:
+        '200':
+          description: Product details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Product not found
+
+components:
+  schemas:
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        price:
+          type: number
+        category:
+          type: string
+        inStock:
+          type: boolean

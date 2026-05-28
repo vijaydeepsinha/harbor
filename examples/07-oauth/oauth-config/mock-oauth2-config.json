@@ -1,0 +1,21 @@
+{
+  "interactiveLogin": false,
+  "tokenCallbacks": [
+    {
+      "issuerId": "default",
+      "tokenExpiry": 3600,
+      "requestMappings": [
+        {
+          "requestParam": "grant_type",
+          "match": "client_credentials",
+          "claims": {
+            "sub": "harbor-test-client",
+            "client_id": "harbor-test-client",
+            "aud": ["http://localhost:3333"],
+            "scope": "api:read api:write"
+          }
+        }
+      ]
+    }
+  ]
+}

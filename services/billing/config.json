@@ -1,0 +1,37 @@
+{
+  "description": "Billing service — manage invoices and payments. Demonstrates Harbor's OAuth 2.1 JWT validation. Enable this service to test the oauth-2.1 auth strategy; disable to use the static-token demo services.",
+  "api": {
+    "protocol": "http",
+    "host": "localhost",
+    "port": 3004,
+    "basePath": "",
+    "requestTimeoutMs": 10000,
+    "maxRetries": 1
+  },
+  "enabled": false,
+  "auth": {
+    "type": "oauth-2.1",
+    "authorizationServer": "http://localhost:8080/default",
+    "audience": "http://localhost:3333",
+    "clockToleranceSec": 30,
+    "metadataMapping": {
+      "userId": "sub",
+      "clientId": "client_id"
+    }
+  },
+  "spec": {
+    "source": "file"
+  },
+  "serviceRefreshIntervalMs": 0,
+  "circuitBreaker": {
+    "type": "noop"
+  },
+  "idempotency": {
+    "type": "noop"
+  },
+  "sandbox": {
+    "executeTimeoutMs": 10000,
+    "maxApiCalls": 20,
+    "maxConcurrentCalls": 3
+  }
+}

@@ -1,0 +1,37 @@
+# Build artifacts
+node_modules
+dist
+coverage
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+pre-log.json
+post-log.json
+
+# Version control and IDE
+.git
+.gitignore
+.internal
+.claude
+.idea
+.vscode
+*.swp
+.DS_Store
+
+# Tests and dev tooling (not needed at runtime)
+tests
+examples
+bench
+scripts
+
+# CI/CD (not needed at runtime)
+.github
+
+# Docs (not needed at runtime)
+docs
+*.md

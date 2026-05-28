@@ -1,0 +1,70 @@
+openapi: 3.0.3
+info:
+  title: Billing API
+  version: 1.0.0
+  description: Billing service — used to demonstrate Harbor's OAuth 2.1 auth strategy
+
+servers:
+  - url: http://localhost:3004
+
+paths:
+  /invoices:
+    get:
+      operationId: listInvoices
+      summary: List invoices
+      description: Returns a list of invoices. Requires a valid JWT bearer token validated by Harbor.
+      responses:
+        '200':
+          description: List of invoices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invoices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Invoice'
+                  total:
+                    type: integer
+
+  /invoices/{id}:
+    get:
+      operationId: getInvoice
+      summary: Get invoice by ID
+      description: Returns details for a single invoice.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invoice details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+        '404':
+          description: Invoice not found
+
+components:
+  schemas:
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: string
+        customerId:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [draft, issued, paid, overdue]
+        dueDate:
+          type: string
+          format: date
