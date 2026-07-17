@@ -6,7 +6,7 @@ import pino from 'pino'
 import { registerDiscoverServicesTool } from '../../tools/discover-services.tool.js'
 import { TOOL, METRIC, OUTCOME } from '../../core/constants.js'
 import type { ServiceRegistry } from '../../runtime/registry/service-registry.js'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { McpServer } from '@modelcontextprotocol/server'
 import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
 
 const silentLogger = pino({ level: 'silent' })

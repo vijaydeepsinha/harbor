@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import type { ServiceRegistry } from '../runtime/registry/service-registry.js'
 import type { Logger } from '../runtime/observability/logger.js'
@@ -90,9 +90,9 @@ This keeps each search result small and readable.`
 
   server.registerTool(
     TOOL.SEARCH_CODE,
-    { description: SEARCH_CODE_DESCRIPTION, inputSchema: { service: z.string(), code: z.string() } },
-    async ({ service, code }, extra) => {
-      const correlationId = extractCorrelationId(extra)
+    { description: SEARCH_CODE_DESCRIPTION, inputSchema: z.object({ service: z.string(), code: z.string() }) },
+    async ({ service, code }, ctx) => {
+      const correlationId = extractCorrelationId(ctx)
 
       logger.info(
         { correlationId, tool: TOOL.SEARCH_CODE, service, codeReceived: code },

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import { v4 as uuidv4 } from 'uuid'
 import { createHash } from 'node:crypto'
@@ -122,10 +122,10 @@ async () => {
 
   server.registerTool(
     TOOL.API_EXECUTE,
-    { description: EXECUTE_DESCRIPTION, inputSchema: { service: z.string(), code: z.string() } },
-    async ({ service, code }, extra) => {
-      const correlationId = extractCorrelationId(extra)
-      const sessionId = extractSessionId(extra)
+    { description: EXECUTE_DESCRIPTION, inputSchema: z.object({ service: z.string(), code: z.string() }) },
+    async ({ service, code }, ctx) => {
+      const correlationId = extractCorrelationId(ctx)
+      const sessionId = extractSessionId(ctx)
 
       logger.info(
         { correlationId, tool: TOOL.API_EXECUTE, service },

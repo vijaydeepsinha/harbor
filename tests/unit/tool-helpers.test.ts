@@ -51,8 +51,8 @@ function makeMetrics() {
 }
 
 describe('tool-helpers extractors', () => {
-  it('extractCorrelationId returns the provided id', () => {
-    expect(extractCorrelationId({ correlationId: 'abc' })).toBe('abc')
+  it('extractCorrelationId returns the MCP request id', () => {
+    expect(extractCorrelationId({ mcpReq: { id: 'abc' } })).toBe('abc')
   })
 
   it('extractCorrelationId falls back to a uuid when absent', () => {
@@ -60,7 +60,7 @@ describe('tool-helpers extractors', () => {
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
   })
 
-  it('extractSessionId returns the provided id', () => {
+  it('extractSessionId returns the transport session id', () => {
     expect(extractSessionId({ sessionId: 'sess-1' })).toBe('sess-1')
   })
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { McpServer } from '@modelcontextprotocol/server'
 import type { ServiceRegistry } from '../runtime/registry/service-registry.js'
 import type { Logger } from '../runtime/observability/logger.js'
 import type { MetricsCollector } from '../core/types/metrics.types.js'

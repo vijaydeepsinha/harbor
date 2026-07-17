@@ -3,19 +3,19 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { AuthInfo } from '@modelcontextprotocol/server'
 import { ERR } from '../../core/constants.js'
 
-const { mockHandleRequest, mockTransportClose } = vi.hoisted(() => ({
-  mockHandleRequest: vi.fn(),
-  mockTransportClose: vi.fn().mockResolvedValue(undefined)
+const { mockNodeMcpHandler } = vi.hoisted(() => ({
+  mockNodeMcpHandler: vi.fn()
 }))
 
-vi.mock('@modelcontextprotocol/sdk/server/streamableHttp.js', () => ({
-  StreamableHTTPServerTransport: vi.fn().mockImplementation(() => ({
-    handleRequest: mockHandleRequest,
-    close: mockTransportClose
-  }))
+vi.mock('@modelcontextprotocol/server', () => ({
+  createMcpHandler: vi.fn(() => ({ fetch: vi.fn() }))
+}))
+
+vi.mock('@modelcontextprotocol/node', () => ({
+  toNodeHandler: vi.fn(() => mockNodeMcpHandler)
 }))
 
 import { startHttpGateway, type HttpGatewayHandle } from '../../runtime/http/http-gateway.js'
@@ -24,10 +24,9 @@ import type { Logger } from '../../runtime/observability/logger.js'
 
 /**
  * The gateway is tested end-to-end against a real `node:http` listener on an
- * ephemeral port. Routes that never reach `transport.handleRequest` (health,
- * 404s, and every auth rejection path) can be asserted without any MCP SDK
- * plumbing because the gateway short-circuits before handing off to the
- * transport.
+ * ephemeral port. Routes that never reach the MCP handler (health, 404s, and
+ * every auth rejection path) can be asserted without any SDK plumbing because
+ * the gateway short-circuits before delegating to `toNodeHandler`.
  */
 
 function makeLogger(): Logger {
@@ -69,6 +68,7 @@ describe('startHttpGateway', () => {
   let cleanup: (() => Promise<void>) | null = null
 
   afterEach(async () => {
+    mockNodeMcpHandler.mockReset()
     if (cleanup) {
       await cleanup()
       cleanup = null
@@ -98,20 +98,14 @@ describe('startHttpGateway', () => {
     expect(body.code).toBe(ERR.NOT_FOUND)
   })
 
-  it('POST /mcp without Authorization is rejected before creating a server', async () => {
-    let createMcpServerCalled = false
-    const { baseUrl, close } = await startForTest({
-      createMcpServer: () => {
-        createMcpServerCalled = true
-        throw new Error('should not reach createMcpServer')
-      }
-    })
+  it('POST /mcp without Authorization is rejected before MCP dispatch', async () => {
+    const { baseUrl, close } = await startForTest()
     cleanup = close
 
     const res = await fetch(`${baseUrl}/mcp`, { method: 'POST' })
     expect(res.status).toBeGreaterThanOrEqual(400)
     expect(res.status).toBeLessThan(500)
-    expect(createMcpServerCalled).toBe(false)
+    expect(mockNodeMcpHandler).not.toHaveBeenCalled()
     const body = await res.json() as { code: string }
     expect(body.code).toBe(ERR.MISSING_TOKEN)
   })
@@ -147,27 +141,19 @@ describe('startHttpGateway', () => {
     expect(body.code).toBe(ERR.INTERNAL)
   })
 
-  it('POST /mcp with valid bearer connects transport, handles request, and cleans up', async () => {
-    mockHandleRequest.mockReset()
-    mockTransportClose.mockClear()
-
-    let capturedToken = ''
-    const mockConnect = vi.fn().mockResolvedValue(undefined)
-    const mockServerClose = vi.fn().mockResolvedValue(undefined)
-
-    mockHandleRequest.mockImplementation(async (_req, res) => {
+  it('POST /mcp with valid bearer attaches authInfo and delegates to the MCP handler', async () => {
+    mockNodeMcpHandler.mockImplementation(async (req, res) => {
       res.statusCode = 200
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ ok: true }))
     })
 
+    let factoryCalled = false
     const { baseUrl, close } = await startForTest({
-      createMcpServer: (clientToken: string) => {
-        capturedToken = clientToken
-        return {
-          connect: mockConnect,
-          close: mockServerClose
-        } as unknown as McpServer
+      createMcpServer: (ctx) => {
+        factoryCalled = true
+        expect(ctx.authInfo?.token).toBeDefined()
+        return {} as never
       }
     })
     cleanup = close
@@ -179,12 +165,12 @@ describe('startHttpGateway', () => {
     })
 
     expect(res.status).toBe(200)
-    expect(capturedToken).toBe(testToken)
-    expect(mockConnect).toHaveBeenCalledTimes(1)
-    expect(mockHandleRequest).toHaveBeenCalledTimes(1)
+    expect(mockNodeMcpHandler).toHaveBeenCalledTimes(1)
 
-    await new Promise<void>(resolve => setTimeout(resolve, 20))
-    expect(mockServerClose).toHaveBeenCalledTimes(1)
-    expect(mockTransportClose).toHaveBeenCalledTimes(1)
+    const [req] = mockNodeMcpHandler.mock.calls[0] as [{ auth?: AuthInfo }]
+    expect(req.auth?.token).toBe(testToken)
+    // Factory is invoked by createMcpHandler at handler construction time in
+    // production; here we only assert auth passthrough on the Node request.
+    expect(factoryCalled).toBe(false)
   })
 })
