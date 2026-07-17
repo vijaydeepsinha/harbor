@@ -3,6 +3,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import pino from 'pino'
+import { type ZodObject } from 'zod'
+import { makeServerCtx } from './mcp-test-context.js'
 
 vi.mock('../../runtime/sandbox/spec-search-in-sandbox.js', () => ({
   runSpecSearchInSandbox: vi.fn()
@@ -115,8 +117,8 @@ describe('registerSearchCodeTool', () => {
     const entry = server.handlers[TOOL.SEARCH_CODE]
     expect(entry).toBeDefined()
     expect(entry!.def.description).toContain('tasks')
-    const schema = entry!.def.inputSchema as Record<string, unknown>
-    expect(Object.keys(schema)).toEqual(expect.arrayContaining(['service', 'code']))
+    const schema = entry!.def.inputSchema as ZodObject
+    expect(Object.keys(schema.shape)).toEqual(expect.arrayContaining(['service', 'code']))
   })
 
   it('returns UNKNOWN_SERVICE mcpError when the service is not registered', async () => {
@@ -131,7 +133,7 @@ describe('registerSearchCodeTool', () => {
 
     const r = await server.handlers[TOOL.SEARCH_CODE]!.handler(
       { service: 'ghost', code: 'async () => spec' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
     expect(r.isError).toBe(true)
     expect(JSON.parse(r.content[0]!.text).code).toBe(ERR.UNKNOWN_SERVICE)
@@ -159,7 +161,7 @@ describe('registerSearchCodeTool', () => {
 
     const r = await server.handlers[TOOL.SEARCH_CODE]!.handler(
       { service: 'tasks', code: 'async () => spec' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
     expect(r.isError).toBe(true)
     expect(JSON.parse(r.content[0]!.text).code).toBe(ERR.MISSING_TOKEN)
@@ -182,7 +184,7 @@ describe('registerSearchCodeTool', () => {
 
     const r = await server.handlers[TOOL.SEARCH_CODE]!.handler(
       { service: 'tasks', code: 'async () => Object.keys(spec.paths)' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBeUndefined()
@@ -218,7 +220,7 @@ describe('registerSearchCodeTool', () => {
 
     const r = await server.handlers[TOOL.SEARCH_CODE]!.handler(
       { service: 'tasks', code: 'async () => { while (true) {} }' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
