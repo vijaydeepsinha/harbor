@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import type { ServiceRegistry } from '../runtime/registry/service-registry.js'
 import type { Logger } from '../runtime/observability/logger.js'
@@ -72,8 +72,8 @@ After finding the relevant skill, use get_skill_details() to read the full SOP.`
   server.registerTool(
     TOOL.DISCOVER_SKILLS,
     { description: DESCRIPTION, inputSchema: { service: z.string(), code: z.string() } },
-    async ({ service, code }, extra) => {
-      const correlationId = extractCorrelationId(extra)
+    async ({ service, code }, ctx) => {
+      const correlationId = extractCorrelationId(ctx)
 
       logger.info(
         { correlationId, tool: TOOL.DISCOVER_SKILLS, service, codeReceived: code },

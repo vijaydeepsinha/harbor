@@ -21,15 +21,7 @@ export type ToolResponse = {
   isError?: boolean
 } & Record<string, unknown>
 
-/**
- * Shape of the `extra` bag the MCP SDK passes to tool handlers. Only the
- * fields the gateway actually reads are declared — the SDK may attach more
- * but we don't depend on them.
- */
-export interface McpToolExtra {
-  correlationId?: string
-  sessionId?: string
-}
+import type { ServerContext } from '@modelcontextprotocol/server'
 
 /**
  * Builds the standard `isError` MCP tool response. The on-wire payload always
@@ -65,14 +57,17 @@ export function mcpSuccess(data: unknown): ToolResponse {
   }
 }
 
-/** Reads `correlationId` off the MCP `extra` bag, falling back to a fresh UUID. */
-export function extractCorrelationId(extra: unknown): string {
-  return (extra as McpToolExtra | undefined)?.correlationId ?? crypto.randomUUID()
+/** Reads correlation id from the MCP handler context, falling back to a fresh UUID. */
+export function extractCorrelationId(ctx: unknown): string {
+  const serverCtx = ctx as ServerContext | undefined
+  const id = serverCtx?.mcpReq?.id
+  if (id !== undefined && id !== null) return String(id)
+  return crypto.randomUUID()
 }
 
-/** Reads `sessionId` off the MCP `extra` bag, falling back to a fresh UUID. */
-export function extractSessionId(extra: unknown): string {
-  return (extra as McpToolExtra | undefined)?.sessionId ?? crypto.randomUUID()
+/** Reads session id from the MCP handler context, falling back to a fresh UUID. */
+export function extractSessionId(ctx: unknown): string {
+  return (ctx as ServerContext | undefined)?.sessionId ?? crypto.randomUUID()
 }
 
 export function resolveService(
