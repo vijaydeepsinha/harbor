@@ -1,6 +1,6 @@
 {
   "name": "harbor-gateway",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "TypeScript framework that connects AI agents to backend APIs via the Model Context Protocol",
   "author": "Vijaydeep Sinha",
   "license": "Apache-2.0",

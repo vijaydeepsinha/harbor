@@ -69,27 +69,39 @@ python3 tests/demo_e2e.py --start-services
 
 ## Step 3 — Try It from the Terminal
 
-The gateway speaks JSON-RPC 2.0 over HTTP. Initialize a session, then call tools.
+The gateway speaks MCP protocol revision **2026-07-28** over HTTP. Probe with `server/discover`, then call tools.
 
 ```bash
-# Initialize
+# server/discover (connection probe)
 curl -si -X POST http://127.0.0.1:3333/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{
-    "protocolVersion":"2024-11-05",
-    "capabilities":{},
-    "clientInfo":{"name":"curl","version":"0"}
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: server/discover" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{
+    "_meta":{
+      "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+      "io.modelcontextprotocol/clientInfo":{"name":"curl","version":"0"},
+      "io.modelcontextprotocol/clientCapabilities":{}
+    }
   }}'
 
-# Discover services (stateless — bearer on every request)
+# Discover services (bearer + 2026 headers on every request)
 curl -s -X POST http://127.0.0.1:3333/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
   -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/call" \
+  -H "Mcp-Name: discover_services" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
-    "name":"discover_services","arguments":{}
+    "name":"discover_services","arguments":{},
+    "_meta":{
+      "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+      "io.modelcontextprotocol/clientInfo":{"name":"curl","version":"0"},
+      "io.modelcontextprotocol/clientCapabilities":{}
+    }
   }}'
 ```
 
