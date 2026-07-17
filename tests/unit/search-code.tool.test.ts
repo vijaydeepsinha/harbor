@@ -12,7 +12,7 @@ import { runSpecSearchInSandbox } from '../../runtime/sandbox/spec-search-in-san
 import { registerSearchCodeTool } from '../../tools/search-code.tool.js'
 import { TOOL, METRIC, OUTCOME, ERR } from '../../core/constants.js'
 import type { ServiceRegistry, ServiceResources } from '../../runtime/registry/service-registry.js'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { McpServer } from '@modelcontextprotocol/server'
 import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
 import type { TokenPayload } from '../../core/types/auth.types.js'
 import { MissingTokenError } from '../../core/types/auth.types.js'
