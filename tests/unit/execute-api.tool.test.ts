@@ -4,6 +4,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createHash } from 'node:crypto'
 import pino from 'pino'
+import { type ZodObject } from 'zod'
+import { makeServerCtx } from './mcp-test-context.js'
 
 vi.mock('../../runtime/sandbox/execute-api-in-sandbox.js', () => ({
   runApiInSandbox: vi.fn()
@@ -160,8 +162,8 @@ describe('registerExecuteApiTool', () => {
     const entry = server.handlers[TOOL.API_EXECUTE]
     expect(entry).toBeDefined()
     expect(entry!.def.description).toContain('tasks')
-    const schema = entry!.def.inputSchema as Record<string, unknown>
-    expect(Object.keys(schema)).toEqual(expect.arrayContaining(['service', 'code']))
+    const schema = entry!.def.inputSchema as ZodObject
+    expect(Object.keys(schema.shape)).toEqual(expect.arrayContaining(['service', 'code']))
   })
 
   it('returns UNKNOWN_SERVICE mcpError when the service is not registered and never runs the sandbox', async () => {
@@ -177,7 +179,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'ghost', code: 'async () => 1' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)
@@ -204,7 +206,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)
@@ -231,7 +233,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)
@@ -255,7 +257,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => ({ hello: "world" })' },
-      { correlationId: 'cid-ok', sessionId: 'sid-ok' }
+      makeServerCtx('cid-ok', 'sid-ok')
     )
 
     expect(r.isError).toBeUndefined()
@@ -299,11 +301,11 @@ describe('registerExecuteApiTool', () => {
     const code = 'async () => ({ ok: true })'
     await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
     await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code },
-      { correlationId: 'cid2', sessionId: 'sid2' }
+      makeServerCtx('cid2', 'sid2')
     )
 
     expect(runApiInSandbox).toHaveBeenCalledTimes(2)
@@ -342,7 +344,7 @@ describe('registerExecuteApiTool', () => {
 
     await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => {}' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     const audit = vi.mocked(writeAuditRecord).mock.calls[0]![0]
@@ -369,7 +371,7 @@ describe('registerExecuteApiTool', () => {
 
     await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     const audit = vi.mocked(writeAuditRecord).mock.calls[0]![0]
@@ -392,7 +394,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => api.request({})' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)
@@ -431,7 +433,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => api.request({})' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)
@@ -465,7 +467,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)
@@ -498,7 +500,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)
@@ -529,7 +531,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => bogus()' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)
@@ -561,7 +563,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)
@@ -598,7 +600,7 @@ describe('registerExecuteApiTool', () => {
 
     await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(writeAuditRecord).toHaveBeenCalledTimes(1)
@@ -647,7 +649,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => bogus()' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)
@@ -681,7 +683,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => bogus()' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
 
     expect(r.isError).toBe(true)

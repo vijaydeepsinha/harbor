@@ -3,6 +3,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import pino from 'pino'
+import { type ZodObject } from 'zod'
+import { makeServerCtx } from './mcp-test-context.js'
 import { registerGetSkillDetailsTool } from '../../tools/get-skill-details.tool.js'
 import { TOOL, METRIC, OUTCOME, ERR } from '../../core/constants.js'
 import type { ServiceRegistry, ServiceResources } from '../../runtime/registry/service-registry.js'
@@ -89,8 +91,8 @@ describe('registerGetSkillDetailsTool', () => {
 
     const entry = server.handlers[TOOL.GET_SKILL_DETAILS]
     expect(entry).toBeDefined()
-    const schema = entry!.def.inputSchema as Record<string, unknown>
-    expect(Object.keys(schema)).toEqual(expect.arrayContaining(['service', 'skill_id']))
+    const schema = entry!.def.inputSchema as ZodObject
+    expect(Object.keys(schema.shape)).toEqual(expect.arrayContaining(['service', 'skill_id']))
   })
 
   it('returns UNKNOWN_SERVICE mcpError and records TOOL_CALLS(error)', async () => {
@@ -104,7 +106,7 @@ describe('registerGetSkillDetailsTool', () => {
 
     const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
       { service: 'ghost', skill_id: 'x' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
     expect(r.isError).toBe(true)
     const body = JSON.parse(r.content[0]!.text)
@@ -133,7 +135,7 @@ describe('registerGetSkillDetailsTool', () => {
 
     const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
       { service: 'svc', skill_id: 'x' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
     expect(r.isError).toBe(true)
     const body = JSON.parse(r.content[0]!.text)
@@ -164,7 +166,7 @@ describe('registerGetSkillDetailsTool', () => {
 
     const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
       { service: 'svc', skill_id: 'x' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
     expect(r.isError).toBe(true)
     expect(JSON.parse(r.content[0]!.text).code).toBe(ERR.MISSING_TOKEN)
@@ -188,7 +190,7 @@ describe('registerGetSkillDetailsTool', () => {
 
     const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
       { service: 'svc', skill_id: 'missing' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
     expect(r.isError).toBe(true)
     const body = JSON.parse(r.content[0]!.text)
@@ -214,7 +216,7 @@ describe('registerGetSkillDetailsTool', () => {
 
     const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
       { service: 'svc', skill_id: 'whatever' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
     const body = JSON.parse(r.content[0]!.text)
     expect(body.code).toBe(ERR.UNKNOWN_SKILL)
@@ -237,7 +239,7 @@ describe('registerGetSkillDetailsTool', () => {
 
     const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
       { service: 'svc', skill_id: 'manage-campaigns' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBeUndefined()
