@@ -12,7 +12,7 @@ import { runSkillsSearchInSandbox } from '../../runtime/sandbox/skills-search-in
 import { registerDiscoverSkillsTool } from '../../tools/discover-skills.tool.js'
 import { TOOL, METRIC, OUTCOME, ERR, AUTH_SCHEME } from '../../core/constants.js'
 import type { ServiceRegistry, ServiceResources } from '../../runtime/registry/service-registry.js'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { McpServer } from '@modelcontextprotocol/server'
 import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
 import type { TokenPayload } from '../../core/types/auth.types.js'
 import { MissingTokenError } from '../../core/types/auth.types.js'
