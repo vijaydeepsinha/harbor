@@ -122,7 +122,7 @@ async () => {
 
   server.registerTool(
     TOOL.API_EXECUTE,
-    { description: EXECUTE_DESCRIPTION, inputSchema: { service: z.string(), code: z.string() } },
+    { description: EXECUTE_DESCRIPTION, inputSchema: z.object({ service: z.string(), code: z.string() }) },
     async ({ service, code }, ctx) => {
       const correlationId = extractCorrelationId(ctx)
       const sessionId = extractSessionId(ctx)
