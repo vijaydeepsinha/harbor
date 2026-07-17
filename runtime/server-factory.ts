@@ -1,20 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { GlobalConfig } from '../core/types/config.types.js'
 import { createLogger } from './observability/logger.js'
 import { MetricsRegistry } from './observability/metrics.js'
 import { ServiceRegistry } from './registry/service-registry.js'
 import { scanServicesDirectory } from './registry/filesystem-scanner.js'
-import { registerDiscoverServicesTool } from '../tools/discover-services.tool.js'
-import { registerDiscoverSkillsTool } from '../tools/discover-skills.tool.js'
-import { registerGetSkillDetailsTool } from '../tools/get-skill-details.tool.js'
-import { registerSearchCodeTool } from '../tools/search-code.tool.js'
-import { registerExecuteApiTool } from '../tools/execute-api.tool.js'
 import { buildTokenCacheStrategy } from './gateway/strategy-builders.js'
 import { buildServiceResources } from './gateway/service-resources-factory.js'
 import { startHttpGateway } from './http/http-gateway.js'
+import { buildMcpServerFactory } from './http/mcp-server-factory.js'
 import { startStdioGateway } from './transport/stdio-gateway.js'
 import { GATEWAY_NAME, STORE_TYPE } from '../core/constants.js'
 import { errorMessage } from '../core/utils/errors.js'
@@ -68,19 +63,17 @@ export async function createMcpGateway(
   }
   gatewayLogger.info({ services: registry.serviceNames() }, 'All services registered in gateway')
 
-  // ── 4. Factory: fresh McpServer per HTTP request (stateless transport) ──
-  function createMcpServer(clientToken: string): McpServer {
-    const mcpServer = new McpServer({ name: GATEWAY_NAME, version: '1.0.0' })
-    registerDiscoverServicesTool(mcpServer, registry, gatewayLogger, gatewayMetrics)
-    registerDiscoverSkillsTool(mcpServer, registry, gatewayLogger, gatewayMetrics, clientToken)
-    registerGetSkillDetailsTool(mcpServer, registry, gatewayLogger, gatewayMetrics, clientToken)
-    registerSearchCodeTool(mcpServer, registry, gatewayLogger, gatewayMetrics, clientToken)
-    registerExecuteApiTool(mcpServer, registry, globalConfig, gatewayLogger, gatewayMetrics, clientToken)
-    return mcpServer
-  }
-
-  // ── 5. Transport — Streamable HTTP (default) or stdio ───────────────────
+  // ── 4. Transport mode ───────────────────────────────────────────────────
   const transportMode = globalConfig.mcp.transport
+  const stdioPat = globalConfig.mcp.token ?? ''
+
+  const createMcpServer = buildMcpServerFactory({
+    registry,
+    globalConfig,
+    logger: gatewayLogger,
+    metrics: gatewayMetrics,
+    stdioToken: transportMode === 'stdio' ? stdioPat : undefined
+  })
 
   // Shared shutdown tail. Both transports must tear down cache, registry,
   // and metrics in the same order; any transport-specific teardown (e.g.
@@ -111,15 +104,13 @@ export async function createMcpGateway(
     return
   }
 
-  // stdio
-  const stdioPat = globalConfig.mcp.token ?? ''
   if (!stdioPat) {
     gatewayLogger.error('MCP_TOKEN env var required for stdio transport — exiting')
     process.exit(1)
   }
 
   await startStdioGateway({
-    clientToken: stdioPat, createMcpServer, registry, logger: gatewayLogger
+    createMcpServer, registry, logger: gatewayLogger
   })
 
   process.on('SIGTERM', shutdownShared)
