@@ -59,6 +59,10 @@ from typing import Optional
 GATEWAY_BASE  = "http://127.0.0.1:3333"
 GATEWAY_URL   = f"{GATEWAY_BASE}/mcp"
 BEARER_TOKEN  = "TestBearerTokenForE2ETestingOnly"
+MCP_PROTOCOL  = "2026-07-28"
+MCP_META_PROTOCOL   = "io.modelcontextprotocol/protocolVersion"
+MCP_META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
+MCP_META_CLIENT_CAPS = "io.modelcontextprotocol/clientCapabilities"
 SERVICE_STARTUP_WAIT_S = 1
 
 OAUTH_AS_BASE      = "http://localhost:8080/default"
@@ -287,103 +291,84 @@ def _get_real_jwt() -> str:
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode())["access_token"]
 
-def _mcp_init_with_jwt(jwt: str) -> dict:
-    """Returns parsed initialize response, or {_error: ...} on failure."""
-    payload = json.dumps({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "smoke", "version": "1"},
-        },
-    }).encode()
+def _mcp_envelope() -> dict:
+    return {
+        MCP_META_PROTOCOL: MCP_PROTOCOL,
+        MCP_META_CLIENT_INFO: {"name": "e2e-smoke", "version": "1"},
+        MCP_META_CLIENT_CAPS: {},
+    }
+
+def _mcp_params(params: dict) -> dict:
+    return {**params, "_meta": _mcp_envelope()}
+
+def _mcp_headers(method: str, token: str, name: Optional[str] = None) -> dict:
+    headers = {
+        "Content-Type":           "application/json",
+        "Authorization":          f"Bearer {token}",
+        "Accept":                 "application/json, text/event-stream",
+        "MCP-Protocol-Version":   MCP_PROTOCOL,
+        "Mcp-Method":             method,
+    }
+    if name is not None:
+        headers["Mcp-Name"] = name
+    return headers
+
+def _parse_mcp_response(raw: str) -> dict:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    for line in raw.splitlines():
+        if line.startswith("data: "):
+            return json.loads(line[6:])
+    return {"_transport_error": f"unparseable response: {raw[:200]}"}
+
+def _mcp_discover_with_jwt(jwt: str) -> dict:
+    """Returns parsed server/discover response, or {_error: ...} on failure."""
+    payload = {
+        "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+        "params": _mcp_params({}),
+    }
     req = urllib.request.Request(
         GATEWAY_URL,
-        data=payload,
-        headers={
-            "Content-Type":  "application/json",
-            "Authorization": f"Bearer {jwt}",
-            "Accept":        "application/json, text/event-stream",
-        },
+        data=json.dumps(payload).encode(),
+        headers=_mcp_headers("server/discover", jwt),
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode()
-        for line in raw.splitlines():
-            if line.startswith("data: "):
-                return json.loads(line[6:])
-        try:
-            return json.loads(raw)
-        except Exception:
-            pass
+            return _parse_mcp_response(resp.read().decode())
     except Exception as e:
         return {"_error": str(e)}
-    return {"_error": "no data: line in SSE response"}
 
-
-def _mcp_notify_initialized_jwt(jwt: str):
-    """Send notifications/initialized (fire-and-forget, no response expected)."""
-    body = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}).encode()
-    req  = urllib.request.Request(
-        GATEWAY_URL, data=body,
-        headers={
-            "Content-Type":   "application/json",
-            "Accept":         "application/json, text/event-stream",
-            "Authorization":  f"Bearer {jwt}",
-        },
-        method="POST",
-    )
-    try:
-        urllib.request.urlopen(req, timeout=5)
-    except Exception:
-        pass
-
-
-def _mcp_post_jwt(payload: dict, jwt: str) -> dict:
-    """POST an MCP request using a JWT (stateless — bearer on every request)."""
-    body = json.dumps(payload).encode()
-    req  = urllib.request.Request(
-        GATEWAY_URL, data=body,
-        headers={
-            "Content-Type":   "application/json",
-            "Accept":         "application/json, text/event-stream",
-            "Authorization":  f"Bearer {jwt}",
-        },
+def _mcp_post_jwt(payload: dict, jwt: str, mcp_name: Optional[str] = None) -> dict:
+    """POST an MCP request using a JWT (2026-07-28 envelope + headers)."""
+    method = payload["method"]
+    body_payload = dict(payload)
+    if "params" in body_payload and isinstance(body_payload["params"], dict):
+        body_payload["params"] = _mcp_params(body_payload["params"])
+    req = urllib.request.Request(
+        GATEWAY_URL,
+        data=json.dumps(body_payload).encode(),
+        headers=_mcp_headers(method, jwt, mcp_name),
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode()
-        for line in raw.splitlines():
-            if line.startswith("data: "):
-                return json.loads(line[6:])
-        try:
-            return json.loads(raw)
-        except Exception:
-            return {"_error": f"unparseable: {raw[:200]}"}
+            return _parse_mcp_response(resp.read().decode())
     except urllib.error.HTTPError as e:
         return {"_error": f"HTTP {e.code}: {e.read().decode()[:200]}"}
-
 
 def _post_with_bearer(path: str, token: str) -> tuple[int, dict]:
     """POST to path with an explicit Bearer token; returns (status, headers)."""
     url = f"{GATEWAY_BASE}{path}"
-    payload = json.dumps({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "test", "version": "1"},
-        },
-    }).encode()
+    payload = {
+        "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+        "params": _mcp_params({}),
+    }
     req = urllib.request.Request(
-        url, data=payload,
-        headers={
-            "Content-Type":  "application/json",
-            "Accept":        "application/json, text/event-stream",
-            "Authorization": f"Bearer {token}",
-        },
+        url, data=json.dumps(payload).encode(),
+        headers=_mcp_headers("server/discover", token),
         method="POST",
     )
     try:
@@ -394,55 +379,47 @@ def _post_with_bearer(path: str, token: str) -> tuple[int, dict]:
 
 # ── MCP transport helpers ─────────────────────────────────────────────────────
 
-def _mcp_post(payload: dict) -> dict:
-    body = json.dumps(payload).encode()
-    headers = {
-        "Content-Type":  "application/json",
-        "Authorization": f"Bearer {BEARER_TOKEN}",
-        "Accept":        "application/json, text/event-stream",
-    }
+def _mcp_post(payload: dict, token: str = BEARER_TOKEN) -> dict:
+    method = payload["method"]
+    mcp_name = None
+    params = payload.get("params") or {}
+    if method == "tools/call":
+        mcp_name = params.get("name")
+    body_payload = dict(payload)
+    if "params" in body_payload and isinstance(body_payload["params"], dict):
+        body_payload["params"] = _mcp_params(body_payload["params"])
 
-    req = urllib.request.Request(GATEWAY_URL, data=body, headers=headers, method="POST")
+    req = urllib.request.Request(
+        GATEWAY_URL,
+        data=json.dumps(body_payload).encode(),
+        headers=_mcp_headers(method, token, mcp_name),
+        method="POST",
+    )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode()
+            return _parse_mcp_response(resp.read().decode())
     except Exception as e:
         return {"_transport_error": str(e)}
 
-    for line in raw.splitlines():
-        if line.startswith("data: "):
-            return json.loads(line[6:])
-    return {"_transport_error": "no data line in SSE response"}
-
 def mcp_init() -> bool:
     payload = {
-        "jsonrpc": "2.0", "id": 0, "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "e2e-smoke", "version": "1"},
-        },
+        "jsonrpc": "2.0", "id": 0, "method": "server/discover",
+        "params": {},
     }
-    body = json.dumps(payload).encode()
-    headers = {
-        "Content-Type":  "application/json",
-        "Authorization": f"Bearer {BEARER_TOKEN}",
-        "Accept":        "application/json, text/event-stream",
-    }
-    req = urllib.request.Request(GATEWAY_URL, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode()
+        resp = _mcp_post(payload)
     except Exception as e:
         print(f"{RED}Gateway not reachable: {e}{RESET}")
         return False
 
-    for line in raw.splitlines():
-        if line.startswith("data: "):
-            d = json.loads(line[6:])
-            if "result" in d and "serverInfo" in d["result"]:
-                return True
-    return False
+    if "_transport_error" in resp:
+        print(f"{RED}Gateway not reachable: {resp['_transport_error']}{RESET}")
+        return False
+    if "error" in resp:
+        print(f"{RED}server/discover failed: {resp['error']}{RESET}")
+        return False
+    server_info = resp.get("result", {}).get("serverInfo", {})
+    return server_info.get("name") == "harbor"
 
 def call_tool(name: str, args: dict, req_id: int) -> dict:
     resp = _mcp_post({
@@ -791,22 +768,19 @@ def test_docker_oauth(resource_uri: str):
     bad_status, _ = _post_with_bearer("/mcp", "this-is-not-a-valid-jwt-token")
     assert_eq(bad_status, 401, "weak token rejected with 401")
 
-    # ── MCP handshake with real JWT ───────────────────────────────────────────
-    section("OAuth 2.1 — MCP handshake with real JWT")
-    init_resp = _mcp_init_with_jwt(jwt)
-    assert_true("result" in init_resp,
-                f"initialize with real JWT → result present  {init_resp.get('_error', '')}")
+    # ── MCP handshake with real JWT (2026-07-28) ───────────────────────────────
+    section("OAuth 2.1 — MCP server/discover with real JWT")
+    discover_resp = _mcp_discover_with_jwt(jwt)
+    assert_true("result" in discover_resp,
+                f"server/discover with real JWT → result present  {discover_resp.get('_error', '')}")
     assert_eq(
-        init_resp.get("result", {}).get("serverInfo", {}).get("name"),
+        discover_resp.get("result", {}).get("serverInfo", {}).get("name"),
         "harbor",
-        "initialize → serverInfo.name = harbor",
+        "server/discover → serverInfo.name = harbor",
     )
 
-    _mcp_notify_initialized_jwt(jwt)
-    ok("notifications/initialized sent")
-
     tools_resp = _mcp_post_jwt(
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         jwt,
     )
     assert_true("_error" not in tools_resp,
@@ -866,7 +840,7 @@ def main():
         if not args.start_services:
             print("Run with --start-services, or start the demo manually first.")
         sys.exit(1)
-    ok("Gateway connected (stateless HTTP)")
+    ok("Gateway connected (MCP 2026-07-28)")
 
     try:
         test_discover_services()
