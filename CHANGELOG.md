@@ -7,6 +7,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [Unreleased]
+
+### Changed
+- **Breaking:** HTTP transport is now stateless. Each `/mcp` request creates a fresh MCP server and transport (`sessionIdGenerator: undefined`). No `mcp-session-id` header is issued or required.
+- **Breaking:** Removed `SESSION_IDLE_TTL_MS` and `SESSION_SWEEP_INTERVAL_MS` environment variables.
+- **Breaking:** `/health` no longer returns `activeSessions`.
+- Renamed internal factory `createSessionServer` → `createMcpServer`.
+
+### Removed
+- `SessionManager`, idle session sweep, session resume routing, and `ERR.UNKNOWN_SESSION`.
+
+---
+
 ## [0.1.0] — 2026-05-27
 
 Initial open-source release under Apache License 2.0.

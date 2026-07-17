@@ -68,15 +68,15 @@ export async function createMcpGateway(
   }
   gatewayLogger.info({ services: registry.serviceNames() }, 'All services registered in gateway')
 
-  // ── 4. Factory: fresh McpServer per session with 5 tools ────────────────
-  function createSessionServer(clientToken: string): McpServer {
-    const sessionServer = new McpServer({ name: GATEWAY_NAME, version: '1.0.0' })
-    registerDiscoverServicesTool(sessionServer, registry, gatewayLogger, gatewayMetrics)
-    registerDiscoverSkillsTool(sessionServer, registry, gatewayLogger, gatewayMetrics, clientToken)
-    registerGetSkillDetailsTool(sessionServer, registry, gatewayLogger, gatewayMetrics, clientToken)
-    registerSearchCodeTool(sessionServer, registry, gatewayLogger, gatewayMetrics, clientToken)
-    registerExecuteApiTool(sessionServer, registry, globalConfig, gatewayLogger, gatewayMetrics, clientToken)
-    return sessionServer
+  // ── 4. Factory: fresh McpServer per HTTP request (stateless transport) ──
+  function createMcpServer(clientToken: string): McpServer {
+    const mcpServer = new McpServer({ name: GATEWAY_NAME, version: '1.0.0' })
+    registerDiscoverServicesTool(mcpServer, registry, gatewayLogger, gatewayMetrics)
+    registerDiscoverSkillsTool(mcpServer, registry, gatewayLogger, gatewayMetrics, clientToken)
+    registerGetSkillDetailsTool(mcpServer, registry, gatewayLogger, gatewayMetrics, clientToken)
+    registerSearchCodeTool(mcpServer, registry, gatewayLogger, gatewayMetrics, clientToken)
+    registerExecuteApiTool(mcpServer, registry, globalConfig, gatewayLogger, gatewayMetrics, clientToken)
+    return mcpServer
   }
 
   // ── 5. Transport — Streamable HTTP (default) or stdio ───────────────────
@@ -94,17 +94,15 @@ export async function createMcpGateway(
 
   if (transportMode === 'http') {
     const { host, port } = globalConfig.mcp
-    const { idleTtlMs, sweepIntervalMs } = globalConfig.session
 
     const http = startHttpGateway({
-      host, port, idleTtlMs, sweepIntervalMs,
-      createSessionServer, registry, logger: gatewayLogger,
+      host, port,
+      createMcpServer, registry, logger: gatewayLogger,
       oauthConfig: globalConfig.oauth
     })
 
     const httpShutdown = (signal: string) => {
       gatewayLogger.info({ signal }, 'Received shutdown signal — closing HTTP listener')
-      http.stopIdleSweep()
       http.server.close(() => gatewayLogger.info('HTTP server closed — no longer accepting connections'))
       shutdownShared()
     }
@@ -121,7 +119,7 @@ export async function createMcpGateway(
   }
 
   await startStdioGateway({
-    clientToken: stdioPat, createSessionServer, registry, logger: gatewayLogger
+    clientToken: stdioPat, createMcpServer, registry, logger: gatewayLogger
   })
 
   process.on('SIGTERM', shutdownShared)

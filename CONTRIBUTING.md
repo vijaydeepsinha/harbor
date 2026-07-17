@@ -78,18 +78,18 @@ python3 tests/demo_e2e.py --start-services
 **Talk to the gateway**
 
 ```bash
-# Initialize session
+# Initialize
 curl -s -X POST http://127.0.0.1:3333/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 
-# Discover registered services
+# Discover registered services (bearer on every request)
 curl -s -X POST http://127.0.0.1:3333/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
-  -H "mcp-session-id: <session-id-from-above>" \
+  -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"discover_services","arguments":{}}}'
 ```
 

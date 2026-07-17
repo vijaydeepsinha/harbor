@@ -250,18 +250,7 @@ In `claude_desktop_config.json`:
 
 **Can multiple AI clients connect at the same time?**
 
-Yes. Each client gets its own session (keyed by `mcp-session-id`). Sessions are independent — different tokens, different active sandboxes. The service registry is shared and read-only.
-
----
-
-**How do I terminate a session explicitly?**
-
-```bash
-curl -X DELETE http://127.0.0.1:3333/mcp \
-  -H "mcp-session-id: <session-id>"
-```
-
-Sessions also expire automatically after `SESSION_IDLE_TTL_MS` of inactivity (default: 1 hour).
+Yes. HTTP mode is stateless — each request is independent. Multiple clients (or concurrent requests from one client) can hit the gateway simultaneously. The service registry is shared and read-only; sandbox execution is scoped to the individual request.
 
 ---
 

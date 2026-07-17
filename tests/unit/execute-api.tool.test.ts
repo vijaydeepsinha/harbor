@@ -119,7 +119,6 @@ function makeMetrics() {
 const globalConfig: GlobalConfig = {
   mcp: { host: '127.0.0.1', port: 3333 },
   auth: { tokenCacheTtlMs: 300_000 },
-  session: { idleTtlMs: 60_000, sweepIntervalMs: 10_000 },
   sandbox: {
     memoryLimitMb: 64,
     executeTimeoutMs: 8000,

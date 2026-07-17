@@ -9,7 +9,7 @@ import type { ServiceRegistry } from '../registry/service-registry.js'
 export interface StdioGatewayOptions {
   /** Pre-authenticated personal access token. In stdio mode auth is established once, out-of-band. */
   clientToken: string
-  createSessionServer: (clientToken: string) => McpServer
+  createMcpServer: (clientToken: string) => McpServer
   registry: ServiceRegistry
   logger: Logger
 }
@@ -20,8 +20,8 @@ export interface StdioGatewayOptions {
  * launching parent (`MCP_TOKEN` env var).
  */
 export async function startStdioGateway(opts: StdioGatewayOptions): Promise<void> {
-  const { clientToken, createSessionServer, registry, logger } = opts
+  const { clientToken, createMcpServer, registry, logger } = opts
   const transport = new StdioServerTransport()
-  await createSessionServer(clientToken).connect(transport)
+  await createMcpServer(clientToken).connect(transport)
   logger.info({ services: registry.serviceNames() }, 'Harbor ready (stdio)')
 }
