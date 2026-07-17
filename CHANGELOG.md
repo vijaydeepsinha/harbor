@@ -9,8 +9,24 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+---
+
+## [1.0.0] — 2026-07-17
+
 ### Changed
-- **Breaking:** HTTP transport is now stateless. Each `/mcp` request creates a fresh MCP server and transport (`sessionIdGenerator: undefined`). No `mcp-session-id` header is issued or required.
+- **Breaking:** Harbor 1.0 implements MCP protocol revision **2026-07-28** only (`legacy: 'reject'`). The 2025 `initialize` / `notifications/initialized` handshake is no longer supported.
+- **Breaking:** HTTP clients must send `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method`, and (for `tools/call`) `Mcp-Name` on every POST, plus the per-request `_meta` envelope (`io.modelcontextprotocol/protocolVersion`, `clientInfo`, `clientCapabilities`).
+- **Breaking:** Replaced `@modelcontextprotocol/sdk` v1 with `@modelcontextprotocol/server` and `@modelcontextprotocol/node` v2 (`createMcpHandler`, `serveStdio`).
+- Upgraded `zod` to v4 (required by MCP SDK v2 tool schema registration).
+
+### Added
+- `server/discover` as the connection probe (replaces `initialize`).
+- Shared `buildMcpServerFactory` for HTTP and stdio transports.
+
+## [0.2.0] — 2026-07-17
+
+### Changed
+- **Breaking:** HTTP transport is now stateless. Each `/mcp` request creates a fresh MCP server and transport. No `mcp-session-id` header is issued or required.
 - **Breaking:** Removed `SESSION_IDLE_TTL_MS` and `SESSION_SWEEP_INTERVAL_MS` environment variables.
 - **Breaking:** `/health` no longer returns `activeSessions`.
 - Renamed internal factory `createSessionServer` → `createMcpServer`.
