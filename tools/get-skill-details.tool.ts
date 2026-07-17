@@ -33,7 +33,7 @@ export function registerGetSkillDetailsTool(
 
   server.registerTool(
     TOOL.GET_SKILL_DETAILS,
-    { description: DESCRIPTION, inputSchema: { service: z.string(), skill_id: z.string() } },
+    { description: DESCRIPTION, inputSchema: z.object({ service: z.string(), skill_id: z.string() }) },
     async ({ service, skill_id }, ctx) => {
       const correlationId = extractCorrelationId(ctx)
 

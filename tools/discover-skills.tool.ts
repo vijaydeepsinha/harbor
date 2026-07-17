@@ -71,7 +71,7 @@ After finding the relevant skill, use get_skill_details() to read the full SOP.`
 
   server.registerTool(
     TOOL.DISCOVER_SKILLS,
-    { description: DESCRIPTION, inputSchema: { service: z.string(), code: z.string() } },
+    { description: DESCRIPTION, inputSchema: z.object({ service: z.string(), code: z.string() }) },
     async ({ service, code }, ctx) => {
       const correlationId = extractCorrelationId(ctx)
 

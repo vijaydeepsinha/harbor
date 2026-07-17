@@ -90,7 +90,7 @@ This keeps each search result small and readable.`
 
   server.registerTool(
     TOOL.SEARCH_CODE,
-    { description: SEARCH_CODE_DESCRIPTION, inputSchema: { service: z.string(), code: z.string() } },
+    { description: SEARCH_CODE_DESCRIPTION, inputSchema: z.object({ service: z.string(), code: z.string() }) },
     async ({ service, code }, ctx) => {
       const correlationId = extractCorrelationId(ctx)
 
