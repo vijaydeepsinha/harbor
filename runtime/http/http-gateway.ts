@@ -2,8 +2,8 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import { createMcpHandler, type AuthInfo } from '@modelcontextprotocol/server'
+import { toNodeHandler, type NodeMcpRequestHandler } from '@modelcontextprotocol/node'
 import type { Logger } from '../observability/logger.js'
 import type { ServiceRegistry } from '../registry/service-registry.js'
 import type { OAuthResourceConfig } from '../../core/types/oauth.types.js'
@@ -13,11 +13,15 @@ import { sendJson, sendGatewayError } from './send-response.js'
 import { HttpError } from './http-error.js'
 import { ERR, HTTP_ROUTES } from '../../core/constants.js'
 import { errorMessage } from '../../core/utils/errors.js'
+import type { McpServerFactory } from './mcp-server-factory.js'
+
+/** Node request with pass-through auth for {@linkcode toNodeHandler}. */
+type AuthenticatedIncomingMessage = IncomingMessage & { auth?: AuthInfo }
 
 export interface HttpGatewayOptions {
   host: string
   port: number
-  createMcpServer: (clientToken: string) => McpServer
+  createMcpServer: McpServerFactory
   registry: ServiceRegistry
   logger: Logger
   oauthConfig?: OAuthResourceConfig
@@ -32,12 +36,16 @@ export interface HttpGatewayHandle {
  * Creates and starts the Streamable-HTTP MCP gateway.
  *
  * This module owns the HTTP surface end-to-end: routing, bearer-auth
- * extraction, and stateless per-request MCP transport handling. The boot
+ * extraction, and stateless per-request MCP handler dispatch via the SDK v2
+ * `createMcpHandler` entry (`legacy: 'reject'` — 2026-07-28 only). The boot
  * logic in `server-factory.ts` depends only on the returned handle — it does
- * not need to know about `node:http` or the SDK transport.
+ * not need to know about `node:http` or transport wiring.
  */
 export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
   const { host, port, createMcpServer, registry, logger, oauthConfig } = opts
+
+  const mcpHandler = createMcpHandler(createMcpServer, { legacy: 'reject' })
+  const nodeMcpHandler = toNodeHandler(mcpHandler)
 
   const server = createServer(async (req, res) => {
     try {
@@ -64,7 +72,7 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
       }
 
       if (url === HTTP_ROUTES.MCP) {
-        await handleAuthenticatedMcpRequest(req, res, createMcpServer, logger, oauthConfig)
+        await handleAuthenticatedMcpRequest(req, res, nodeMcpHandler, logger, oauthConfig)
         return
       }
 
@@ -107,7 +115,7 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
         health: `http://${host}:${port}${HTTP_ROUTES.HEALTH}`,
         services: registry.serviceNames()
       },
-      '🚀 Harbor ready (Streamable HTTP) — waiting for Clients to connect'
+      '🚀 Harbor ready (Streamable HTTP, MCP 2026-07-28) — waiting for Clients to connect'
     )
   })
 
@@ -115,16 +123,15 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
 }
 
 /**
- * Handles a request on the `/mcp` route using a fresh stateless transport and
- * McpServer per HTTP request (`sessionIdGenerator: undefined`).
- *
- * Auth failures throw {@link HttpError}; only the transport itself owns the
+ * Validates bearer auth, attaches pass-through {@link AuthInfo} on the Node
+ * request (consumed by {@linkcode toNodeHandler}), and delegates to the MCP
+ * handler. Auth failures throw {@link HttpError}; the MCP handler owns the
  * response stream on the happy path.
  */
 async function handleAuthenticatedMcpRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  createMcpServer: (clientToken: string) => McpServer,
+  nodeMcpHandler: NodeMcpRequestHandler,
   logger: Logger,
   oauthConfig?: OAuthResourceConfig
 ): Promise<void> {
@@ -137,32 +144,17 @@ async function handleAuthenticatedMcpRequest(
     throw new HttpError(status, extracted.error.code, body.error, { reason: body.reason }, { reason: extracted.reason }, headers)
   }
 
-  const clientToken = extracted.token
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined
-  })
-  let mcpServer: McpServer | undefined
-
-  let cleanedUp = false
-  const cleanup = (): void => {
-    if (cleanedUp) return
-    cleanedUp = true
-    void transport.close?.().catch((err) => {
-      logger.warn({ error: errorMessage(err) }, 'Stateless transport close failed')
-    })
-    void mcpServer?.close().catch((err) => {
-      logger.warn({ error: errorMessage(err) }, 'Stateless McpServer close failed')
-    })
+  const authReq = req as AuthenticatedIncomingMessage
+  authReq.auth = {
+    token: extracted.token,
+    clientId: 'harbor-client',
+    scopes: []
   }
 
-  res.on('close', cleanup)
-
   try {
-    mcpServer = createMcpServer(clientToken)
-    await mcpServer.connect(transport)
-    await transport.handleRequest(req, res)
+    await nodeMcpHandler(authReq, res)
   } catch (err) {
-    cleanup()
+    logger.warn({ error: errorMessage(err) }, 'MCP handler dispatch failed')
     throw err
   }
 }
