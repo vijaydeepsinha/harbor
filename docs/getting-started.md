@@ -72,8 +72,8 @@ python3 tests/demo_e2e.py --start-services
 The gateway speaks JSON-RPC 2.0 over HTTP. Initialize a session, then call tools.
 
 ```bash
-# Initialize — captures the session ID from the response header
-RESP=$(curl -si -X POST http://127.0.0.1:3333/mcp \
+# Initialize
+curl -si -X POST http://127.0.0.1:3333/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
   -H "Accept: application/json, text/event-stream" \
@@ -81,16 +81,13 @@ RESP=$(curl -si -X POST http://127.0.0.1:3333/mcp \
     "protocolVersion":"2024-11-05",
     "capabilities":{},
     "clientInfo":{"name":"curl","version":"0"}
-  }}')
+  }}'
 
-SESSION=$(echo "$RESP" | grep -i mcp-session-id | awk '{print $2}' | tr -d '\r')
-echo "Session: $SESSION"
-
-# Discover services
+# Discover services (stateless — bearer on every request)
 curl -s -X POST http://127.0.0.1:3333/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
-  -H "mcp-session-id: $SESSION" \
+  -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
     "name":"discover_services","arguments":{}
   }}'
@@ -114,7 +111,7 @@ Expected response:
 curl -s -X POST http://127.0.0.1:3333/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
-  -H "mcp-session-id: $SESSION" \
+  -H "Accept: application/json, text/event-stream" \
   -d '{
     "jsonrpc":"2.0","id":3,"method":"tools/call",
     "params":{
@@ -133,7 +130,7 @@ curl -s -X POST http://127.0.0.1:3333/mcp \
 curl -s -X POST http://127.0.0.1:3333/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
-  -H "mcp-session-id: $SESSION" \
+  -H "Accept: application/json, text/event-stream" \
   -d '{
     "jsonrpc":"2.0","id":4,"method":"tools/call",
     "params":{

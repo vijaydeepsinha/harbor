@@ -3,18 +3,31 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { ERR } from '../../core/constants.js'
+
+const { mockHandleRequest, mockTransportClose } = vi.hoisted(() => ({
+  mockHandleRequest: vi.fn(),
+  mockTransportClose: vi.fn().mockResolvedValue(undefined)
+}))
+
+vi.mock('@modelcontextprotocol/sdk/server/streamableHttp.js', () => ({
+  StreamableHTTPServerTransport: vi.fn().mockImplementation(() => ({
+    handleRequest: mockHandleRequest,
+    close: mockTransportClose
+  }))
+}))
+
 import { startHttpGateway, type HttpGatewayHandle } from '../../runtime/http/http-gateway.js'
 import { ServiceRegistry } from '../../runtime/registry/service-registry.js'
 import type { Logger } from '../../runtime/observability/logger.js'
-import { MCP_SESSION_HEADER, ERR } from '../../core/constants.js'
 
 /**
  * The gateway is tested end-to-end against a real `node:http` listener on an
  * ephemeral port. Routes that never reach `transport.handleRequest` (health,
  * 404s, and every auth rejection path) can be asserted without any MCP SDK
  * plumbing because the gateway short-circuits before handing off to the
- * transport. The "session creation" case only asserts that auth passed —
- * the SDK's own init handshake is not the gateway's contract to honour.
+ * transport.
  */
 
 function makeLogger(): Logger {
@@ -23,28 +36,6 @@ function makeLogger(): Logger {
     info: noop, warn: noop, error: noop, debug: noop, trace: noop, fatal: noop,
     child: () => makeLogger()
   } as unknown as Logger
-}
-
-interface RecordingLogger extends Logger {
-  warnSpy: ReturnType<typeof vi.fn>
-  errorSpy: ReturnType<typeof vi.fn>
-}
-
-function makeRecordingLogger(): RecordingLogger {
-  const warnSpy = vi.fn()
-  const errorSpy = vi.fn()
-  const logger = {
-    info: () => {},
-    warn: warnSpy,
-    error: errorSpy,
-    debug: () => {},
-    trace: () => {},
-    fatal: () => {},
-    child: () => logger
-  } as unknown as RecordingLogger
-  logger.warnSpy = warnSpy
-  logger.errorSpy = errorSpy
-  return logger
 }
 
 async function startForTest(overrides: Partial<Parameters<typeof startHttpGateway>[0]> = {}): Promise<{
@@ -56,10 +47,8 @@ async function startForTest(overrides: Partial<Parameters<typeof startHttpGatewa
   const handle = startHttpGateway({
     host: '127.0.0.1',
     port: 0,
-    idleTtlMs: 60_000,
-    sweepIntervalMs: 60_000,
-    createSessionServer: () => {
-      throw new Error('createSessionServer not expected to be called in this test')
+    createMcpServer: () => {
+      throw new Error('createMcpServer not expected to be called in this test')
     },
     registry,
     logger: makeLogger(),
@@ -71,7 +60,6 @@ async function startForTest(overrides: Partial<Parameters<typeof startHttpGatewa
     handle,
     baseUrl: `http://127.0.0.1:${port}`,
     close: () => new Promise<void>((resolve, reject) => {
-      handle.stopIdleSweep()
       handle.server.close(err => err ? reject(err) : resolve())
     })
   }
@@ -87,7 +75,7 @@ describe('startHttpGateway', () => {
     }
   })
 
-  it('GET /health returns 200 with registry + session snapshot', async () => {
+  it('GET /health returns 200 with service registry snapshot', async () => {
     const registry = new ServiceRegistry()
     const { baseUrl, close } = await startForTest({ registry })
     cleanup = close
@@ -95,10 +83,9 @@ describe('startHttpGateway', () => {
     const res = await fetch(`${baseUrl}/health`)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('application/json')
-    const body = await res.json() as { status: string; services: string[]; activeSessions: number }
+    const body = await res.json() as { status: string; services: string[] }
     expect(body.status).toBe('ok')
     expect(body.services).toEqual([])
-    expect(body.activeSessions).toBe(0)
   })
 
   it('unknown route returns 404 with the gateway error envelope', async () => {
@@ -111,12 +98,12 @@ describe('startHttpGateway', () => {
     expect(body.code).toBe(ERR.NOT_FOUND)
   })
 
-  it('POST /mcp without Authorization is rejected before creating a session', async () => {
-    let createSessionCalled = false
+  it('POST /mcp without Authorization is rejected before creating a server', async () => {
+    let createMcpServerCalled = false
     const { baseUrl, close } = await startForTest({
-      createSessionServer: () => {
-        createSessionCalled = true
-        throw new Error('should not reach createSessionServer')
+      createMcpServer: () => {
+        createMcpServerCalled = true
+        throw new Error('should not reach createMcpServer')
       }
     })
     cleanup = close
@@ -124,54 +111,12 @@ describe('startHttpGateway', () => {
     const res = await fetch(`${baseUrl}/mcp`, { method: 'POST' })
     expect(res.status).toBeGreaterThanOrEqual(400)
     expect(res.status).toBeLessThan(500)
-    expect(createSessionCalled).toBe(false)
+    expect(createMcpServerCalled).toBe(false)
     const body = await res.json() as { code: string }
     expect(body.code).toBe(ERR.MISSING_TOKEN)
   })
 
-  it('resuming with an unknown mcp-session-id returns 404', async () => {
-    const { baseUrl, close } = await startForTest()
-    cleanup = close
-
-    const res = await fetch(`${baseUrl}/mcp`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer doesnt-matter',
-        [MCP_SESSION_HEADER]: 'no-such-session'
-      }
-    })
-    expect(res.status).toBe(404)
-    const body = await res.json() as { code: string }
-    expect(body.code).toBe(ERR.UNKNOWN_SESSION)
-  })
-
-  it('4xx failures are logged at warn via the top-level funnel with the logContext payload', async () => {
-    const logger = makeRecordingLogger()
-    const { baseUrl, close } = await startForTest({ logger })
-    cleanup = close
-
-    const res = await fetch(`${baseUrl}/mcp`, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer doesnt-matter',
-        [MCP_SESSION_HEADER]: 'no-such-session'
-      }
-    })
-    expect(res.status).toBe(404)
-
-    expect(logger.warnSpy).toHaveBeenCalledTimes(1)
-    const [payload, message] = logger.warnSpy.mock.calls[0]
-    expect(message).toBe('Unknown session: no-such-session')
-    expect(payload).toMatchObject({
-      code: ERR.UNKNOWN_SESSION,
-      sessionId: 'no-such-session',
-      url: '/mcp',
-      method: 'POST'
-    })
-    expect(logger.errorSpy).not.toHaveBeenCalled()
-  })
-
-  it('bearer failures on new-session requests include the reason enum in the response body', async () => {
+  it('bearer failures include the reason enum in the response body', async () => {
     const { baseUrl, close } = await startForTest()
     cleanup = close
 
@@ -200,5 +145,46 @@ describe('startHttpGateway', () => {
     expect(res.status).toBe(500)
     const body = await res.json() as { code: string }
     expect(body.code).toBe(ERR.INTERNAL)
+  })
+
+  it('POST /mcp with valid bearer connects transport, handles request, and cleans up', async () => {
+    mockHandleRequest.mockReset()
+    mockTransportClose.mockClear()
+
+    let capturedToken = ''
+    const mockConnect = vi.fn().mockResolvedValue(undefined)
+    const mockServerClose = vi.fn().mockResolvedValue(undefined)
+
+    mockHandleRequest.mockImplementation(async (_req, res) => {
+      res.statusCode = 200
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ ok: true }))
+    })
+
+    const { baseUrl, close } = await startForTest({
+      createMcpServer: (clientToken: string) => {
+        capturedToken = clientToken
+        return {
+          connect: mockConnect,
+          close: mockServerClose
+        } as unknown as McpServer
+      }
+    })
+    cleanup = close
+
+    const testToken = 'abcdefghijklmnopqrstuvwxyz0123456789AB'
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${testToken}` }
+    })
+
+    expect(res.status).toBe(200)
+    expect(capturedToken).toBe(testToken)
+    expect(mockConnect).toHaveBeenCalledTimes(1)
+    expect(mockHandleRequest).toHaveBeenCalledTimes(1)
+
+    await new Promise<void>(resolve => setTimeout(resolve, 20))
+    expect(mockServerClose).toHaveBeenCalledTimes(1)
+    expect(mockTransportClose).toHaveBeenCalledTimes(1)
   })
 })

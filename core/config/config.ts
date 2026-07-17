@@ -164,8 +164,6 @@ const GlobalConfigSchema = z.object({
   MCP_TRANSPORT: z.enum(['http', 'stdio']).default('http'),
   MCP_TOKEN: z.string().optional(),
   AUTH_TOKEN_CACHE_TTL_MS: z.coerce.number().int().positive().default(300_000),
-  SESSION_IDLE_TTL_MS: z.coerce.number().int().positive().default(3_600_000),
-  SESSION_SWEEP_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
   SANDBOX_MEMORY_MB: z.coerce.number().int().positive().default(64),
   // Wall-clock lifetime for the api_execute sandbox (ms). Covers CPU time
   // AND all awaits (api.request bridge hops). The isolate is forcibly
@@ -211,10 +209,6 @@ export function validateGlobalConfig(): GlobalConfig {
         memcachePrefix: 'TOKEN_CACHE_MEMCACHE_',
         couchbasePrefix: 'TOKEN_CACHE_CB_',
       }) as TokenCacheBackendConfig
-    },
-    session: {
-      idleTtlMs: env.SESSION_IDLE_TTL_MS,
-      sweepIntervalMs: env.SESSION_SWEEP_INTERVAL_MS,
     },
     sandbox: {
       memoryLimitMb: env.SANDBOX_MEMORY_MB,

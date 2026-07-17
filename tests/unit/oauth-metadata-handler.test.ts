@@ -27,9 +27,7 @@ async function startForTest(oauthConfig?: OAuthResourceConfig): Promise<{
   const handle = startHttpGateway({
     host: '127.0.0.1',
     port: 0,
-    idleTtlMs: 60_000,
-    sweepIntervalMs: 60_000,
-    createSessionServer: () => { throw new Error('not expected') },
+    createMcpServer: () => { throw new Error('not expected') },
     registry: new ServiceRegistry(),
     logger: makeLogger(),
     oauthConfig
@@ -40,7 +38,6 @@ async function startForTest(oauthConfig?: OAuthResourceConfig): Promise<{
     handle,
     baseUrl: `http://127.0.0.1:${port}`,
     close: () => new Promise<void>((resolve, reject) => {
-      handle.stopIdleSweep()
       handle.server.close(err => err ? reject(err) : resolve())
     })
   }

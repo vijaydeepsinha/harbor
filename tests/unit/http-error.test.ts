@@ -9,9 +9,9 @@ describe('HttpError', () => {
     const err = new HttpError(
       401,
       'TOKEN_INVALID',
-      'Authorization does not match session',
+      'Token is invalid or revoked.',
       { reason: 'credential_format' },
-      { sessionId: 'abc-123' }
+      { url: '/mcp', method: 'POST' }
     )
 
     expect(err).toBeInstanceOf(Error)
@@ -19,9 +19,9 @@ describe('HttpError', () => {
     expect(err.name).toBe('HttpError')
     expect(err.status).toBe(401)
     expect(err.code).toBe('TOKEN_INVALID')
-    expect(err.message).toBe('Authorization does not match session')
+    expect(err.message).toBe('Token is invalid or revoked.')
     expect(err.body).toEqual({ reason: 'credential_format' })
-    expect(err.logContext).toEqual({ sessionId: 'abc-123' })
+    expect(err.logContext).toEqual({ url: '/mcp', method: 'POST' })
   })
 
   it('body and logContext are optional', () => {
