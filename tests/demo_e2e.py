@@ -287,8 +287,8 @@ def _get_real_jwt() -> str:
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode())["access_token"]
 
-def _mcp_init_with_jwt(jwt: str) -> tuple[dict, Optional[str]]:
-    """Returns (parsed_result, session_id).  session_id is None on error."""
+def _mcp_init_with_jwt(jwt: str) -> dict:
+    """Returns parsed initialize response, or {_error: ...} on failure."""
     payload = json.dumps({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
         "params": {
@@ -309,21 +309,20 @@ def _mcp_init_with_jwt(jwt: str) -> tuple[dict, Optional[str]]:
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            session_id = resp.headers.get("Mcp-Session-Id")
             raw = resp.read().decode()
         for line in raw.splitlines():
             if line.startswith("data: "):
-                return json.loads(line[6:]), session_id
+                return json.loads(line[6:])
         try:
-            return json.loads(raw), session_id
+            return json.loads(raw)
         except Exception:
             pass
     except Exception as e:
-        return {"_error": str(e)}, None
-    return {"_error": "no data: line in SSE response"}, None
+        return {"_error": str(e)}
+    return {"_error": "no data: line in SSE response"}
 
 
-def _mcp_notify_initialized_jwt(jwt: str, session_id: str):
+def _mcp_notify_initialized_jwt(jwt: str):
     """Send notifications/initialized (fire-and-forget, no response expected)."""
     body = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}).encode()
     req  = urllib.request.Request(
@@ -332,7 +331,6 @@ def _mcp_notify_initialized_jwt(jwt: str, session_id: str):
             "Content-Type":   "application/json",
             "Accept":         "application/json, text/event-stream",
             "Authorization":  f"Bearer {jwt}",
-            "Mcp-Session-Id": session_id,
         },
         method="POST",
     )
@@ -342,8 +340,8 @@ def _mcp_notify_initialized_jwt(jwt: str, session_id: str):
         pass
 
 
-def _mcp_post_jwt(payload: dict, jwt: str, session_id: str) -> dict:
-    """POST an MCP request using a JWT and an established session."""
+def _mcp_post_jwt(payload: dict, jwt: str) -> dict:
+    """POST an MCP request using a JWT (stateless — bearer on every request)."""
     body = json.dumps(payload).encode()
     req  = urllib.request.Request(
         GATEWAY_URL, data=body,
@@ -351,7 +349,6 @@ def _mcp_post_jwt(payload: dict, jwt: str, session_id: str) -> dict:
             "Content-Type":   "application/json",
             "Accept":         "application/json, text/event-stream",
             "Authorization":  f"Bearer {jwt}",
-            "Mcp-Session-Id": session_id,
         },
         method="POST",
     )
@@ -397,8 +394,6 @@ def _post_with_bearer(path: str, token: str) -> tuple[int, dict]:
 
 # ── MCP transport helpers ─────────────────────────────────────────────────────
 
-_session_id: Optional[str] = None
-
 def _mcp_post(payload: dict) -> dict:
     body = json.dumps(payload).encode()
     headers = {
@@ -406,8 +401,6 @@ def _mcp_post(payload: dict) -> dict:
         "Authorization": f"Bearer {BEARER_TOKEN}",
         "Accept":        "application/json, text/event-stream",
     }
-    if _session_id:
-        headers["mcp-session-id"] = _session_id
 
     req = urllib.request.Request(GATEWAY_URL, data=body, headers=headers, method="POST")
     try:
@@ -422,7 +415,6 @@ def _mcp_post(payload: dict) -> dict:
     return {"_transport_error": "no data line in SSE response"}
 
 def mcp_init() -> bool:
-    global _session_id
     payload = {
         "jsonrpc": "2.0", "id": 0, "method": "initialize",
         "params": {
@@ -440,7 +432,6 @@ def mcp_init() -> bool:
     req = urllib.request.Request(GATEWAY_URL, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            _session_id = resp.headers.get("mcp-session-id")
             raw = resp.read().decode()
     except Exception as e:
         print(f"{RED}Gateway not reachable: {e}{RESET}")
@@ -748,9 +739,9 @@ def test_oauth_metadata(resource_uri: str):
 
     section("OAuth 2.1 — backward compatibility (existing bearer still accepted)")
     status4, _, body4 = _get(f"{GATEWAY_BASE}/health")
-    active = body4.get("activeSessions", 0)
-    assert_true(active >= 1,
-                f"existing bearer session still alive after OAuth config active (activeSessions={active})")
+    assert_eq(body4.get("status"), "ok", "health still ok after OAuth config active")
+    assert_true(isinstance(body4.get("services"), list),
+                "health still returns services list after OAuth config active")
 
 # ── OAuth 2.1 tests — real JWT via Docker mock AS ─────────────────────────────
 
@@ -802,7 +793,7 @@ def test_docker_oauth(resource_uri: str):
 
     # ── MCP handshake with real JWT ───────────────────────────────────────────
     section("OAuth 2.1 — MCP handshake with real JWT")
-    init_resp, session_id = _mcp_init_with_jwt(jwt)
+    init_resp = _mcp_init_with_jwt(jwt)
     assert_true("result" in init_resp,
                 f"initialize with real JWT → result present  {init_resp.get('_error', '')}")
     assert_eq(
@@ -810,23 +801,21 @@ def test_docker_oauth(resource_uri: str):
         "harbor",
         "initialize → serverInfo.name = harbor",
     )
-    assert_true(bool(session_id), "Mcp-Session-Id returned by initialize")
 
-    if session_id:
-        _mcp_notify_initialized_jwt(jwt, session_id)
-        ok("notifications/initialized sent")
+    _mcp_notify_initialized_jwt(jwt)
+    ok("notifications/initialized sent")
 
-        tools_resp = _mcp_post_jwt(
-            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-            jwt, session_id,
-        )
-        assert_true("_error" not in tools_resp,
-                    f"tools/list → no error  {tools_resp.get('_error', '')}")
-        tools = tools_resp.get("result", {}).get("tools", [])
-        assert_true(len(tools) > 0, f"tools/list → {len(tools)} tools returned")
-        tool_names = [t["name"] for t in tools]
-        for name in ("discover_services", "discover_skills", "search_code", "api_execute"):
-            assert_in(name, tool_names, f"tool '{name}' present")
+    tools_resp = _mcp_post_jwt(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        jwt,
+    )
+    assert_true("_error" not in tools_resp,
+                f"tools/list → no error  {tools_resp.get('_error', '')}")
+    tools = tools_resp.get("result", {}).get("tools", [])
+    assert_true(len(tools) > 0, f"tools/list → {len(tools)} tools returned")
+    tool_names = [t["name"] for t in tools]
+    for name in ("discover_services", "discover_skills", "search_code", "api_execute"):
+        assert_in(name, tool_names, f"tool '{name}' present")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -877,7 +866,7 @@ def main():
         if not args.start_services:
             print("Run with --start-services, or start the demo manually first.")
         sys.exit(1)
-    ok(f"Session established (id: {_session_id[:8] if _session_id else 'none'}...)")
+    ok("Gateway connected (stateless HTTP)")
 
     try:
         test_discover_services()

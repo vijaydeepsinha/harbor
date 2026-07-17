@@ -79,7 +79,6 @@ export const ERR = {
   SANDBOX_SYNTAX: 'SANDBOX_SYNTAX',
   SANDBOX_RUNTIME: 'SANDBOX_RUNTIME',
   INVALID_API_REQUEST: 'INVALID_API_REQUEST',
-  UNKNOWN_SESSION: 'UNKNOWN_SESSION',
   NOT_FOUND: 'NOT_FOUND',
   INTERNAL: 'INTERNAL',
 } as const
@@ -124,13 +123,6 @@ export const HTTP_ROUTES = {
 /** Default bind address and port for the MCP gateway HTTP transport. */
 export const MCP_DEFAULT_HOST = '127.0.0.1'
 export const MCP_DEFAULT_PORT = 3333
-
-/**
- * Session id header used by @modelcontextprotocol/sdk's Streamable HTTP
- * transport. Node normalises incoming header names to lowercase, so the
- * lookup form must be lowercase too.
- */
-export const MCP_SESSION_HEADER = 'mcp-session-id'
 
 /** Max length for bearer credentials after the `Bearer` prefix (header value hardening). */
 export const BEARER_CREDENTIAL_MAX_OCTETS = 8192

@@ -12,27 +12,27 @@ The gateway implements [Model Context Protocol](https://modelcontextprotocol.io)
 
 The AI client connects via HTTP POST to `http://<host>:<port>/mcp`.
 
-**Headers the client must send:**
+**Headers the client must send on every request:**
 - `Content-Type: application/json`
 - `Accept: application/json, text/event-stream`
 - `Authorization: Bearer <token>` — required on every request
-- `mcp-session-id: <session-id>` — required after initialization
 
-**Session lifecycle:**
+**Stateless request flow:**
+
+HTTP mode uses a **stateless** Streamable HTTP transport (`sessionIdGenerator: undefined` in the MCP SDK). Each `POST /mcp` request gets a fresh `McpServer` and transport instance. The bearer token is validated on every request — no `mcp-session-id` header is issued or required.
 
 ```
 1. POST /mcp   { method: "initialize" }
-   → Response includes: mcp-session-id header + server capabilities
+   → Response includes server capabilities (no session header)
 
 2. POST /mcp   { method: "tools/list" }         ← optional discovery
    → Returns the 5 tool definitions with input schemas
 
 3. POST /mcp   { method: "tools/call", params: { name: "...", arguments: {...} } }
    → Returns tool result (SSE stream or JSON, depending on Accept)
-
-4. DELETE /mcp  Header: mcp-session-id: <id>    ← explicit logout
-   → Session terminated immediately
 ```
+
+Each step is an independent HTTP request with `Authorization: Bearer <token>`.
 
 **Response format:**
 
@@ -63,20 +63,20 @@ MCP_TRANSPORT=stdio node dist/index.js
 
 All structured logs go to **stderr**. Stdout is reserved for the MCP protocol stream.
 
-### Session state
+### Per-request lifecycle (HTTP)
 
-Each session stores:
+Each HTTP request creates a fresh `McpServer` with the client's bearer token bound into the tool handlers. Request-scoped state includes:
 - The raw bearer token from the `Authorization` header
-- A `correlationId` prefix for request tracing
-- Active sandbox isolates (for concurrent calls)
+- A `correlationId` for request tracing (from the MCP SDK `extra` bag)
+- Active sandbox isolates for concurrent calls within that request
 
-Sessions are evicted after `SESSION_IDLE_TTL_MS` (default: 1 hour) of inactivity. The sweep runs every `SESSION_SWEEP_INTERVAL_MS` (default: 5 minutes).
+When the HTTP response closes, the transport and `McpServer` are torn down.
 
 ### Multi-pod deployments
 
-**Sticky sessions are required.** Session state (the `McpServer` instance and its tool registrations) lives in-process on the pod that created the session. A load balancer must route all requests carrying the same `mcp-session-id` header to the same pod — round-robin will cause random `404 UNKNOWN_SESSION` errors as requests land on pods that have no record of the session.
+Because HTTP transport is stateless, **any pod can serve any request**. No sticky sessions or session affinity are required. Load balancers can use round-robin freely.
 
-If a pod dies, clients reconnect automatically. Because the bearer token lives in the shared token cache (`TOKEN_CACHE_TYPE=memcache` or `couchbase`), the reconnect is a fast cache hit — no re-login prompt for the user, just a new session initialized on a healthy pod.
+The shared token cache (`TOKEN_CACHE_TYPE=memcache` or `couchbase`) still allows fast auth across pods — validated tokens are cached centrally so each request does not re-hit the auth backend unnecessarily.
 
 ---
 

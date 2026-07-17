@@ -76,10 +76,6 @@ export interface GlobalConfig {
     tokenCacheTtlMs: number
     tokenCacheBackend?: TokenCacheBackendConfig
   }
-  session: {
-    idleTtlMs: number
-    sweepIntervalMs: number
-  }
   sandbox: SandboxLimits
   observability: {
     logLevel: LogLevel

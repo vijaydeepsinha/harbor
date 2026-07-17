@@ -15,7 +15,7 @@ These apply to the **whole gateway process**: bind address, shared token cache, 
 Read at process entry (`index.ts`): `SERVICES_DIR`.
 
 Parsed on every startup (`GlobalConfigSchema` in `config.ts`):  
-`MCP_HOST`, `MCP_PORT`, `MCP_TRANSPORT`, `MCP_TOKEN` (optional unless `MCP_TRANSPORT=stdio`), `SESSION_IDLE_TTL_MS`, `SESSION_SWEEP_INTERVAL_MS`, `AUTH_TOKEN_CACHE_TTL_MS`, `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE`, `SANDBOX_MEMORY_MB`, `SANDBOX_EXECUTE_TIMEOUT_MS`, `SANDBOX_SEARCH_TIMEOUT_MS`, `SANDBOX_MAX_API_CALLS`, `SANDBOX_MAX_CONCURRENT_CALLS`, `LOG_LEVEL`, `SERVICE_NAME`, `MCP_AGENT_NAME`, `ENVIRONMENT`, `ENABLE_AUDIT`, `HARBOR_RESOURCE_URI`, `HARBOR_AUTH_SERVERS`, `HARBOR_SCOPES_SUPPORTED`.
+`MCP_HOST`, `MCP_PORT`, `MCP_TRANSPORT`, `MCP_TOKEN` (optional unless `MCP_TRANSPORT=stdio`), `AUTH_TOKEN_CACHE_TTL_MS`, `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE`, `SANDBOX_MEMORY_MB`, `SANDBOX_EXECUTE_TIMEOUT_MS`, `SANDBOX_SEARCH_TIMEOUT_MS`, `SANDBOX_MAX_API_CALLS`, `SANDBOX_MAX_CONCURRENT_CALLS`, `LOG_LEVEL`, `SERVICE_NAME`, `MCP_AGENT_NAME`, `ENVIRONMENT`, `ENABLE_AUDIT`, `HARBOR_RESOURCE_URI`, `HARBOR_AUTH_SERVERS`, `HARBOR_SCOPES_SUPPORTED`.
 
 Read only when the matching backend is active:
 
@@ -54,13 +54,6 @@ In local development the file path does not exist; `dotenv` populates `process.e
 | `MCP_PORT`      | `3333`      | TCP port for Streamable HTTP.                                                |
 | `MCP_TRANSPORT` | `http`      | `http` (default) or `stdio`.                                                 |
 | `MCP_TOKEN`     | —           | Required when `MCP_TRANSPORT=stdio` — static bearer for the stdio transport. |
-
-### Session store (in-process)
-
-| Variable                    | Default   | Role                                            |
-| --------------------------- | --------- | ----------------------------------------------- |
-| `SESSION_IDLE_TTL_MS`       | `3600000` | Idle MCP session eviction (default 1 hour).     |
-| `SESSION_SWEEP_INTERVAL_MS` | `300000`  | How often the sweeper runs (default 5 minutes). |
 
 ### Token cache (shared by **all** services)
 

@@ -152,8 +152,8 @@ runtime/
 ├── http/
 │   ├── http-gateway.ts            Streamable HTTP server (node:http); /mcp + /health endpoints
 │   ├── http-error.ts              typed HTTP error
-│   ├── send-response.ts           SSE response writer
-│   └── session-manager.ts         TTL-keyed session store; background idle sweep
+│   ├── oauth-metadata-handler.ts  RFC 9728 protected resource metadata
+│   └── send-response.ts           SSE response writer
 ├── observability/
 │   ├── audit.ts                   AuditCollector — per-request record; flushed via pino on completion
 │   ├── logger.ts                  pino factory; pino-caller adds source location in non-prod
@@ -215,12 +215,11 @@ AI Agent
   │
   │  POST /mcp
   │  Accept: application/json, text/event-stream
-  │  mcp-session-id: <session-id>
   │  Authorization: Bearer <client-token>
   ▼
 http-gateway.ts
-  ├─ SessionManager.get(session-id)      — validate session exists
-  ├─ extract Bearer token from header
+  ├─ extract Bearer token from header (every request)
+  ├─ create fresh stateless transport + McpServer
   └─ McpServer.handle(request)
        ▼
   MCP SDK  →  route tools/call  →  execute-api.tool.ts handler
@@ -317,7 +316,7 @@ server-factory.ts
   │
   ├─ 4. ServiceRegistry.register(name, resources)  × N services
   │
-  ├─ 5. createSessionServer(clientToken): McpServer
+  ├─ 5. createMcpServer(clientToken): McpServer
   │       registerDiscoverServicesTool(...)
   │       registerDiscoverSkillsTool(...)
   │       registerGetSkillDetailsTool(...)
@@ -325,8 +324,8 @@ server-factory.ts
   │       registerExecuteApiTool(...)
   │
   └─ 6. start transport
-          HTTP:  startHttpGateway({ host, port, idleTtlMs, sweepIntervalMs, createSessionServer })
-          stdio: startStdioGateway({ clientToken, createSessionServer })
+          HTTP:  startHttpGateway({ host, port, createMcpServer })
+          stdio: startStdioGateway({ clientToken, createMcpServer })
 ```
 
 ---

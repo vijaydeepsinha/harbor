@@ -86,9 +86,9 @@ The gateway factory runs these steps once at startup:
 
    g. **Registers all resources** into the `ServiceRegistry` keyed by the folder name.
 
-4. **Creates a per-session `McpServer` factory** with five tools wired to the shared registry:
+4. **Creates a per-request `McpServer` factory** with five tools wired to the shared registry:
    `discover_services`, `discover_skills`, `get_skill_details`, `search_code`, `api_execute`.
-   The client's `Authorization` header is extracted at session creation and stored with the session.
+   The client's `Authorization` header is extracted and validated on every HTTP request.
 
 5. **Registers `SIGTERM` handler** to destroy the global token cache and shut down gracefully.
 
@@ -438,9 +438,9 @@ with the source file and line number (powered by `pino-caller`).
 ```
 User: "Show me all my tasks"
 
-  Step 0: Client connects with Authorization: Bearer <token>
-          → Gateway extracts and stores token for the session.
-            Connection rejected if no token present.
+  Step 0: Client sends POST /mcp with Authorization: Bearer <token>
+          → Gateway validates bearer, creates fresh stateless transport + McpServer for this request.
+            Rejected if no token present.
 
   Step 1: discover_services()
           → [{ service: "tasks", description: "Task and project management..." }]
@@ -465,9 +465,9 @@ User: "Show me all my tasks"
 ```
 User: "Create a new task assigned to Alice with high priority"
 
-  Step 0: Client connects with Authorization: Bearer <token>
-          → Gateway extracts and stores token for the session.
-            Connection rejected if no token present.
+  Step 0: Client sends POST /mcp with Authorization: Bearer <token>
+          → Gateway validates bearer, creates fresh stateless transport + McpServer for this request.
+            Rejected if no token present.
 
   Step 1: discover_services()
           → [{ service: "tasks", description: "Task and project management..." }]
