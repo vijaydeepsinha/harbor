@@ -23,14 +23,13 @@ wants a fare quote before booking.
 
 ## Interpreting the result — read this before deciding something is wrong
 
-- **`available_seats: 0` is a valid, expected response.** This service seeds some
-  trains as permanently scarce (2-4 seats) or fully sold out (0 seats) on every
-  date and class, on purpose, to exercise both the happy path and the "no
-  availability" path. It is not a bug and not a reason to retry the same call.
+- **`available_seats: 0` is a valid response.** Some trains run with very limited
+  or zero seats in a given class on a given date. It is not a bug and not a reason
+  to retry the same call.
 - If seats are 0 (or too few for the group size), go back to `GET /trains/search`
   for the same route/date and offer the user a different train. Do not keep
   re-checking the same train/date/class combination.
-- A `404` here means the train doesn't run, or the date is outside the seeded
-  30-day window — not that seats are unavailable.
+- A `404` here means the train doesn't run, or the date is outside the bookable
+  window returned by `GET /health` — not that seats are unavailable.
 - A `400` means the requested `travel_class` isn't offered by this train — check
   `GET /trains/{train_number}` for its actual class list.

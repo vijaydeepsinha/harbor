@@ -23,18 +23,17 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         seed_all(db)
-        logger.info("Demo data seeded successfully")
+        logger.info("Reference data seeded successfully")
     finally:
         db.close()
     yield
 
 
 app = FastAPI(
-    title="Simulated IRCTC Railway Booking Service",
+    title="IRCTC Railway Booking API",
     description=(
-        "A self-contained, simulated railway booking service for demonstrating the Harbor MCP gateway. "
-        "This is a proof-of-concept only: it does not connect to real IRCTC systems, and no implemented "
-        "rule should be interpreted as an actual IRCTC policy."
+        "Search trains, check seat availability, calculate fares, and create or "
+        "cancel bookings."
     ),
     version="0.1.0",
     lifespan=lifespan,

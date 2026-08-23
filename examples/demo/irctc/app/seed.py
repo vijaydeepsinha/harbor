@@ -1,7 +1,5 @@
-"""Seed and reset demo data for the simulated IRCTC service.
-
-All data here is fictional and created purely for demonstrating the Harbor MCP
-gateway. It does not reflect real IRCTC schedules, fares, or policies.
+"""Seed and reset reference data for the IRCTC service: stations, trains, and
+seat availability.
 """
 from datetime import date, timedelta
 
@@ -23,8 +21,8 @@ STATIONS = [
 ]
 
 # (train_number, name, source, destination, departure, arrival, duration_min, running_days, classes, base_fare, tatkal)
-# Every route is seeded in both directions — real IRCTC always pairs an "up" and
-# "down" train number (e.g. 12301/12302) for a route, and so does this demo.
+# Every route runs in both directions, each with its own train number (e.g. an "up"
+# train 12301 and a "down" train 12302 for the same route).
 TRAINS = [
     ("12301", "Rajdhani Express", "NDLS", "HWH", "16:55", "10:05", 1030, "DAILY", "3A,2A,1A", 2500.0, True),
     ("12302", "Rajdhani Express", "HWH", "NDLS", "16:50", "10:00", 1030, "DAILY", "3A,2A,1A", 2500.0, True),
@@ -48,41 +46,39 @@ CLASS_FARE_MULTIPLIER = {"SL": 0.4, "3A": 1.0, "2A": 1.5, "1A": 2.2}
 CLASS_TOTAL_SEATS = {"SL": 500, "3A": 300, "2A": 150, "1A": 50}
 CLASS_TOTAL_SEATS_TATKAL = {"SL": 50, "3A": 30, "2A": 15, "1A": 5}
 
-# Fixed 2-or-4-seat caps for "scarce" trains (per user request: scarcity should be
-# obvious and deterministic, not a random small number).
+# Fixed 2-or-4-seat caps for trains running with limited capacity.
 SCARCE_AVAILABLE = {"SL": 4, "3A": 2, "2A": 4, "1A": 2}
 SCARCE_AVAILABLE_TATKAL = {"SL": 2, "3A": 2, "2A": 2, "1A": 2}
 
 # Every train is deterministically assigned one capacity profile, applied across
-# every seeded date and class. This gives the demo (and any AI agent exploring it)
-# a predictable mix: some trains always have healthy availability, some are always
-# down to 2-4 seats, and some are always fully booked out (0 available, but still a
-# valid, bookable-in-theory train — booking correctly returns 409 INSUFFICIENT_SEATS).
+# every date and class it runs. This produces a realistic mix: most trains have
+# healthy availability, some run with only a few seats left, and some are fully
+# booked out (0 available — booking correctly returns 409 INSUFFICIENT_SEATS).
 TRAIN_CAPACITY_PROFILE = {
-    "12418": "healthy",    # Prayagraj Express (NDLS->PRYJ) — primary demo/docs train, always available
-    "12417": "healthy",    # Prayagraj Express (PRYJ->NDLS) — return leg, mirrors 12418
-    "12402": "healthy",    # Prayagraj Duronto (NDLS->PRYJ) — second healthy NDLS->PRYJ option
-    "12401": "healthy",    # Prayagraj Duronto (PRYJ->NDLS) — return leg, mirrors 12402
-    "12301": "healthy",    # Rajdhani Express (NDLS->HWH) — used for the >Rs.5000 fare demo scenario
-    "12302": "healthy",    # Rajdhani Express (HWH->NDLS) — return leg, mirrors 12301
-    "12423": "scarce",     # Dibrugarh Rajdhani (NDLS->HWH) — only 2-4 seats per class
-    "12424": "scarce",     # Dibrugarh Rajdhani (HWH->NDLS) — return leg, mirrors 12423
-    "12448": "scarce",     # UP Sampark Kranti (NDLS->PRYJ) — only 2-4 seats per class
-    "12447": "scarce",     # UP Sampark Kranti (PRYJ->NDLS) — return leg, mirrors 12448
-    "12801": "sold_out",   # Purushottam Express (NDLS->HWH) — always fully booked (0 available)
-    "12802": "sold_out",   # Purushottam Express (HWH->NDLS) — return leg, mirrors 12801
-    "12951": "sold_out",   # Mumbai Rajdhani (NDLS->BCT) — always fully booked (0 available)
-    "12952": "sold_out",   # Mumbai Rajdhani (BCT->NDLS) — return leg, mirrors 12951
+    "12418": "healthy",    # Prayagraj Express (NDLS->PRYJ)
+    "12417": "healthy",    # Prayagraj Express (PRYJ->NDLS)
+    "12402": "healthy",    # Prayagraj Duronto (NDLS->PRYJ)
+    "12401": "healthy",    # Prayagraj Duronto (PRYJ->NDLS)
+    "12301": "healthy",    # Rajdhani Express (NDLS->HWH)
+    "12302": "healthy",    # Rajdhani Express (HWH->NDLS)
+    "12423": "scarce",     # Dibrugarh Rajdhani (NDLS->HWH)
+    "12424": "scarce",     # Dibrugarh Rajdhani (HWH->NDLS)
+    "12448": "scarce",     # UP Sampark Kranti (NDLS->PRYJ)
+    "12447": "scarce",     # UP Sampark Kranti (PRYJ->NDLS)
+    "12801": "sold_out",   # Purushottam Express (NDLS->HWH)
+    "12802": "sold_out",   # Purushottam Express (HWH->NDLS)
+    "12951": "sold_out",   # Mumbai Rajdhani (NDLS->BCT)
+    "12952": "sold_out",   # Mumbai Rajdhani (BCT->NDLS)
 }
 
-# Rolling window anchored on "today" so availability is always bookable regardless
-# of when the demo is run, rather than a fixed calendar window that goes stale.
-DEMO_WINDOW_DAYS = 30
+# Rolling window anchored on "today" so the booking horizon is always current,
+# rather than a fixed calendar window that goes stale.
+BOOKING_WINDOW_DAYS = 30
 
 
-def _demo_dates() -> list[str]:
+def _booking_window_dates() -> list[str]:
     start = date.today()
-    return [(start + timedelta(days=i)).isoformat() for i in range(DEMO_WINDOW_DAYS)]
+    return [(start + timedelta(days=i)).isoformat() for i in range(BOOKING_WINDOW_DAYS)]
 
 
 def _capacity_for(train_number: str, travel_class: str, tatkal: bool) -> tuple[int, int]:
@@ -145,7 +141,7 @@ def seed_trains(db: Session) -> list[Train]:
 
 
 def seed_availability(db: Session, trains: list[Train]) -> None:
-    dates = _demo_dates()
+    dates = _booking_window_dates()
     for train in trains:
         for journey_date in dates:
             for travel_class in train.classes_list():
@@ -211,7 +207,7 @@ def seed_all(db: Session) -> None:
 
 
 def reset_demo_data(db: Session) -> None:
-    """Delete all demo bookings and restore seeded availability to full capacity."""
+    """Delete all bookings and restore every availability record to its initial state."""
     db.query(BookingPassenger).delete()
     db.query(Booking).delete()
     db.query(Availability).delete()

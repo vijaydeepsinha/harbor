@@ -1,21 +1,12 @@
-# Simulated IRCTC Railway Booking Service
+# IRCTC Railway Booking Service
 
 ## Purpose
 
-A small, self-contained, **simulated** railway booking backend used to demonstrate the
-Harbor MCP gateway. It exposes a realistic-looking booking API (search, availability,
-fare, booking, cancellation) with a rich OpenAPI spec so Harbor can discover and govern
-it dynamically.
-
-## Disclaimer
-
-**This is not IRCTC.** This is a proof-of-concept/demo service only:
-
-- It does not connect to, scrape, or depend on any real IRCTC system.
-- No train number, fare, class, or rule implemented here should be interpreted as an
-  actual IRCTC policy.
-- All station, train, fare, and seat data is fictional demo data, seeded automatically
-  on startup into a local SQLite database.
+A small, self-contained railway booking backend used to demonstrate the Harbor MCP
+gateway. It exposes a booking API (search, availability, fare, booking, cancellation)
+with a rich OpenAPI spec so Harbor can discover and govern it dynamically. Reference
+data (stations, trains, availability) is seeded automatically on startup into a local
+SQLite database.
 
 ## Architecture
 
@@ -32,7 +23,7 @@ Harbor
 OpenAPI discovery / API execution
     |
     v
-Simulated Railway Service   <-- this repo
+Railway Booking Service     <-- this repo
     |
     v
 SQLite
@@ -64,7 +55,7 @@ app/
   repositories/     Data access
   services/        Business logic
   routes/          Thin FastAPI routers
-  seed.py          Demo data seeding / reset
+  seed.py          Reference data seeding / reset
 tests/             pytest suite
 ```
 
@@ -93,8 +84,8 @@ UVICORN_PORT=4000 uvicorn app.main:app --reload      # uvicorn CLI honors it dir
 UVICORN_PORT=4000 uv run uvicorn app.main:app --reload
 ```
 
-The service listens on `http://localhost:3005` and seeds demo data automatically on
-startup (idempotent — safe to restart).
+The service listens on `http://localhost:3005` and seeds reference data automatically
+on startup (idempotent — safe to restart).
 
 ## API documentation
 
@@ -139,11 +130,11 @@ curl "http://localhost:3005/bookings/<PNR>"
 # Cancel a booking
 curl -X POST "http://localhost:3005/bookings/<PNR>/cancel"
 
-# Reset demo data
+# Reset booking data
 curl -X POST "http://localhost:3005/demo/reset"
 ```
 
-## Demo workflow
+## Booking workflow
 
 1. Search New Delhi (`NDLS`) -> Prayagraj (`PRYJ`) trains for `2026-09-07`.
 2. Filter by `preferred_departure_after=20:00`.
@@ -162,8 +153,8 @@ curl -X POST "http://localhost:3005/demo/reset"
 curl -X POST "http://localhost:3005/demo/reset"
 ```
 
-This deletes all demo bookings and restores every seeded availability slot to full
-capacity, so the demo can be repeated from a clean state without restarting the app.
+This deletes all bookings and restores every availability record to full capacity,
+returning the service to a clean state without restarting the app.
 
 ## Tests
 

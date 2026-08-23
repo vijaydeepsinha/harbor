@@ -9,8 +9,8 @@ class PassengerIn(BaseModel):
     name: str = Field(..., description="Passenger full name", examples=["Rahul Sharma"])
     age: int = Field(..., ge=1, le=120, description="Passenger age in years")
     gender: Gender = Field(..., description="Passenger gender")
-    id_type: str | None = Field(None, description="Simulated ID type, e.g. AADHAAR (not verified)")
-    id_number: str | None = Field(None, description="Simulated ID number (not verified)")
+    id_type: str | None = Field(None, description="ID type, e.g. AADHAAR, PASSPORT")
+    id_number: str | None = Field(None, description="ID number corresponding to id_type")
 
 
 class PassengerOut(PassengerIn):
@@ -54,5 +54,5 @@ class BookingOut(BaseModel):
 class CancellationOut(BaseModel):
     pnr: str
     status: BookingStatus
-    refund_amount: float = Field(..., description="Simulated refund amount")
+    refund_amount: float = Field(..., description="Refund amount")
     message: str

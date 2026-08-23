@@ -10,7 +10,7 @@ Four demo services are included so the framework works out of the box:
 | `order/` | 3002 | static-token | Order management — place and track |
 | `tasks/` | 3003 | static-token | Task CRUD — create, assign, complete |
 | `billing/` | 3004 | oauth-2.1 | Billing — demonstrates OAuth 2.1 JWT validation (disabled by default) |
-| `irctc/` | 3005 | static-token | Simulated IRCTC railway booking — search, availability, fare, book, cancel |
+| `irctc/` | 3005 | static-token | IRCTC railway booking — search, availability, fare, book, cancel |
 
 Start the token-mode demo backends: `bash examples/demo/start.sh`
 

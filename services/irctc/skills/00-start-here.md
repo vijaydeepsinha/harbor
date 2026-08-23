@@ -16,7 +16,7 @@ and the hard rules that apply across every operation in this service.
 | Find trains between two cities/stations | `search-trains` |
 | Check seats left, or get a fare quote | `check-availability-and-fare` |
 | Book a ticket, look up a PNR, or cancel | `book-and-manage-ticket` |
-| Reset demo data, or check service health | `reset-demo-data` |
+| Reset booking data, or check service health | `reset-and-health-check` |
 
 ## Hard rules (apply to every call)
 
@@ -35,14 +35,11 @@ and the hard rules that apply across every operation in this service.
 4. **Data covers a rolling 30-day window starting today.** A journey date outside
    that window will 404 — that is expected, not a bug. Pick a date within the next
    30 days.
-5. **Some trains are intentionally scarce or fully sold out on every date/class**,
-   by design, to exercise both the "available" and "not available" paths. Seeing
-   `available_seats: 0`, or a `409 INSUFFICIENT_SEATS` on booking, means: stop
-   retrying that exact train — call search again and offer the user a different
-   train, date, or class. It does not mean the API is broken.
+5. **Some trains run with very limited or zero seats on any given date/class.**
+   Seeing `available_seats: 0`, or a `409 INSUFFICIENT_SEATS` on booking, means:
+   stop retrying that exact train — call search again and offer the user a
+   different train, date, or class.
 6. **This service does not enforce booking policy.** It will allow a Tatkal booking
    for any number of passengers, and a booking of any fare amount. Do not add your
    own limits or refuse a request for those reasons — that decision belongs to
    Harbor's governance layer, not you.
-7. This is a simulated demo, not real IRCTC. Never present its data as an actual
-   IRCTC record, schedule, fare, or policy.

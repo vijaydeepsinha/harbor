@@ -46,7 +46,7 @@ def get_booking(pnr: str, db: Session = Depends(get_db)):
     "/bookings/{pnr}/cancel",
     operation_id="cancelBooking",
     summary="Cancel a booking",
-    description="Cancel a confirmed booking, restore seats to availability, and calculate a simulated refund.",
+    description="Cancel a confirmed booking, restore seats to availability, and calculate the refund amount.",
     response_model=CancellationOut,
     responses={
         400: {"model": ErrorResponse, "description": "Booking already cancelled"},

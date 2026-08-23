@@ -16,7 +16,7 @@ from app.services.train_service import (
     validate_tatkal_offered,
 )
 
-CANCEL_REFUND_RATE = 0.75  # simulated: 75% of fare refunded on cancellation
+CANCEL_REFUND_RATE = 0.75  # 75% of fare refunded on cancellation
 
 
 def _generate_pnr(db: Session) -> str:
@@ -144,5 +144,5 @@ def cancel_booking(db: Session, pnr: str) -> dict:
         "pnr": booking.pnr,
         "status": booking.status,
         "refund_amount": refund_amount,
-        "message": f"Booking {pnr} has been cancelled. Simulated refund of {refund_amount} initiated.",
+        "message": f"Booking {pnr} has been cancelled. Refund of {refund_amount} initiated.",
     }

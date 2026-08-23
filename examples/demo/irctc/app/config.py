@@ -1,4 +1,4 @@
-"""App-wide configuration for the simulated IRCTC demo service."""
+"""App-wide configuration for the IRCTC service."""
 import os
 
 DATABASE_URL = os.environ.get("IRCTC_DATABASE_URL", "sqlite:///./irctc_demo.db")

@@ -1,9 +1,10 @@
 openapi: 3.0.3
 info:
-  title: Simulated IRCTC Railway Booking Service
+  title: IRCTC Railway Booking API
   version: 0.1.0
   description: >
-    Simulated IRCTC railway booking API (POC — not real IRCTC data or policy).
+    Search trains, check seat availability, calculate fares, and create or cancel
+    bookings.
 
     Call order: GET /health (get today's date + valid booking window) -> searchTrains
     -> checkAvailability -> calculateFare (optional) -> createBooking ->
@@ -289,9 +290,9 @@ paths:
         '409':
           description: >
             Not enough seats for this train/date/class/tatkal combination
-            (INSUFFICIENT_SEATS). Expected for scarce/sold-out demo trains — call
-            GET /trains/search again and offer the user a different train, date, or
-            class instead of retrying the same request.
+            (INSUFFICIENT_SEATS). Some trains run with limited or sold-out capacity
+            — call GET /trains/search again and offer the user a different train,
+            date, or class instead of retrying the same request.
           content:
             application/json:
               schema:
@@ -327,7 +328,7 @@ paths:
     post:
       operationId: cancelBooking
       summary: Cancel a booking
-      description: Cancel a confirmed booking, restore seats to availability, and calculate a simulated refund.
+      description: Cancel a confirmed booking, restore seats to availability, and calculate the refund amount.
       parameters:
         - name: pnr
           in: path
@@ -391,8 +392,8 @@ paths:
   /demo/reset:
     post:
       operationId: resetDemoData
-      summary: Reset demo data
-      description: Delete all demo bookings and restore seeded availability. Useful between live demo runs.
+      summary: Reset booking data
+      description: Removes all bookings and restores every availability record to its initial state.
       responses:
         '200':
           description: Reset confirmation
@@ -563,11 +564,11 @@ components:
         id_type:
           type: string
           nullable: true
-          description: Simulated ID type, e.g. AADHAAR (not verified)
+          description: ID type, e.g. AADHAAR, PASSPORT
         id_number:
           type: string
           nullable: true
-          description: Simulated ID number (not verified)
+          description: ID number corresponding to id_type
 
     CreateBookingRequest:
       type: object

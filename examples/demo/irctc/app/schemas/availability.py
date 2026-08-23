@@ -20,5 +20,5 @@ class FareBreakdown(BaseModel):
     passenger_count: int
     tatkal: bool
     base_fare_per_passenger: float
-    tatkal_surcharge_per_passenger: float = Field(..., description="Simulated Tatkal surcharge per passenger")
+    tatkal_surcharge_per_passenger: float = Field(..., description="Tatkal surcharge per passenger")
     total_fare: float

@@ -1,5 +1,5 @@
 {
-  "description": "Simulated IRCTC railway booking (search, availability, fare, book, cancel). POC only, not real IRCTC data/policy. READ THE '00-start-here' SKILL FIRST. Call GET /health before picking any journey_date — never guess a year/date from memory. Never write custom filtering/sorting code or invent parameters — use only what the OpenAPI spec documents. Some trains are intentionally scarce or fully sold out by design (0 seats is expected, not a bug). This service does not enforce booking policy (Tatkal group size, max fare) — that is Harbor's job, not yours.",
+  "description": "IRCTC railway booking service — search trains, check seat availability, calculate fares, and create or cancel bookings. READ THE '00-start-here' SKILL FIRST. Call GET /health before picking any journey_date — never guess a year/date from memory. Never write custom filtering/sorting code or invent parameters — use only what the OpenAPI spec documents. Some trains run with limited or sold-out capacity (0 seats is a valid result, not a bug). This service does not enforce booking policy (Tatkal group size, max fare) — that is Harbor's job, not yours.",
   "api": {
     "protocol": "http",
     "host": "localhost",

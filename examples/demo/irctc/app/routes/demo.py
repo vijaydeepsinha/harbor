@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.seed import DEMO_WINDOW_DAYS, reset_demo_data
+from app.seed import BOOKING_WINDOW_DAYS, reset_demo_data
 
-router = APIRouter(tags=["Demo & Health"])
+router = APIRouter(tags=["Health & Maintenance"])
 
 
 @router.get(
@@ -21,7 +21,7 @@ router = APIRouter(tags=["Demo & Health"])
 )
 def health():
     today = date.today()
-    window_end = today + timedelta(days=DEMO_WINDOW_DAYS - 1)
+    window_end = today + timedelta(days=BOOKING_WINDOW_DAYS - 1)
     return {
         "status": "ok",
         "today": today.isoformat(),
@@ -32,9 +32,9 @@ def health():
 @router.post(
     "/demo/reset",
     operation_id="resetDemoData",
-    summary="Reset demo data",
-    description="Delete all demo bookings and restore seeded availability. Useful between live demo runs.",
+    summary="Reset booking data",
+    description="Removes all bookings and restores every availability record to its initial state.",
 )
 def reset_demo(db: Session = Depends(get_db)):
     reset_demo_data(db)
-    return {"status": "reset", "message": "Demo railway data has been restored"}
+    return {"status": "reset", "message": "Booking data has been restored"}
