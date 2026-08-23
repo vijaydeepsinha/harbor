@@ -23,14 +23,23 @@ STATIONS = [
 ]
 
 # (train_number, name, source, destination, departure, arrival, duration_min, running_days, classes, base_fare, tatkal)
+# Every route is seeded in both directions — real IRCTC always pairs an "up" and
+# "down" train number (e.g. 12301/12302) for a route, and so does this demo.
 TRAINS = [
     ("12301", "Rajdhani Express", "NDLS", "HWH", "16:55", "10:05", 1030, "DAILY", "3A,2A,1A", 2500.0, True),
+    ("12302", "Rajdhani Express", "HWH", "NDLS", "16:50", "10:00", 1030, "DAILY", "3A,2A,1A", 2500.0, True),
     ("12423", "Dibrugarh Rajdhani", "NDLS", "HWH", "11:05", "13:10", 1565, "DAILY", "3A,2A,1A", 2800.0, True),
+    ("12424", "Dibrugarh Rajdhani", "HWH", "NDLS", "11:00", "13:00", 1560, "DAILY", "3A,2A,1A", 2800.0, True),
     ("12801", "Purushottam Express", "NDLS", "HWH", "14:35", "20:20", 1665, "DAILY", "SL,3A,2A", 1400.0, False),
+    ("12802", "Purushottam Express", "HWH", "NDLS", "14:30", "20:15", 1665, "DAILY", "SL,3A,2A", 1400.0, False),
     ("12418", "Prayagraj Express", "NDLS", "PRYJ", "21:15", "06:40", 565, "DAILY", "SL,3A,2A,1A", 1200.0, True),
+    ("12417", "Prayagraj Express", "PRYJ", "NDLS", "21:00", "06:15", 555, "DAILY", "SL,3A,2A,1A", 1200.0, True),
     ("12951", "Mumbai Rajdhani", "NDLS", "BCT", "16:25", "08:15", 950, "DAILY", "3A,2A,1A", 2600.0, True),
+    ("12952", "Mumbai Rajdhani", "BCT", "NDLS", "17:00", "08:35", 935, "DAILY", "3A,2A,1A", 2600.0, True),
     ("12402", "Prayagraj Duronto", "NDLS", "PRYJ", "20:30", "05:10", 520, "DAILY", "SL,3A,2A", 900.0, False),
+    ("12401", "Prayagraj Duronto", "PRYJ", "NDLS", "20:00", "04:40", 520, "DAILY", "SL,3A,2A", 900.0, False),
     ("12448", "UP Sampark Kranti", "NDLS", "PRYJ", "22:15", "07:00", 525, "DAILY", "SL,3A", 700.0, True),
+    ("12447", "UP Sampark Kranti", "PRYJ", "NDLS", "22:00", "06:45", 525, "DAILY", "SL,3A", 700.0, True),
 ]
 
 # Class fare multipliers relative to a train's base_fare (SL cheapest, 1A priciest).
@@ -39,13 +48,56 @@ CLASS_FARE_MULTIPLIER = {"SL": 0.4, "3A": 1.0, "2A": 1.5, "1A": 2.2}
 CLASS_TOTAL_SEATS = {"SL": 500, "3A": 300, "2A": 150, "1A": 50}
 CLASS_TOTAL_SEATS_TATKAL = {"SL": 50, "3A": 30, "2A": 15, "1A": 5}
 
-# Fixed demo window (covers the dates used throughout Requirements.md examples).
-DEMO_START_DATE = date(2026, 9, 1)
-DEMO_WINDOW_DAYS = 21
+# Fixed 2-or-4-seat caps for "scarce" trains (per user request: scarcity should be
+# obvious and deterministic, not a random small number).
+SCARCE_AVAILABLE = {"SL": 4, "3A": 2, "2A": 4, "1A": 2}
+SCARCE_AVAILABLE_TATKAL = {"SL": 2, "3A": 2, "2A": 2, "1A": 2}
+
+# Every train is deterministically assigned one capacity profile, applied across
+# every seeded date and class. This gives the demo (and any AI agent exploring it)
+# a predictable mix: some trains always have healthy availability, some are always
+# down to 2-4 seats, and some are always fully booked out (0 available, but still a
+# valid, bookable-in-theory train — booking correctly returns 409 INSUFFICIENT_SEATS).
+TRAIN_CAPACITY_PROFILE = {
+    "12418": "healthy",    # Prayagraj Express (NDLS->PRYJ) — primary demo/docs train, always available
+    "12417": "healthy",    # Prayagraj Express (PRYJ->NDLS) — return leg, mirrors 12418
+    "12402": "healthy",    # Prayagraj Duronto (NDLS->PRYJ) — second healthy NDLS->PRYJ option
+    "12401": "healthy",    # Prayagraj Duronto (PRYJ->NDLS) — return leg, mirrors 12402
+    "12301": "healthy",    # Rajdhani Express (NDLS->HWH) — used for the >Rs.5000 fare demo scenario
+    "12302": "healthy",    # Rajdhani Express (HWH->NDLS) — return leg, mirrors 12301
+    "12423": "scarce",     # Dibrugarh Rajdhani (NDLS->HWH) — only 2-4 seats per class
+    "12424": "scarce",     # Dibrugarh Rajdhani (HWH->NDLS) — return leg, mirrors 12423
+    "12448": "scarce",     # UP Sampark Kranti (NDLS->PRYJ) — only 2-4 seats per class
+    "12447": "scarce",     # UP Sampark Kranti (PRYJ->NDLS) — return leg, mirrors 12448
+    "12801": "sold_out",   # Purushottam Express (NDLS->HWH) — always fully booked (0 available)
+    "12802": "sold_out",   # Purushottam Express (HWH->NDLS) — return leg, mirrors 12801
+    "12951": "sold_out",   # Mumbai Rajdhani (NDLS->BCT) — always fully booked (0 available)
+    "12952": "sold_out",   # Mumbai Rajdhani (BCT->NDLS) — return leg, mirrors 12951
+}
+
+# Rolling window anchored on "today" so availability is always bookable regardless
+# of when the demo is run, rather than a fixed calendar window that goes stale.
+DEMO_WINDOW_DAYS = 30
 
 
 def _demo_dates() -> list[str]:
-    return [(DEMO_START_DATE + timedelta(days=i)).isoformat() for i in range(DEMO_WINDOW_DAYS)]
+    start = date.today()
+    return [(start + timedelta(days=i)).isoformat() for i in range(DEMO_WINDOW_DAYS)]
+
+
+def _capacity_for(train_number: str, travel_class: str, tatkal: bool) -> tuple[int, int]:
+    """Return (total_seats, available_seats) for a train/class/tatkal slot."""
+    total = (CLASS_TOTAL_SEATS_TATKAL if tatkal else CLASS_TOTAL_SEATS)[travel_class]
+    profile = TRAIN_CAPACITY_PROFILE.get(train_number, "healthy")
+
+    if profile == "healthy":
+        return total, total
+    if profile == "scarce":
+        available = (SCARCE_AVAILABLE_TATKAL if tatkal else SCARCE_AVAILABLE)[travel_class]
+        return total, min(available, total)
+    if profile == "sold_out":
+        return total, 0
+    return total, total
 
 
 def seed_stations(db: Session) -> None:
@@ -110,7 +162,7 @@ def seed_availability(db: Session, trains: list[Train]) -> None:
                     .first()
                 )
                 if not existing:
-                    total = CLASS_TOTAL_SEATS[travel_class]
+                    total, available = _capacity_for(train.train_number, travel_class, tatkal=False)
                     db.add(
                         Availability(
                             train_id=train.id,
@@ -118,7 +170,7 @@ def seed_availability(db: Session, trains: list[Train]) -> None:
                             travel_class=travel_class,
                             tatkal=False,
                             total_seats=total,
-                            available_seats=total,
+                            available_seats=available,
                             fare=fare,
                         )
                     )
@@ -135,7 +187,9 @@ def seed_availability(db: Session, trains: list[Train]) -> None:
                         .first()
                     )
                     if not existing_tatkal:
-                        total_tatkal = CLASS_TOTAL_SEATS_TATKAL[travel_class]
+                        total_tatkal, available_tatkal = _capacity_for(
+                            train.train_number, travel_class, tatkal=True
+                        )
                         db.add(
                             Availability(
                                 train_id=train.id,
@@ -143,7 +197,7 @@ def seed_availability(db: Session, trains: list[Train]) -> None:
                                 travel_class=travel_class,
                                 tatkal=True,
                                 total_seats=total_tatkal,
-                                available_seats=total_tatkal,
+                                available_seats=available_tatkal,
                                 fare=fare,
                             )
                         )

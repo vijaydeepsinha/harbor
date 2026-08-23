@@ -1,15 +1,32 @@
+from datetime import date, timedelta
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.seed import reset_demo_data
+from app.seed import DEMO_WINDOW_DAYS, reset_demo_data
 
 router = APIRouter(tags=["Demo & Health"])
 
 
-@router.get("/health", operation_id="healthCheck", summary="Health check")
+@router.get(
+    "/health",
+    operation_id="healthCheck",
+    summary="Health check",
+    description=(
+        "Returns service status plus the server's current date and the valid "
+        "journey_date booking window. Call this first if unsure what 'today' is — "
+        "do not guess or assume a year/date for journey_date."
+    ),
+)
 def health():
-    return {"status": "ok"}
+    today = date.today()
+    window_end = today + timedelta(days=DEMO_WINDOW_DAYS - 1)
+    return {
+        "status": "ok",
+        "today": today.isoformat(),
+        "booking_window": {"from": today.isoformat(), "to": window_end.isoformat()},
+    }
 
 
 @router.post(

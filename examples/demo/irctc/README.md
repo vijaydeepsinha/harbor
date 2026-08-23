@@ -83,42 +83,42 @@ python -m app.main
 ```
 
 The port is defined in one place — `app/config.py` reads `UVICORN_PORT` (default
-`3004`). This is also uvicorn's own auto-envvar name, so the same variable works no
+`3005`). This is also uvicorn's own auto-envvar name, so the same variable works no
 matter how you start the app:
 
 ```bash
-python -m app.main                                  # uses UVICORN_PORT, default 3004
+python -m app.main                                  # uses UVICORN_PORT, default 3005
 UVICORN_PORT=4000 python -m app.main                 # override
 UVICORN_PORT=4000 uvicorn app.main:app --reload      # uvicorn CLI honors it directly
 UVICORN_PORT=4000 uv run uvicorn app.main:app --reload
 ```
 
-The service listens on `http://localhost:3004` and seeds demo data automatically on
+The service listens on `http://localhost:3005` and seeds demo data automatically on
 startup (idempotent — safe to restart).
 
 ## API documentation
 
-- Swagger UI: `http://localhost:3004/docs`
-- ReDoc: `http://localhost:3004/redoc`
-- Raw OpenAPI spec: `http://localhost:3004/openapi.json`
+- Swagger UI: `http://localhost:3005/docs`
+- ReDoc: `http://localhost:3005/redoc`
+- Raw OpenAPI spec: `http://localhost:3005/openapi.json`
 
 ## Example curl commands
 
 ```bash
 # Search trains
-curl "http://localhost:3004/trains/search?from=NDLS&to=PRYJ&date=2026-09-07&preferred_departure_after=20:00"
+curl "http://localhost:3005/trains/search?from=NDLS&to=PRYJ&date=2026-09-07&preferred_departure_after=20:00"
 
 # Train details
-curl "http://localhost:3004/trains/12418"
+curl "http://localhost:3005/trains/12418"
 
 # Check availability
-curl "http://localhost:3004/availability?train_number=12418&date=2026-09-07&travel_class=3A&tatkal=false"
+curl "http://localhost:3005/availability?train_number=12418&date=2026-09-07&travel_class=3A&tatkal=false"
 
 # Calculate fare
-curl "http://localhost:3004/fare?train_number=12418&date=2026-09-07&travel_class=3A&passenger_count=2&tatkal=false"
+curl "http://localhost:3005/fare?train_number=12418&date=2026-09-07&travel_class=3A&passenger_count=2&tatkal=false"
 
 # Create a booking
-curl -X POST "http://localhost:3004/bookings" \
+curl -X POST "http://localhost:3005/bookings" \
   -H "Content-Type: application/json" \
   -d '{
     "train_number": "12418",
@@ -134,13 +134,13 @@ curl -X POST "http://localhost:3004/bookings" \
   }'
 
 # Retrieve a booking
-curl "http://localhost:3004/bookings/<PNR>"
+curl "http://localhost:3005/bookings/<PNR>"
 
 # Cancel a booking
-curl -X POST "http://localhost:3004/bookings/<PNR>/cancel"
+curl -X POST "http://localhost:3005/bookings/<PNR>/cancel"
 
 # Reset demo data
-curl -X POST "http://localhost:3004/demo/reset"
+curl -X POST "http://localhost:3005/demo/reset"
 ```
 
 ## Demo workflow
@@ -159,7 +159,7 @@ curl -X POST "http://localhost:3004/demo/reset"
 ## Reset instructions
 
 ```bash
-curl -X POST "http://localhost:3004/demo/reset"
+curl -X POST "http://localhost:3005/demo/reset"
 ```
 
 This deletes all demo bookings and restores every seeded availability slot to full

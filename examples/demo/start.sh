@@ -4,7 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$SCRIPT_DIR/.."
 
-export UVICORN_PORT="${UVICORN_PORT:-3004}"
+export UVICORN_PORT="${UVICORN_PORT:-3005}"
 
 echo "=== MCP Demo: Product + Order + Task + IRCTC services ==="
 echo ""
