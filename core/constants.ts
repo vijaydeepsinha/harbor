@@ -182,3 +182,27 @@ export type AuditOutcome = typeof OUTCOME[keyof typeof OUTCOME]
 // ── Gateway ──────────────────────────────────────────────────────────────────
 
 export const GATEWAY_NAME = 'harbor'
+
+/** Advertised gateway (MCP server) version. Surfaced through response
+ *  `_meta` serverInfo and the `McpServer` implementation identity. */
+export const GATEWAY_VERSION = '1.0.0'
+
+// ── MCP 2026-07-28 reserved `_meta` namespace ─────────────────────────────────
+// Keys in the `io.modelcontextprotocol/*` namespace are protocol-defined and
+// carried out-of-band from model-visible `content`. Harbor treats inbound
+// values as untrusted (never for auth/security) and only *emits* serverInfo.
+
+/** Response `_meta` key carrying server identity (spec §10, MANDATORY). */
+export const SERVER_INFO_META_KEY = 'io.modelcontextprotocol/serverInfo'
+
+/** Request `_meta` key carrying the negotiated protocol version (spec §9). */
+export const PROTOCOL_VERSION_META_KEY = 'io.modelcontextprotocol/protocolVersion'
+
+/** Request `_meta` key carrying client implementation info (spec §9). */
+export const CLIENT_INFO_META_KEY = 'io.modelcontextprotocol/clientInfo'
+
+/** Request `_meta` key carrying client capabilities (spec §9). */
+export const CLIENT_CAPABILITIES_META_KEY = 'io.modelcontextprotocol/clientCapabilities'
+
+/** The single MCP protocol version this gateway speaks (spec §20). */
+export const MCP_PROTOCOL_VERSION = '2026-07-28'

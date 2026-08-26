@@ -11,14 +11,38 @@ import {
   AUTH_SCHEME,
   METRIC,
   OUTCOME,
-  LOG_PREFIX
+  LOG_PREFIX,
+  GATEWAY_NAME,
+  GATEWAY_VERSION,
+  SERVER_INFO_META_KEY
 } from '../core/constants.js'
 import { ensureError, errorCode, errorRetryable } from '../core/utils/errors.js'
+
+/** Server identity emitted in every response `_meta` (spec §10, MANDATORY). */
+const SERVER_INFO = Object.freeze({ name: GATEWAY_NAME, version: GATEWAY_VERSION })
+
+/**
+ * Application-level metadata a tool may attach to a response `_meta` channel
+ * (spec §11). This is transport for the MCP client/application — correlation
+ * ids, audit ids, downstream ids — and is kept strictly out of model-visible
+ * `content`. It is NOT Human-in-the-Loop: no approval/elicitation/task state.
+ */
+export type AppMeta = Record<string, unknown>
+
+/**
+ * Builds a response `_meta` object. Server identity under the reserved
+ * `io.modelcontextprotocol/serverInfo` key is always present and always wins:
+ * application metadata is merged first so it can never spoof server identity.
+ */
+export function buildResponseMeta(appMeta?: AppMeta): Record<string, unknown> {
+  return { ...(appMeta ?? {}), [SERVER_INFO_META_KEY]: SERVER_INFO }
+}
 
 /** MCP tool handlers expect `Record<string, unknown>`-compatible objects. */
 export type ToolResponse = {
   content: Array<{ type: 'text'; text: string }>
   isError?: boolean
+  _meta?: Record<string, unknown>
 } & Record<string, unknown>
 
 import type { ServerContext } from '@modelcontextprotocol/server'
@@ -31,12 +55,16 @@ import type { ServerContext } from '@modelcontextprotocol/server'
  * only read the three core fields.
  *
  * Reserved keys (`error`, `code`, `retryable`) cannot be overridden by `extra`.
+ *
+ * `appMeta` is carried on the response `_meta` channel (spec §11), alongside
+ * mandatory serverInfo — never mixed into the model-visible error `content`.
  */
 export function mcpError(
   message: string,
   code: string,
   retryable = false,
-  extra?: Record<string, unknown>
+  extra?: Record<string, unknown>,
+  appMeta?: AppMeta
 ): ToolResponse {
   const payload: Record<string, unknown> = { ...(extra ?? {}), error: message, code, retryable }
   return {
@@ -44,16 +72,18 @@ export function mcpError(
       type: 'text' as const,
       text: JSON.stringify(payload)
     }],
-    isError: true
+    isError: true,
+    _meta: buildResponseMeta(appMeta)
   }
 }
 
-export function mcpSuccess(data: unknown): ToolResponse {
+export function mcpSuccess(data: unknown, appMeta?: AppMeta): ToolResponse {
   return {
     content: [{
       type: 'text' as const,
       text: typeof data === 'string' ? data : JSON.stringify(data, null, 2)
-    }]
+    }],
+    _meta: buildResponseMeta(appMeta)
   }
 }
 
