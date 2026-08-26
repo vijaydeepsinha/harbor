@@ -109,6 +109,15 @@ Full field reference: [`configuration.md — oauth-2.1`](configuration.md#oauth-
 
 Discovery tries `/.well-known/openid-configuration` first, then `/.well-known/oauth-authorization-server`. The result is cached per strategy instance; Harbor does not re-fetch on every token.
 
+> **`audience` is required (MCP 2026-07-28, RFC 8707 resource binding).** The
+> `oauth-2.1` strategy fails closed at startup if `audience` is missing or
+> blank. `audience` is the gateway's canonical resource identifier — set it to
+> the same value you advertise as `resource` in the Protected Resource Metadata
+> (`HARBOR_RESOURCE_URI`). This ensures Harbor rejects an access token minted
+> for a *different* resource behind the same authorization server, closing the
+> confused-deputy / token pass-through gap. The lower-level `jwt-validation`
+> strategy keeps `audience` optional for standalone use.
+
 ### oauth-introspection — token introspection (RFC 7662)
 
 Use when the AS does not issue JWTs or when you need server-side revocation checks.
