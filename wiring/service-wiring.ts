@@ -50,9 +50,12 @@ export function resolveAuth(auth: ServiceAuthConfig | undefined, logger?: Logger
         ...(logger !== undefined ? { logger } : {}),
       })
     case AUTH_TYPE.OAUTH_2_1:
+      if (!auth.audience || auth.audience.trim() === '') {
+        throw new Error('config.auth.audience (resource binding) is required for oauth-2.1 auth')
+      }
       return oauthDiscovery({
         authorizationServer: auth.authorizationServer,
-        ...(auth.audience !== undefined ? { audience: auth.audience } : {}),
+        audience: auth.audience,
         ...(auth.clockToleranceSec !== undefined ? { clockToleranceSec: auth.clockToleranceSec } : {}),
         ...(auth.scopeClaim !== undefined ? { scopeClaim: auth.scopeClaim } : {}),
         ...(auth.metadataMapping !== undefined ? { metadataMapping: auth.metadataMapping } : {}),
