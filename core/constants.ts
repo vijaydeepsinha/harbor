@@ -103,6 +103,11 @@ export const HTTP_HEADER = {
   MCP_SERVICE: 'X-MCP-Service',
   MCP_VERSION: 'X-MCP-Version',
   IDEMPOTENCY_KEY: 'X-Idempotency-Key',
+  /** MCP 2026-07-28 protocol headers (spec §13/§14). Validated by the SDK;
+   *  Harbor only reads them for routing/authorization/observability. */
+  MCP_PROTOCOL_VERSION: 'MCP-Protocol-Version',
+  MCP_METHOD: 'Mcp-Method',
+  MCP_NAME: 'Mcp-Name',
 } as const
 
 export const CONTENT_TYPE_JSON = 'application/json'
