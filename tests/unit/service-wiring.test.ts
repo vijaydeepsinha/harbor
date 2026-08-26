@@ -23,6 +23,12 @@ describe('resolveAuth', () => {
       resolveAuth({ type: AUTH_TYPE.STATIC_TOKEN } as never)
     ).toThrow('config.auth.token is required for static-token auth')
   })
+
+  it('throws when oauth-2.1 type has no audience (resource binding, spec §17)', () => {
+    expect(() =>
+      resolveAuth({ type: AUTH_TYPE.OAUTH_2_1, authorizationServer: 'https://auth.example.com' } as never)
+    ).toThrow('config.auth.audience (resource binding) is required for oauth-2.1 auth')
+  })
 })
 
 describe('resolveCircuitBreaker', () => {

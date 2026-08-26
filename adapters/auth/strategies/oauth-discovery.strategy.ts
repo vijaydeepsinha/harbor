@@ -9,7 +9,15 @@ import { JwtValidationStrategy } from './jwt-validation.strategy.js'
 
 export interface OAuthDiscoveryConfig {
   authorizationServer: string
-  audience?: string
+  /**
+   * Canonical resource identifier this gateway accepts tokens for (RFC 8707
+   * resource indicator / JWT `aud`). REQUIRED under MCP 2026-07-28 (spec §17):
+   * the resource server MUST reject tokens not bound to it, otherwise a token
+   * minted for another resource behind the same authorization server would be
+   * accepted here (confused-deputy / token pass-through). Set this to the value
+   * Harbor advertises as `resource` in its Protected Resource Metadata.
+   */
+  audience: string
   clockToleranceSec?: number
   scopeClaim?: string
   metadataMapping?: Record<string, string>
@@ -27,6 +35,12 @@ export class OAuthDiscoveryStrategy implements AuthStrategy {
   private readonly logger?: Logger
 
   constructor(config: OAuthDiscoveryConfig) {
+    // Fail closed on missing resource binding (spec §17, RFC 8707). Without an
+    // audience the inner JWT verification would accept any `aud`, defeating
+    // resource-binding — so this is a misconfiguration, not a soft default.
+    if (!config.audience || config.audience.trim() === '') {
+      throw new Error('OAuth 2.1 auth requires `audience` (resource binding) under MCP 2026-07-28')
+    }
     this.config = config
     this.logger = config.logger
   }
@@ -54,7 +68,7 @@ export class OAuthDiscoveryStrategy implements AuthStrategy {
       this.inner = new JwtValidationStrategy({
         jwksUri,
         issuer: this.config.authorizationServer,
-        ...(this.config.audience !== undefined ? { audience: this.config.audience } : {}),
+        audience: this.config.audience,
         ...(this.config.clockToleranceSec !== undefined ? { clockToleranceSec: this.config.clockToleranceSec } : {}),
         ...(this.config.scopeClaim !== undefined ? { scopeClaim: this.config.scopeClaim } : {}),
         ...(this.config.metadataMapping !== undefined ? { metadataMapping: this.config.metadataMapping } : {}),
