@@ -10,13 +10,14 @@ import {
   isToolError,
   mcpError,
   mcpSuccess,
+  buildResponseMeta,
   validateAuth,
   runSandboxTool,
   type ToolResponse
 } from '../../tools/tool-helpers.js'
 import type { ServiceRegistry, ServiceResources } from '../../runtime/registry/service-registry.js'
 import { MissingTokenError, SessionExpiredError, type TokenPayload } from '../../core/types/auth.types.js'
-import { ERR, METRIC, OUTCOME } from '../../core/constants.js'
+import { ERR, METRIC, OUTCOME, GATEWAY_NAME, GATEWAY_VERSION, SERVER_INFO_META_KEY } from '../../core/constants.js'
 
 const silentLogger = pino({ level: 'silent' })
 
@@ -118,6 +119,50 @@ describe('tool-helpers responses', () => {
     expect(isToolError(mcpError('x', 'y'))).toBe(true)
     expect(isToolError(mcpSuccess('x'))).toBe(false)
     expect(isToolError({})).toBe(false)
+  })
+})
+
+describe('response _meta / serverInfo (spec §10, §11)', () => {
+  const expectedServerInfo = { name: GATEWAY_NAME, version: GATEWAY_VERSION }
+
+  it('mcpSuccess carries mandatory serverInfo in _meta', () => {
+    const r = mcpSuccess({ a: 1 })
+    expect(r._meta?.[SERVER_INFO_META_KEY]).toEqual(expectedServerInfo)
+  })
+
+  it('mcpError carries mandatory serverInfo in _meta', () => {
+    const r = mcpError('boom', ERR.API_ERROR)
+    expect(r._meta?.[SERVER_INFO_META_KEY]).toEqual(expectedServerInfo)
+  })
+
+  it('serverInfo never leaks into model-visible content', () => {
+    const r = mcpSuccess({ a: 1 })
+    expect(r.content[0].text).not.toContain('serverInfo')
+    expect(r.content[0].text).not.toContain(GATEWAY_NAME)
+    const e = mcpError('boom', ERR.API_ERROR, false, { progress: 1 })
+    expect(e.content[0].text).not.toContain('serverInfo')
+  })
+
+  it('mcpSuccess merges application _meta alongside serverInfo', () => {
+    const r = mcpSuccess({ a: 1 }, { 'harbor/correlationId': 'cid-9' })
+    expect(r._meta?.['harbor/correlationId']).toBe('cid-9')
+    expect(r._meta?.[SERVER_INFO_META_KEY]).toEqual(expectedServerInfo)
+  })
+
+  it('mcpError merges application _meta alongside serverInfo', () => {
+    const r = mcpError('boom', ERR.API_ERROR, true, undefined, { 'harbor/auditId': 'aud-1' })
+    expect(r._meta?.['harbor/auditId']).toBe('aud-1')
+    expect(r._meta?.[SERVER_INFO_META_KEY]).toEqual(expectedServerInfo)
+  })
+
+  it('application _meta cannot spoof the reserved serverInfo key', () => {
+    const spoof = buildResponseMeta({ [SERVER_INFO_META_KEY]: { name: 'evil', version: '0' } })
+    expect(spoof[SERVER_INFO_META_KEY]).toEqual(expectedServerInfo)
+  })
+
+  it('application _meta does not leak into content', () => {
+    const r = mcpSuccess({ a: 1 }, { 'harbor/auditId': 'aud-secret' })
+    expect(r.content[0].text).not.toContain('aud-secret')
   })
 })
 
