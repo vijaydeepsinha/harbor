@@ -90,6 +90,7 @@ def section(title): print(f"\n{BOLD}{CYAN}── {title}{RESET}")
 
 _procs: list[subprocess.Popen] = []
 _oauth_harbor_proc: Optional[subprocess.Popen] = None
+_billing_proc: Optional[subprocess.Popen] = None
 
 def _find_node() -> str:
     for candidate in [
@@ -276,8 +277,80 @@ def _stop_harbor_oauth():
     _oauth_harbor_proc = None
     info("Harbor (OAuth mode) stopped")
 
+def _start_billing_backend():
+    """Start the billing backend (examples/demo/billing-service.js) on :3004.
+
+    Needed for the resource-binding test: a token that passes oauth-2.1
+    validation must reach a *real* backend for a genuine 200, and a rejected
+    token must never reach it.
+    """
+    global _billing_proc
+    node = _find_node()
+    script = ROOT / "examples" / "demo" / "billing-service.js"
+    _billing_proc = subprocess.Popen(
+        [node, str(script)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={**os.environ, "NODE_PATH": str(ROOT / "node_modules")},
+        cwd=str(ROOT),
+        start_new_session=True,
+    )
+    info(f"Started billing-service.js (pid {_billing_proc.pid})")
+    for _ in range(20):
+        try:
+            urllib.request.urlopen("http://localhost:3004/invoices", timeout=1)
+            return
+        except Exception:
+            time.sleep(0.5)
+    raise RuntimeError("billing backend (:3004) did not become ready")
+
+def _stop_billing_backend():
+    global _billing_proc
+    if _billing_proc is None:
+        return
+    try:
+        os.killpg(os.getpgid(_billing_proc.pid), signal.SIGTERM)
+    except Exception:
+        pass
+    try:
+        _billing_proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(_billing_proc.pid), signal.SIGKILL)
+        except Exception:
+            pass
+    _billing_proc = None
+    info("billing backend stopped")
+
 def _get_real_jwt() -> str:
     data = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode()
+    credentials = base64.b64encode(f"{OAUTH_CLIENT_ID}:{OAUTH_CLIENT_SECRET}".encode()).decode()
+    req = urllib.request.Request(
+        f"{OAUTH_AS_BASE}/token",
+        data=data,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Basic {credentials}",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode())["access_token"]
+
+def _get_jwt_wrong_aud() -> str:
+    """Mint a JWT from the SAME mock AS but bound to a *different* resource.
+
+    The mock AS config matches `scope=confused-deputy` first and stamps
+    `aud: ["https://not-harbor.example.com"]`. The token is otherwise
+    well-formed and signed by the same key Harbor discovers via JWKS — only the
+    audience differs. This is the confused-deputy / token pass-through scenario
+    Harbor's oauth-2.1 resource binding (RFC 8707, MCP 2026-07-28 §17) must
+    reject.
+    """
+    data = urllib.parse.urlencode({
+        "grant_type": "client_credentials",
+        "scope": "confused-deputy",
+    }).encode()
     credentials = base64.b64encode(f"{OAUTH_CLIENT_ID}:{OAUTH_CLIENT_SECRET}".encode()).decode()
     req = urllib.request.Request(
         f"{OAUTH_AS_BASE}/token",
@@ -438,6 +511,30 @@ def call_tool(name: str, args: dict, req_id: int) -> dict:
 
 def api_exec(service: str, code: str, req_id: int) -> dict:
     return call_tool("api_execute", {"service": service, "code": code}, req_id)
+
+def api_exec_jwt(service: str, code: str, req_id: int, jwt: str) -> dict:
+    """Run api_execute over a JWT-authenticated MCP call.
+
+    Returns a normalized dict so resource-binding assertions can inspect both
+    the transport/JSON-RPC outcome and the tool-level result:
+      { is_error: bool, parsed: dict|None, raw: dict }
+    `is_error` is the MCP tool-result `isError` flag; `parsed` is the decoded
+    first text-content block (Harbor serializes both success data and error
+    envelopes as JSON there).
+    """
+    resp = _mcp_post_jwt({
+        "jsonrpc": "2.0", "id": req_id, "method": "tools/call",
+        "params": {"name": "api_execute", "arguments": {"service": service, "code": code}},
+    }, jwt, mcp_name="api_execute")
+    if "_error" in resp:
+        return {"is_error": True, "parsed": {"error": resp["_error"]}, "raw": resp}
+    result = resp.get("result", {})
+    parsed = None
+    try:
+        parsed = json.loads(result["content"][0]["text"])
+    except Exception:
+        pass
+    return {"is_error": bool(result.get("isError")), "parsed": parsed, "raw": resp}
 
 # ── Assertions ────────────────────────────────────────────────────────────────
 
@@ -791,6 +888,49 @@ def test_docker_oauth(resource_uri: str):
     for name in ("discover_services", "discover_skills", "search_code", "api_execute"):
         assert_in(name, tool_names, f"tool '{name}' present")
 
+    # ── Resource binding (MCP 2026-07-28 §17 / RFC 8707) — LIVE ────────────────
+    # Per-service oauth-2.1 JWT validation (signature via discovered JWKS,
+    # issuer, AND audience) fires inside api_execute BEFORE the backend call.
+    # server/discover and tools/list do NOT trigger it, so resource binding must
+    # be exercised through api_execute on the billing service.
+    section("OAuth 2.1 — resource binding via api_execute (billing)")
+
+    BILLING_CODE = ('async () => { const r = await api.request({ method: "GET", '
+                    'path: "/invoices" }); return r.data; }')
+
+    # (a) Correct-aud JWT (aud = http://localhost:3333) → validation PASSES,
+    #     backend reached, real invoices returned.
+    good = api_exec_jwt("billing", BILLING_CODE, 600, jwt)
+    assert_true(not good["is_error"],
+                f"api_execute(billing) with correct-aud JWT → success  "
+                f"{(good['parsed'] or {}).get('error', '')}")
+    invoices = (good["parsed"] or {}).get("invoices", [])
+    assert_true(len(invoices) > 0,
+                f"correct-aud JWT → {len(invoices)} invoices returned from live backend")
+    if invoices:
+        inv_ids = [i.get("id") for i in invoices]
+        assert_in("inv-001", inv_ids, "live billing backend returned inv-001")
+
+    # (b) Wrong-aud JWT (same AS, same signature, aud = not-harbor) → resource
+    #     binding REJECTS. Confused-deputy / token pass-through must fail closed.
+    try:
+        wrong_jwt = _get_jwt_wrong_aud()
+    except Exception as e:
+        assert_true(False, f"wrong-aud JWT acquired from mock AS  →  {e}")
+        wrong_jwt = None
+
+    if wrong_jwt:
+        assert_eq(len(wrong_jwt.split(".")), 3, "wrong-aud JWT is a well-formed JWT")
+        bad = api_exec_jwt("billing", BILLING_CODE, 601, wrong_jwt)
+        assert_true(bad["is_error"],
+                    "api_execute(billing) with wrong-aud JWT → rejected (isError)")
+        bad_parsed = bad["parsed"] or {}
+        assert_true("invoices" not in bad_parsed,
+                    "wrong-aud JWT → NO invoice data leaked")
+        code = bad_parsed.get("code", "")
+        assert_true(code in ("TOKEN_INVALID", "AUTH_FAILED", "TOKEN_EXPIRED"),
+                    f"wrong-aud rejection carries an auth error code (got {code!r})")
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -865,6 +1005,7 @@ def main():
             _switch_to_oauth_mode()
             _docker_oauth_up()
             try:
+                _start_billing_backend()
                 _start_harbor_oauth({
                     "HARBOR_RESOURCE_URI":    args.oauth_resource_uri,
                     "HARBOR_AUTH_SERVERS":    OAUTH_AS_BASE,
@@ -873,6 +1014,7 @@ def main():
                 test_docker_oauth(args.oauth_resource_uri)
             finally:
                 _stop_harbor_oauth()
+                _stop_billing_backend()
                 _docker_oauth_down()
                 _switch_to_token_mode()
                 info("Phase-2 cleanup complete")
