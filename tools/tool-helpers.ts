@@ -14,7 +14,10 @@ import {
   LOG_PREFIX,
   GATEWAY_NAME,
   GATEWAY_VERSION,
-  SERVER_INFO_META_KEY
+  SERVER_INFO_META_KEY,
+  PROTOCOL_VERSION_META_KEY,
+  CLIENT_INFO_META_KEY,
+  CLIENT_CAPABILITIES_META_KEY
 } from '../core/constants.js'
 import { ensureError, errorCode, errorRetryable } from '../core/utils/errors.js'
 
@@ -98,6 +101,39 @@ export function extractCorrelationId(ctx: unknown): string {
 /** Reads session id from the MCP handler context, falling back to a fresh UUID. */
 export function extractSessionId(ctx: unknown): string {
   return (ctx as ServerContext | undefined)?.sessionId ?? crypto.randomUUID()
+}
+
+/**
+ * Advisory view of per-request MCP metadata (spec §9): the negotiated protocol
+ * version, client implementation info, and client capabilities. The SDK lifts
+ * the reserved `io.modelcontextprotocol/*` envelope keys out of the params
+ * `_meta` the handler sees and onto `ctx.mcpReq.envelope`; this reads both,
+ * envelope-first.
+ *
+ * SECURITY: this is untrusted, client-supplied context for logging/telemetry
+ * and content shaping ONLY. Never use it for authorization or any security
+ * decision — auth flows exclusively through the validated bearer token.
+ */
+export interface RequestMetaView {
+  protocolVersion?: string
+  clientInfo?: { name?: string; version?: string } & Record<string, unknown>
+  clientCapabilities?: Record<string, unknown>
+}
+
+export function readRequestMeta(ctx: unknown): RequestMetaView {
+  const mcpReq = (ctx as ServerContext | undefined)?.mcpReq
+  const src: Record<string, unknown> = {
+    ...((mcpReq?._meta as Record<string, unknown> | undefined) ?? {}),
+    ...((mcpReq?.envelope as Record<string, unknown> | undefined) ?? {})
+  }
+  const view: RequestMetaView = {}
+  const pv = src[PROTOCOL_VERSION_META_KEY]
+  if (typeof pv === 'string') view.protocolVersion = pv
+  const ci = src[CLIENT_INFO_META_KEY]
+  if (ci !== null && typeof ci === 'object') view.clientInfo = ci as RequestMetaView['clientInfo']
+  const cc = src[CLIENT_CAPABILITIES_META_KEY]
+  if (cc !== null && typeof cc === 'object') view.clientCapabilities = cc as Record<string, unknown>
+  return view
 }
 
 export function resolveService(
