@@ -9,6 +9,7 @@ import type { ServiceRegistry } from '../registry/service-registry.js'
 import type { OAuthResourceConfig } from '../../core/types/oauth.types.js'
 import { extractBearerFromRequest, bearerFailureToHttpResponse } from '../../spi/auth/bearer-authorization.js'
 import { handleProtectedResourceMetadata } from './oauth-metadata-handler.js'
+import { readMcpRequestIdentity } from './mcp-request-identity.js'
 import { sendJson, sendGatewayError } from './send-response.js'
 import { HttpError } from './http-error.js'
 import { ERR, HTTP_ROUTES } from '../../core/constants.js'
@@ -151,10 +152,15 @@ async function handleAuthenticatedMcpRequest(
     scopes: []
   }
 
+  // Normalized MCP request identity from HTTP headers (spec §14). Advisory:
+  // used for routing/observability only — the SDK validates these headers and
+  // reconciles them with the JSON-RPC body; auth stays keyed to the token.
+  const mcpIdentity = readMcpRequestIdentity(req.headers)
+
   try {
     await nodeMcpHandler(authReq, res)
   } catch (err) {
-    logger.warn({ error: errorMessage(err) }, 'MCP handler dispatch failed')
+    logger.warn({ error: errorMessage(err), ...mcpIdentity }, 'MCP handler dispatch failed')
     throw err
   }
 }
