@@ -4,7 +4,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
 import type { AuthInfo } from '@modelcontextprotocol/server'
-import { ERR } from '../../core/constants.js'
+import { ERR, MCP_PROTOCOL_VERSION } from '../../core/constants.js'
 
 const { mockNodeMcpHandler } = vi.hoisted(() => ({
   mockNodeMcpHandler: vi.fn()
@@ -83,9 +83,19 @@ describe('startHttpGateway', () => {
     const res = await fetch(`${baseUrl}/health`)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('application/json')
-    const body = await res.json() as { status: string; services: string[] }
+    const body = await res.json() as { status: string; protocolVersion: string; services: string[] }
     expect(body.status).toBe('ok')
     expect(body.services).toEqual([])
+  })
+
+  it('GET /health advertises the single supported protocol version (spec §20)', async () => {
+    const { baseUrl, close } = await startForTest()
+    cleanup = close
+
+    const res = await fetch(`${baseUrl}/health`)
+    const body = await res.json() as { protocolVersion: string }
+    expect(body.protocolVersion).toBe(MCP_PROTOCOL_VERSION)
+    expect(body.protocolVersion).toBe('2026-07-28')
   })
 
   it('unknown route returns 404 with the gateway error envelope', async () => {

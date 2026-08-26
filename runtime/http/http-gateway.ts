@@ -12,7 +12,7 @@ import { handleProtectedResourceMetadata } from './oauth-metadata-handler.js'
 import { readMcpRequestIdentity } from './mcp-request-identity.js'
 import { sendJson, sendGatewayError } from './send-response.js'
 import { HttpError } from './http-error.js'
-import { ERR, HTTP_ROUTES } from '../../core/constants.js'
+import { ERR, HTTP_ROUTES, MCP_PROTOCOL_VERSION } from '../../core/constants.js'
 import { errorMessage } from '../../core/utils/errors.js'
 import type { McpServerFactory } from './mcp-server-factory.js'
 
@@ -55,6 +55,10 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
       if (url === HTTP_ROUTES.HEALTH) {
         sendJson(res, 200, {
           status: 'ok',
+          // Single protocol version Harbor speaks (spec §20). Harbor rejects
+          // legacy clients at the transport (`legacy: 'reject'`); this makes
+          // the supported version explicit for operators and monitoring.
+          protocolVersion: MCP_PROTOCOL_VERSION,
           services: registry.serviceNames()
         })
         return
