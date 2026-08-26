@@ -6,6 +6,7 @@ import pino from 'pino'
 import {
   extractCorrelationId,
   extractSessionId,
+  readRequestMeta,
   resolveService,
   isToolError,
   mcpError,
@@ -68,6 +69,48 @@ describe('tool-helpers extractors', () => {
   it('extractSessionId falls back to a uuid when absent', () => {
     const id = extractSessionId(undefined)
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
+  })
+})
+
+describe('readRequestMeta (spec §9)', () => {
+  const PV = 'io.modelcontextprotocol/protocolVersion'
+  const CI = 'io.modelcontextprotocol/clientInfo'
+  const CC = 'io.modelcontextprotocol/clientCapabilities'
+
+  it('reads protocol version, clientInfo and capabilities from the envelope', () => {
+    const ctx = {
+      mcpReq: {
+        envelope: {
+          [PV]: '2026-07-28',
+          [CI]: { name: 'demo-client', version: '9.9' },
+          [CC]: { sampling: {} }
+        }
+      }
+    }
+    const view = readRequestMeta(ctx)
+    expect(view.protocolVersion).toBe('2026-07-28')
+    expect(view.clientInfo).toEqual({ name: 'demo-client', version: '9.9' })
+    expect(view.clientCapabilities).toEqual({ sampling: {} })
+  })
+
+  it('falls back to params _meta when the envelope is absent', () => {
+    const ctx = { mcpReq: { _meta: { [PV]: '2026-07-28' } } }
+    expect(readRequestMeta(ctx).protocolVersion).toBe('2026-07-28')
+  })
+
+  it('envelope wins over params _meta on key collision', () => {
+    const ctx = { mcpReq: { _meta: { [PV]: 'old' }, envelope: { [PV]: '2026-07-28' } } }
+    expect(readRequestMeta(ctx).protocolVersion).toBe('2026-07-28')
+  })
+
+  it('returns an empty view for missing/blank context', () => {
+    expect(readRequestMeta(undefined)).toEqual({})
+    expect(readRequestMeta({ mcpReq: {} })).toEqual({})
+  })
+
+  it('ignores malformed values (wrong types) without throwing', () => {
+    const ctx = { mcpReq: { envelope: { [PV]: 123, [CI]: 'nope', [CC]: null } } }
+    expect(readRequestMeta(ctx)).toEqual({})
   })
 })
 
