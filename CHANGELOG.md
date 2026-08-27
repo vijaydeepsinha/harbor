@@ -9,6 +9,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+- **Breaking (`oauth-2.1` auth):** access tokens must now be resource-bound (RFC 8707, MCP 2026-07-28 §17). `audience` is **required** on the `oauth-2.1` auth config and validated against the token's `aud`; a missing/blank `audience` now fails closed at strategy construction and config wiring. Closes a confused-deputy / token pass-through gap where a token minted for another resource behind the same authorization server was accepted. The lower-level `jwt-validation` provider keeps `audience` optional.
+
+### Added
+- Live E2E coverage for OAuth 2.1 resource binding via `api_execute` on the billing service (`tests/demo_e2e.py --docker-oauth`): a correct-audience JWT reaches the backend; a same-issuer, same-signature, wrong-audience JWT is rejected (`TOKEN_INVALID`, no data leak).
+
+### Security
+- Cleared all high-severity `npm audit` advisories (axios, js-yaml, nanoid, postcss, brace-expansion, fast-uri) so the `npm audit --audit-level=high` CI gate passes.
+
 ---
 
 ## [1.0.0] — 2026-07-17
