@@ -1,0 +1,27 @@
+# Example rule set for a trafficking/campaign service. Copy into
+# governance/rules/ (not examples/) to activate.
+rules:
+  - name: high-budget-campaign
+    version: 1
+    description: Creating a campaign above 1,000,000 needs a human
+    match: { service: trafficking, operation: createCampaign }
+    conditions:
+      budget: { greater_than: 1000000 }
+    action: { type: REQUIRE_APPROVAL, reason: Campaign budget exceeds the approval threshold }
+
+  - name: activate-campaign
+    description: Going live is reviewed
+    match: { service: trafficking, operation: activateCampaign }
+    action: { type: REQUIRE_APPROVAL, reason: Activation changes live delivery }
+
+  - name: attach-creative
+    match: { service: trafficking, operation: attachCreative }
+    action: { type: REQUIRE_APPROVAL, reason: Creative content must be reviewed }
+
+  - name: finalize-campaign
+    match: { service: trafficking, operation: finalizeCampaign }
+    action: { type: ALLOW }
+
+  - name: never-delete-campaigns
+    match: { service: trafficking, method: DELETE, path: /campaigns/{id} }
+    action: { type: DENY, reason: Campaign deletion is not permitted through agents }

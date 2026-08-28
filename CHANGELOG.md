@@ -9,6 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **Code Mode governance layer** (`docs/code-mode-governance.md`): durable executions with a persisted original program and `executionId` (`_meta["harbor/execution-id"]`); an activity journal at the sandbox bridge with replay of completed calls, `REPLAY_DIVERGED` detection and crash-safe outcome handling; declarative **Governance Rules** (`governance/rules/*.yaml`, OpenAPI-operation targeting, request-value conditions, `DENY > REQUIRE_APPROVAL > ALLOW`); human approval through the MCP 2026-07-28 multi-round-trip pattern (form elicitation + HMAC-sealed `requestState`) with multiple approval rounds and resume in a fresh isolate; an HTTP fallback for clients without elicitation (`POST /executions/{id}/approvals/{approvalId}`) and inspection (`GET /executions/{id}`); pluggable execution store (`in-memory`, `file`, `registerExecutionStoreBackend`). New env: `EXECUTION_STORE_TYPE`, `EXECUTION_STORE_DIR`, `GOVERNANCE_RULES_DIR`, `GOVERNANCE_DEFAULT_DECISION`, `GOVERNANCE_REQUEST_STATE_KEY`, `GOVERNANCE_APPROVAL_TTL_SEC`. Legacy behaviour is preserved when no rules exist (default decision `ALLOW`).
+- `AGENTS.md` — repository guide for AI coding agents.
+
 ### Changed
 - **Breaking (`oauth-2.1` auth):** access tokens must now be resource-bound (RFC 8707, MCP 2026-07-28 §17). `audience` is **required** on the `oauth-2.1` auth config and validated against the token's `aud`; a missing/blank `audience` now fails closed at strategy construction and config wiring. Closes a confused-deputy / token pass-through gap where a token minted for another resource behind the same authorization server was accepted. The lower-level `jwt-validation` provider keeps `audience` optional.
 

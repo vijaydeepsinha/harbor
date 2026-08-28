@@ -142,6 +142,19 @@ All three variables are optional. Set `HARBOR_RESOURCE_URI` to enable OAuth 2.1 
 
 When `HARBOR_RESOURCE_URI` is not set the gateway behaves identically to before — the metadata endpoint returns 404 and 401 responses carry no `WWW-Authenticate` header.
 
+## Code Mode governance layer
+
+| Variable | Default | Description |
+|---|---|---|
+| `EXECUTION_STORE_TYPE` | `in-memory` | Where executions, activities, approvals and decisions live: `in-memory` or `file` |
+| `EXECUTION_STORE_DIR` | `./var/executions` | Directory for the `file` store (one JSON document per execution) |
+| `GOVERNANCE_RULES_DIR` | `./governance/rules` | Governance Rule files (`*.yaml`/`*.yml`/`*.json`, top level only). Invalid files fail boot |
+| `GOVERNANCE_DEFAULT_DECISION` | `ALLOW` | Decision when no rule matches: `ALLOW`, `DENY`, `REQUIRE_APPROVAL` |
+| `GOVERNANCE_REQUEST_STATE_KEY` | *(random per process)* | ≥32-character HMAC key sealing the MRTR `requestState`; set it for multi-instance deployments |
+| `GOVERNANCE_APPROVAL_TTL_SEC` | `600` | Seconds a paused execution's `requestState` stays redeemable |
+
+See [`code-mode-governance.md`](code-mode-governance.md).
+
 ## Per-service `config.json` (under `services/<name>/`)
 
 Optional file next to `spec.yaml` / `spec.json`. All fields have defaults; omit what you don't need.

@@ -484,3 +484,28 @@ In non-production environments (`ENVIRONMENT` not set to `prod`), every log line
 ```
 
 Powered by `pino-caller`. Automatically disabled in production.
+
+## Code Mode governance (durable executions, approvals)
+
+`api_execute` runs under the Code Mode governance layer when the gateway is
+started with an execution store (always, since `EXECUTION_STORE_TYPE` defaults
+to `in-memory`):
+
+- every call creates a **durable execution** (`_meta["harbor/execution-id"]`
+  on the result) whose original program is persisted;
+- every `api.request()` is a journaled **activity**; on resume, completed
+  activities are replayed from their stored responses and never re-executed;
+- **Governance Rules** (`governance/rules/`) decide `ALLOW` / `DENY` /
+  `REQUIRE_APPROVAL` per activity before the external call;
+- `REQUIRE_APPROVAL` returns an MCP 2026-07-28 `input_required` result with a
+  form elicitation and a sealed `requestState`; the client retries the same
+  call with `inputResponses` after the human decides, and Harbor resumes the
+  program in a fresh isolate. Clients without elicitation get
+  `APPROVAL_REQUIRED` and decide over `POST /executions/{id}/approvals/{approvalId}`.
+
+Additional error codes: `APPROVAL_REQUIRED`, `GOVERNANCE_DENIED`,
+`REPLAY_DIVERGED`, `EXECUTION_LOCKED`, `EXECUTION_NOT_FOUND`,
+`EXECUTION_NOT_RESUMABLE`, `EXECUTION_CANCELLED`, `ACTIVITY_OUTCOME_UNKNOWN`,
+`APPROVAL_NOT_FOUND`, `APPROVAL_ALREADY_DECIDED`.
+
+Full description: [`code-mode-governance.md`](code-mode-governance.md).

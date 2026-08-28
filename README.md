@@ -116,6 +116,7 @@ Full setup guide → [`docs/getting-started.md`](docs/getting-started.md)
 | [`docs/request-lifecycle.md`](docs/request-lifecycle.md) | End-to-end request trace |
 | [`docs/faq.md`](docs/faq.md) | Troubleshooting and common questions |
 | [`ROADMAP.md`](ROADMAP.md) | Planned features and milestones |
+- [Code Mode governance](docs/code-mode-governance.md) — durable executions, replay, Governance Rules, human approval over MCP
 
 ---
 
