@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Contributors to the Harbor project.
+
+import { describe, it, expect, afterEach, vi } from 'vitest'
+import type { AddressInfo } from 'node:net'
+import { ERR, APPROVAL_STATUS, EXECUTION_STATUS } from '../../core/constants.js'
+
+vi.mock('@modelcontextprotocol/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@modelcontextprotocol/server')>()
+  return { ...actual, createMcpHandler: vi.fn(() => ({ fetch: vi.fn() })) }
+})
+vi.mock('@modelcontextprotocol/node', () => ({ toNodeHandler: vi.fn(() => vi.fn()) }))
+
+import { startHttpGateway } from '../../runtime/http/http-gateway.js'
+import { ServiceRegistry } from '../../runtime/registry/service-registry.js'
+import { ActivityJournal } from '../../runtime/execution/activity-journal.js'
+import { makeRuntime, silentLogger } from './code-mode-harness.js'
+
+const TOKEN = 'route-test-token-0123456789abcdefghijklmnop'
+
+async function start(codeMode: ReturnType<typeof makeRuntime>) {
+  const handle = startHttpGateway({
+    host: '127.0.0.1', port: 0,
+    createMcpServer: () => { throw new Error('not expected') },
+    registry: new ServiceRegistry(), logger: silentLogger, codeMode
+  })
+  await new Promise<void>(resolve => handle.server.once('listening', () => resolve()))
+  const { port } = handle.server.address() as AddressInfo
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((resolve, reject) => handle.server.close(err => err ? reject(err) : resolve()))
+  }
+}
+
+/** An execution paused on approval #1, as the tool would leave it. */
+async function seedPaused(rt: ReturnType<typeof makeRuntime>) {
+  const exec = await rt.manager.create({ service: 'trafficking', code: 'async () => 1', userIdHash: 'h' })
+  await rt.manager.beginRun(exec.executionId)
+  const journal = new ActivityJournal(rt.store, exec.executionId, 'trafficking', 1)
+  const request = { method: 'POST' as const, rawPath: '/campaigns/C1', specPath: '/campaigns/{id}', operationId: 'updateCampaign', body: { action: 'activate' } }
+  await journal.next(request)
+  const approval = await rt.approvals.request(exec.executionId, 1, { ...request, service: 'trafficking', reason: 'r', matchedRules: ['x'] })
+  await journal.recordWaitingApproval(1, request, approval.approvalId)
+  await rt.manager.endRun(exec.executionId, { kind: 'waitingApproval', approvalId: approval.approvalId })
+  return { executionId: exec.executionId, approvalId: approval.approvalId }
+}
+
+describe('execution routes', () => {
+  let cleanup: (() => Promise<void>) | null = null
+  afterEach(async () => { if (cleanup) { await cleanup(); cleanup = null } })
+
+  it('requires a bearer, 404s unknown executions, and returns the full inspection', async () => {
+    const rt = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(rt)
+    const { baseUrl, close } = await start(rt); cleanup = close
+
+    expect((await fetch(`${baseUrl}/executions/${executionId}`)).status).toBe(401)
+    const missing = await fetch(`${baseUrl}/executions/nope`, { headers: { Authorization: `Bearer ${TOKEN}` } })
+    expect(missing.status).toBe(404)
+    expect((await missing.json() as { code: string }).code).toBe(ERR.EXECUTION_NOT_FOUND)
+
+    const res = await fetch(`${baseUrl}/executions/${executionId}`, { headers: { Authorization: `Bearer ${TOKEN}` } })
+    expect(res.status).toBe(200)
+    const body = await res.json() as Record<string, unknown>
+    expect(body['execution']).toMatchObject({ executionId, status: EXECUTION_STATUS.WAITING_APPROVAL, pendingApprovalId: approvalId })
+    expect((body['activities'] as unknown[]).length).toBe(1)
+    expect((body['approvals'] as Array<{ status: string }>)[0]?.status).toBe(APPROVAL_STATUS.PENDING)
+    expect(Array.isArray(body['history'])).toBe(true)
+    expect(Array.isArray(body['decisions'])).toBe(true)
+  })
+
+  it('POST decides an approval once; validates body and ownership', async () => {
+    const rt = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(rt)
+    const { baseUrl, close } = await start(rt); cleanup = close
+    const post = (path: string, body: unknown) => fetch(`${baseUrl}${path}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    })
+
+    const bad = await post(`/executions/${executionId}/approvals/${approvalId}`, { action: 'maybe' })
+    expect(bad.status).toBe(400)
+
+    const wrongExec = await post(`/executions/other-exec/approvals/${approvalId}`, { action: 'accept' })
+    expect(wrongExec.status).toBe(404)
+
+    const ok = await post(`/executions/${executionId}/approvals/${approvalId}`, { action: 'accept', comment: 'fine' })
+    expect(ok.status).toBe(200)
+    const decided = await ok.json() as { outcome: string; approval: { status: string; comment: string; decidedVia: string }; executionStatus: string }
+    expect(decided.outcome).toBe('APPROVED')
+    expect(decided.approval).toMatchObject({ status: APPROVAL_STATUS.APPROVED, comment: 'fine', decidedVia: 'http' })
+    expect(decided.executionStatus).toBe(EXECUTION_STATUS.WAITING_APPROVAL) // decided ⇒ resumable
+
+    const again = await post(`/executions/${executionId}/approvals/${approvalId}`, { action: 'decline' })
+    expect(again.status).toBe(409)
+    expect((await again.json() as { code: string }).code).toBe(ERR.APPROVAL_ALREADY_DECIDED)
+
+    const get = await fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, { headers: { Authorization: `Bearer ${TOKEN}` } })
+    expect(get.status).toBe(405)
+  })
+
+  it('decline over HTTP denies the execution', async () => {
+    const rt = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(rt)
+    const { baseUrl, close } = await start(rt); cleanup = close
+    const res = await fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decline' })
+    })
+    expect((await res.json() as { executionStatus: string }).executionStatus).toBe(EXECUTION_STATUS.DENIED)
+  })
+
+  it('is absent when no Code Mode runtime is configured', async () => {
+    const handle = startHttpGateway({
+      host: '127.0.0.1', port: 0, createMcpServer: () => { throw new Error('no') }, registry: new ServiceRegistry(), logger: silentLogger
+    })
+    await new Promise<void>(resolve => handle.server.once('listening', () => resolve()))
+    const { port } = handle.server.address() as AddressInfo
+    cleanup = () => new Promise<void>((resolve, reject) => handle.server.close(err => err ? reject(err) : resolve()))
+    const res = await fetch(`http://127.0.0.1:${port}/executions/x`, { headers: { Authorization: `Bearer ${TOKEN}` } })
+    expect(res.status).toBe(404)
+    expect((await res.json() as { code: string }).code).toBe(ERR.NOT_FOUND)
+  })
+})

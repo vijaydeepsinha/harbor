@@ -15,6 +15,8 @@ import { HttpError } from './http-error.js'
 import { ERR, HTTP_ROUTES, MCP_PROTOCOL_VERSION } from '../../core/constants.js'
 import { errorMessage } from '../../core/utils/errors.js'
 import type { McpServerFactory } from './mcp-server-factory.js'
+import type { CodeModeRuntime } from '../execution/code-mode-runtime.js'
+import { handleExecutionRoutes } from './execution-routes.js'
 
 /** Node request with pass-through auth for {@linkcode toNodeHandler}. */
 type AuthenticatedIncomingMessage = IncomingMessage & { auth?: AuthInfo }
@@ -26,6 +28,8 @@ export interface HttpGatewayOptions {
   registry: ServiceRegistry
   logger: Logger
   oauthConfig?: OAuthResourceConfig
+  /** Enables GET /executions/{id} and POST /executions/{id}/approvals/{approvalId}. */
+  codeMode?: CodeModeRuntime
 }
 
 export interface HttpGatewayHandle {
@@ -43,7 +47,7 @@ export interface HttpGatewayHandle {
  * not need to know about `node:http` or transport wiring.
  */
 export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
-  const { host, port, createMcpServer, registry, logger, oauthConfig } = opts
+  const { host, port, createMcpServer, registry, logger, oauthConfig, codeMode } = opts
 
   const mcpHandler = createMcpHandler(createMcpServer, { legacy: 'reject' })
   const nodeMcpHandler = toNodeHandler(mcpHandler)
@@ -79,6 +83,10 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
       if (url === HTTP_ROUTES.MCP) {
         await handleAuthenticatedMcpRequest(req, res, nodeMcpHandler, logger, oauthConfig)
         return
+      }
+
+      if (codeMode && url.startsWith(HTTP_ROUTES.EXECUTIONS)) {
+        if (await handleExecutionRoutes(req, res, url, codeMode, logger, oauthConfig)) return
       }
 
       throw new HttpError(404, ERR.NOT_FOUND, 'Not found', undefined, { url })

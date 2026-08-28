@@ -84,6 +84,7 @@ export async function createMcpGateway(
   // and metrics in the same order; any transport-specific teardown (e.g.
   // closing the HTTP listener) runs *before* this.
   const shutdownShared = () => {
+    void codeMode.shutdown().catch(err => gatewayLogger.warn({ error: errorMessage(err) }, 'Code Mode store shutdown failed'))
     tokenCacheStrategy.destroy()
     registry.shutdownAll()
     gatewayMetrics.stop()
@@ -96,7 +97,8 @@ export async function createMcpGateway(
     const http = startHttpGateway({
       host, port,
       createMcpServer, registry, logger: gatewayLogger,
-      oauthConfig: globalConfig.oauth
+      oauthConfig: globalConfig.oauth,
+      codeMode
     })
 
     const httpShutdown = (signal: string) => {
