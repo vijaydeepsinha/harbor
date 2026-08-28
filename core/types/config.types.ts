@@ -6,7 +6,7 @@ import type { CircuitBreakerStrategy } from './circuit-breaker.types.js'
 import type { IdempotencyStrategy } from './idempotency.types.js'
 import type { PermissionGuard } from './permission.types.js'
 import type { SpecLoaderStrategy } from './spec.types.js'
-import type { Environment } from '../constants.js'
+import type { Environment, GovernanceDecisionType } from '../constants.js'
 import type { OAuthResourceConfig } from './oauth.types.js'
 
 /** Pino log levels. Narrowed from `string` so typos are caught at compile time. */
@@ -38,6 +38,25 @@ export type IdempotencyBackendConfig =
   | { type: 'in-memory' }
   | ({ type: 'memcache' } & MemcacheConnectionConfig)
   | ({ type: 'couchbase' } & CouchbaseConnectionConfig)
+
+export type ExecutionStoreBackendConfig =
+  | { type: 'in-memory' }
+  | { type: 'file'; dir: string }
+
+/** Code Mode governance layer settings (see docs/code-mode-governance.md). */
+export interface CodeModeConfig {
+  store: ExecutionStoreBackendConfig
+  governance: {
+    /** Directory of Governance Rule files (`*.yaml` / `*.yml` / `*.json`). Missing dir ⇒ no rules. */
+    rulesDir: string
+    /** Decision when no rule matches. `ALLOW` preserves pre-governance behaviour. */
+    defaultDecision: GovernanceDecisionType
+    /** HMAC key for MRTR `requestState`; ≥32 chars. Absent ⇒ a per-process random key (single-instance only). */
+    requestStateKey?: string
+    /** How long a paused execution's `requestState` stays redeemable. */
+    approvalTtlSec: number
+  }
+}
 
 export type ServiceAuthConfig =
   | { type: 'static-token'; token?: string; protocol?: 'http' | 'https'; host?: string; port?: number; introspectionPath?: string; authTimeoutMs?: number; method?: 'GET' | 'POST'; tokenPassMode?: 'query' | 'body' | 'header'; tokenParamName?: string; refreshPath?: string; tokenRefreshBufferSec?: number }
@@ -86,6 +105,7 @@ export interface GlobalConfig {
   }
   defaultIdempotency: IdempotencyBackendConfig
   oauth?: OAuthResourceConfig
+  codeMode: CodeModeConfig
 }
 
 export type { AuthStrategy, TokenCacheStrategy, CircuitBreakerStrategy, IdempotencyStrategy, PermissionGuard, SpecLoaderStrategy, OAuthResourceConfig }

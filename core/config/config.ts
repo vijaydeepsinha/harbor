@@ -11,7 +11,7 @@ import type {
   CouchbaseConnectionConfig
 } from '../types/config.types.js'
 import { LOG_LEVELS } from '../types/config.types.js'
-import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT } from '../constants.js'
+import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, EXECUTION_STORE_TYPE, GOVERNANCE_DECISION } from '../constants.js'
 
 // ── Config-file loader ───────────────────────────────────────────────────────
 //
@@ -181,6 +181,14 @@ const GlobalConfigSchema = z.object({
   HARBOR_RESOURCE_URI: z.string().optional(),
   HARBOR_AUTH_SERVERS: z.string().optional(),
   HARBOR_SCOPES_SUPPORTED: z.string().optional(),
+  // ── Code Mode governance layer ──
+  EXECUTION_STORE_TYPE: z.enum([EXECUTION_STORE_TYPE.IN_MEMORY, EXECUTION_STORE_TYPE.FILE]).default(EXECUTION_STORE_TYPE.IN_MEMORY),
+  EXECUTION_STORE_DIR: z.string().default('./var/executions'),
+  GOVERNANCE_RULES_DIR: z.string().default('./governance/rules'),
+  GOVERNANCE_DEFAULT_DECISION: z.enum([GOVERNANCE_DECISION.ALLOW, GOVERNANCE_DECISION.DENY, GOVERNANCE_DECISION.REQUIRE_APPROVAL]).default(GOVERNANCE_DECISION.ALLOW),
+  // HMAC key for the MRTR requestState codec (spec MUST integrity-protect state that drives authorization).
+  GOVERNANCE_REQUEST_STATE_KEY: z.string().min(32).optional(),
+  GOVERNANCE_APPROVAL_TTL_SEC: z.coerce.number().int().positive().default(600),
 })
 
 export function validateGlobalConfig(): GlobalConfig {
@@ -231,6 +239,17 @@ export function validateGlobalConfig(): GlobalConfig {
       memcachePrefix: 'IDEMPOTENCY_MEMCACHE_',
       couchbasePrefix: 'IDEMPOTENCY_CB_',
     }) as IdempotencyBackendConfig,
+    codeMode: {
+      store: env.EXECUTION_STORE_TYPE === EXECUTION_STORE_TYPE.FILE
+        ? { type: EXECUTION_STORE_TYPE.FILE, dir: env.EXECUTION_STORE_DIR }
+        : { type: EXECUTION_STORE_TYPE.IN_MEMORY },
+      governance: {
+        rulesDir: env.GOVERNANCE_RULES_DIR,
+        defaultDecision: env.GOVERNANCE_DEFAULT_DECISION,
+        ...(env.GOVERNANCE_REQUEST_STATE_KEY ? { requestStateKey: env.GOVERNANCE_REQUEST_STATE_KEY } : {}),
+        approvalTtlSec: env.GOVERNANCE_APPROVAL_TTL_SEC
+      }
+    },
     ...(env.HARBOR_RESOURCE_URI ? {
       oauth: {
         resourceUri: env.HARBOR_RESOURCE_URI,

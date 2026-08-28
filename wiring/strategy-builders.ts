@@ -4,7 +4,10 @@
 import type { TokenCacheStrategy } from '../core/types/auth.types.js'
 import type { IdempotencyStrategy } from '../core/types/idempotency.types.js'
 import type { SpecLoaderStrategy } from '../core/types/spec.types.js'
-import type { IdempotencyBackendConfig, TokenCacheBackendConfig } from '../core/types/config.types.js'
+import type { IdempotencyBackendConfig, TokenCacheBackendConfig, ExecutionStoreBackendConfig } from '../core/types/config.types.js'
+import type { CodeModeStore } from '../spi/execution/execution-store.js'
+import { inMemoryCodeModeStore } from '../adapters/execution/in-memory-execution-store.js'
+import { fileCodeModeStore } from '../adapters/execution/file-execution-store.js'
 import type { Logger } from '../core/types/logger.types.js'
 import { inMemoryTokenCache } from '../adapters/auth/strategies/in-memory-token-cache.strategy.js'
 import { memcacheTokenCache } from '../adapters/auth/strategies/memcache-token-cache.strategy.js'
@@ -16,7 +19,7 @@ import { couchbaseIdempotency } from '../adapters/idempotency/strategies/couchba
 import { fileSpec } from '../spi/spec/strategies/file-spec-loader.strategy.js'
 import { urlSpec } from '../spi/spec/strategies/url-spec-loader.strategy.js'
 import { urlWithFallback } from '../spi/spec/strategies/url-with-fallback-spec-loader.strategy.js'
-import { STORE_TYPE } from '../core/constants.js'
+import { STORE_TYPE, EXECUTION_STORE_TYPE } from '../core/constants.js'
 
 // ── External backend registration ────────────────────────────────────────────
 //
@@ -39,7 +42,13 @@ export type IdempotencyFactory = (
   logger?: Logger
 ) => IdempotencyStrategy
 
+export type ExecutionStoreFactory = (
+  config: ExecutionStoreBackendConfig & Record<string, unknown>,
+  logger?: Logger
+) => CodeModeStore
+
 const _tokenCacheRegistry = new Map<string, TokenCacheFactory>()
+const _executionStoreRegistry = new Map<string, ExecutionStoreFactory>()
 const _idempotencyRegistry = new Map<string, IdempotencyFactory>()
 
 export function registerTokenCacheBackend(type: string, factory: TokenCacheFactory): void {
@@ -48,6 +57,11 @@ export function registerTokenCacheBackend(type: string, factory: TokenCacheFacto
 
 export function registerIdempotencyBackend(type: string, factory: IdempotencyFactory): void {
   _idempotencyRegistry.set(type, factory)
+}
+
+/** Register a custom Code Mode execution store (e.g. Postgres, Redis) keyed by the EXECUTION_STORE_TYPE value. */
+export function registerExecutionStoreBackend(type: string, factory: ExecutionStoreFactory): void {
+  _executionStoreRegistry.set(type, factory)
 }
 
 // ── Builders ─────────────────────────────────────────────────────────────────
@@ -85,6 +99,22 @@ export function buildIdempotencyStrategy(
     case STORE_TYPE.MEMCACHE:  return memcacheIdempotency(config, logger)
     case STORE_TYPE.COUCHBASE: return couchbaseIdempotency(config, logger)
     default: throw new Error(`Unknown idempotency type: "${(config as { type: string }).type}"`)
+  }
+}
+
+export function buildExecutionStore(
+  config: ExecutionStoreBackendConfig | undefined,
+  logger?: Logger
+): CodeModeStore {
+  if (!config) return inMemoryCodeModeStore()
+
+  const custom = _executionStoreRegistry.get(config.type)
+  if (custom) return custom(config as ExecutionStoreBackendConfig & Record<string, unknown>, logger)
+
+  switch (config.type) {
+    case EXECUTION_STORE_TYPE.IN_MEMORY: return inMemoryCodeModeStore()
+    case EXECUTION_STORE_TYPE.FILE:      return fileCodeModeStore(config.dir, logger)
+    default: throw new Error(`Unknown execution store type: "${(config as { type: string }).type}"`)
   }
 }
 
