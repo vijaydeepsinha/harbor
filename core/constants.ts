@@ -81,6 +81,17 @@ export const ERR = {
   INVALID_API_REQUEST: 'INVALID_API_REQUEST',
   NOT_FOUND: 'NOT_FOUND',
   INTERNAL: 'INTERNAL',
+  // ── Code Mode governance layer ──
+  APPROVAL_REQUIRED: 'APPROVAL_REQUIRED',
+  GOVERNANCE_DENIED: 'GOVERNANCE_DENIED',
+  REPLAY_DIVERGED: 'REPLAY_DIVERGED',
+  EXECUTION_LOCKED: 'EXECUTION_LOCKED',
+  EXECUTION_NOT_FOUND: 'EXECUTION_NOT_FOUND',
+  EXECUTION_NOT_RESUMABLE: 'EXECUTION_NOT_RESUMABLE',
+  EXECUTION_CANCELLED: 'EXECUTION_CANCELLED',
+  ACTIVITY_OUTCOME_UNKNOWN: 'ACTIVITY_OUTCOME_UNKNOWN',
+  APPROVAL_NOT_FOUND: 'APPROVAL_NOT_FOUND',
+  APPROVAL_ALREADY_DECIDED: 'APPROVAL_ALREADY_DECIDED',
 } as const
 
 /** Union of every string constant in `ERR`. Use anywhere you were tempted to
@@ -123,6 +134,8 @@ export const HTTP_ROUTES = {
   MCP: '/mcp',
   OAUTH_PROTECTED_RESOURCE: '/.well-known/oauth-protected-resource',
   OAUTH_PROTECTED_RESOURCE_MCP: '/mcp/.well-known/oauth-protected-resource',
+  /** Code Mode execution inspection + fallback approval decisions (see docs/code-mode-governance.md). */
+  EXECUTIONS: '/executions',
 } as const
 
 /** Default bind address and port for the MCP gateway HTTP transport. */
@@ -180,6 +193,10 @@ export const OUTCOME = {
   PERMISSION_DENIED: 'permission_denied',
   CALL_LIMIT_EXCEEDED: 'call_limit_exceeded',
   CONCURRENT_LIMIT_EXCEEDED: 'concurrent_limit_exceeded',
+  APPROVAL_REQUIRED: 'approval_required',
+  GOVERNANCE_DENIED: 'governance_denied',
+  REPLAY_DIVERGED: 'replay_diverged',
+  EXECUTION_CANCELLED: 'execution_cancelled',
 } as const
 
 export type AuditOutcome = typeof OUTCOME[keyof typeof OUTCOME]
@@ -211,3 +228,88 @@ export const CLIENT_CAPABILITIES_META_KEY = 'io.modelcontextprotocol/clientCapab
 
 /** The single MCP protocol version this gateway speaks (spec §20). */
 export const MCP_PROTOCOL_VERSION = '2026-07-28'
+
+// ── Code Mode governance layer ───────────────────────────────────────────────
+// Vocabulary shared by the execution store, the sandbox bridge, the governance
+// evaluator and the api_execute tool. Kept here (not in the types module) so
+// runtime switch statements and tests reference one spelling.
+
+/**
+ * Harbor's own `_meta` namespace. MCP 2026-07-28 asks third parties to prefix
+ * custom keys with a vendor label (reverse-DNS preferred); the prefix must not
+ * have `mcp` / `modelcontextprotocol` as its second label. `harbor/` is a
+ * placeholder until the project's public name is settled — rename in one place.
+ */
+export const META_PREFIX = 'harbor/'
+/** Response `_meta`: the durable execution id of the Code Mode run. Request `_meta`: resume this execution (non-MRTR clients). */
+export const EXECUTION_ID_META_KEY = `${META_PREFIX}execution-id`
+/** Response `_meta`: execution status after this tool call. */
+export const EXECUTION_STATUS_META_KEY = `${META_PREFIX}execution-status`
+/** Response `_meta`: the approval the execution is waiting on (fallback path). */
+export const APPROVAL_ID_META_KEY = `${META_PREFIX}approval-id`
+
+/** Key of the embedded elicitation inside an `input_required` result. */
+export const APPROVAL_INPUT_KEY = 'approval'
+
+export const EXECUTION_STATUS = {
+  CREATED: 'CREATED',
+  RUNNING: 'RUNNING',
+  WAITING_APPROVAL: 'WAITING_APPROVAL',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  DENIED: 'DENIED',
+  CANCELLED: 'CANCELLED',
+} as const
+export type ExecutionStatus = (typeof EXECUTION_STATUS)[keyof typeof EXECUTION_STATUS]
+
+export const ACTIVITY_STATUS = {
+  /** Governance said REQUIRE_APPROVAL; no human decision yet. */
+  WAITING_APPROVAL: 'WAITING_APPROVAL',
+  /** Approved by a human; the external call has not been made yet. */
+  APPROVED: 'APPROVED',
+  /** External call made and a response (any HTTP status) recorded — replayable. */
+  COMPLETED: 'COMPLETED',
+  /** The transport threw: Harbor does not know whether the API executed. Never replayed, never retried silently. */
+  FAILED: 'FAILED',
+  /** Governance DENY, or a human rejected the approval. */
+  DENIED: 'DENIED',
+  /** A human cancelled the approval. */
+  CANCELLED: 'CANCELLED',
+} as const
+export type ActivityStatus = (typeof ACTIVITY_STATUS)[keyof typeof ACTIVITY_STATUS]
+
+export const GOVERNANCE_DECISION = {
+  ALLOW: 'ALLOW',
+  DENY: 'DENY',
+  REQUIRE_APPROVAL: 'REQUIRE_APPROVAL',
+} as const
+export type GovernanceDecisionType = (typeof GOVERNANCE_DECISION)[keyof typeof GOVERNANCE_DECISION]
+
+/** Precedence among matched rules (higher wins). Documented in docs/code-mode-governance.md. */
+export const GOVERNANCE_PRECEDENCE: Record<GovernanceDecisionType, number> = {
+  [GOVERNANCE_DECISION.DENY]: 3,
+  [GOVERNANCE_DECISION.REQUIRE_APPROVAL]: 2,
+  [GOVERNANCE_DECISION.ALLOW]: 1,
+}
+
+export const APPROVAL_STATUS = {
+  PENDING: 'PENDING',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+  CANCELLED: 'CANCELLED',
+} as const
+export type ApprovalStatus = (typeof APPROVAL_STATUS)[keyof typeof APPROVAL_STATUS]
+
+export const EXECUTION_STORE_TYPE = {
+  IN_MEMORY: 'in-memory',
+  FILE: 'file',
+} as const
+
+/** Reason codes attached to governance decisions and execution failures. */
+export const GOVERNANCE_REASON = {
+  NO_MATCHING_RULE: 'NO_MATCHING_RULE',
+  RULE_MATCHED: 'RULE_MATCHED',
+  EVALUATION_FAILED: 'GOVERNANCE_EVALUATION_FAILED',
+  APPROVAL_REJECTED: 'APPROVAL_REJECTED',
+  APPROVAL_CANCELLED: 'APPROVAL_CANCELLED',
+} as const
