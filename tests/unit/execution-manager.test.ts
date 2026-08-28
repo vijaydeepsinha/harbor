@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Contributors to the Harbor project.
+
+import { describe, it, expect, beforeEach } from 'vitest'
+import { ExecutionManager, buildHistory } from '../../runtime/execution/execution-manager.js'
+import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
+import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, GOVERNANCE_DECISION } from '../../core/constants.js'
+import {
+  ExecutionNotFoundError, ExecutionLockedError, ExecutionNotResumableError
+} from '../../core/types/execution.types.js'
+
+let tick = 0
+const clock = () => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++)).toISOString()
+let ids = 0
+const newId = () => `exec-${++ids}`
+
+describe('ExecutionManager', () => {
+  let store: InMemoryCodeModeStore
+  let manager: ExecutionManager
+  beforeEach(() => {
+    tick = 0; ids = 0
+    store = new InMemoryCodeModeStore()
+    manager = new ExecutionManager(store, clock, newId)
+  })
+
+  it('creates an execution with a durable id and persists the original code', async () => {
+    const rec = await manager.create({ service: 'svc', code: 'async () => 42', userIdHash: 'h' })
+    expect(rec.executionId).toBe('exec-1')
+    expect(rec.status).toBe(EXECUTION_STATUS.CREATED)
+    expect((await manager.load('exec-1')).originalCode).toBe('async () => 42')
+    await expect(manager.load('nope')).rejects.toBeInstanceOf(ExecutionNotFoundError)
+  })
+
+  it('beginRun takes the lock, marks RUNNING and counts runs; a concurrent run is refused', async () => {
+    await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    const running = await manager.beginRun('exec-1')
+    expect(running.status).toBe(EXECUTION_STATUS.RUNNING)
+    expect(running.runCount).toBe(1)
+    await expect(manager.beginRun('exec-1')).rejects.toBeInstanceOf(ExecutionLockedError)
+    await manager.endRun('exec-1', { kind: 'completed', result: { ok: true } })
+    const done = await manager.load('exec-1')
+    expect(done.status).toBe(EXECUTION_STATUS.COMPLETED)
+    expect(done.result).toEqual({ ok: true })
+    // lock released, but a COMPLETED execution is terminal
+    await expect(manager.beginRun('exec-1')).rejects.toBeInstanceOf(ExecutionNotResumableError)
+  })
+
+  it('a paused execution resumes only after its approval has been decided', async () => {
+    await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await manager.beginRun('exec-1')
+    await manager.endRun('exec-1', { kind: 'waitingApproval', approvalId: 'ap-1' })
+    await store.putApproval({
+      approvalId: 'ap-1', executionId: 'exec-1', activitySequence: 3, status: APPROVAL_STATUS.PENDING,
+      summary: { service: 'svc', method: 'POST', specPath: '/x', reason: 'r', matchedRules: [] }, createdAt: clock()
+    })
+    expect((await manager.load('exec-1')).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    await expect(manager.beginRun('exec-1')).rejects.toBeInstanceOf(ExecutionNotResumableError)
+
+    const ap = (await store.getApproval('ap-1'))!
+    await store.putApproval({ ...ap, status: APPROVAL_STATUS.APPROVED, decidedAt: clock() })
+    const resumed = await manager.beginRun('exec-1')
+    expect(resumed.runCount).toBe(2)
+    expect(resumed.status).toBe(EXECUTION_STATUS.RUNNING)
+  })
+
+  it('endRun records terminal reasons for failed / denied / cancelled and releases the lock', async () => {
+    for (const [kind, status] of [
+      ['failed', EXECUTION_STATUS.FAILED], ['denied', EXECUTION_STATUS.DENIED], ['cancelled', EXECUTION_STATUS.CANCELLED]
+    ] as const) {
+      const rec = await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+      await manager.beginRun(rec.executionId)
+      await manager.endRun(rec.executionId, { kind, code: 'X', message: 'why' })
+      const after = await manager.load(rec.executionId)
+      expect(after.status).toBe(status)
+      expect(after.terminalReason).toEqual({ code: 'X', message: 'why' })
+      expect(await store.acquireLock(rec.executionId)).toBe(true)
+      await store.releaseLock(rec.executionId)
+    }
+  })
+
+  it('a RUNNING record whose lock is free (crashed run) can be resumed from its journal', async () => {
+    await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    const rec = await manager.beginRun('exec-1')
+    // simulate a process crash: status stays RUNNING, lock evaporates
+    await store.releaseLock('exec-1')
+    expect(rec.status).toBe(EXECUTION_STATUS.RUNNING)
+    const again = await manager.beginRun('exec-1')
+    expect(again.runCount).toBe(2)
+  })
+
+  it('recordProgress only ever raises the activity high-water mark', async () => {
+    await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await manager.recordProgress('exec-1', 3)
+    await manager.recordProgress('exec-1', 2)
+    expect((await manager.load('exec-1')).currentActivity).toBe(3)
+  })
+
+  it('inspect assembles a chronological history from the records', async () => {
+    const rec = await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    const id = rec.executionId
+    await manager.beginRun(id)
+    await store.putActivity({
+      executionId: id, sequence: 1, service: 'svc', status: ACTIVITY_STATUS.COMPLETED,
+      request: { method: 'GET', rawPath: '/a', specPath: '/a' }, response: { status: 200, ok: true, data: [] },
+      runIndex: 1, createdAt: clock(), updatedAt: clock()
+    })
+    await store.putDecision({
+      executionId: id, activitySequence: 2, decision: GOVERNANCE_DECISION.REQUIRE_APPROVAL, reason: 'RULE_MATCHED',
+      matchedRules: ['big'], ruleVersions: ['big@1#x'], evaluatedAt: clock()
+    })
+    const createdAt = clock()
+    await store.putActivity({
+      executionId: id, sequence: 2, service: 'svc', status: ACTIVITY_STATUS.WAITING_APPROVAL,
+      request: { method: 'POST', rawPath: '/b', specPath: '/b' }, runIndex: 1, createdAt, updatedAt: createdAt, approvalId: 'ap'
+    })
+    await store.putApproval({
+      approvalId: 'ap', executionId: id, activitySequence: 2, status: APPROVAL_STATUS.PENDING,
+      summary: { service: 'svc', method: 'POST', specPath: '/b', reason: 'r', matchedRules: ['big'] }, createdAt: clock()
+    })
+    await manager.endRun(id, { kind: 'waitingApproval', approvalId: 'ap' })
+    const { history } = await manager.inspect(id)
+    const events = history.map(h => `${h.kind}:${h.event}${h.sequence ? '#' + h.sequence : ''}`)
+    expect(events).toEqual([
+      'EXECUTION:CREATED',
+      'ACTIVITY:ENCOUNTERED#1', 'ACTIVITY:COMPLETED#1',
+      'GOVERNANCE:REQUIRE_APPROVAL#2',
+      'ACTIVITY:ENCOUNTERED#2',
+      'APPROVAL:REQUESTED#2',
+      'EXECUTION:WAITING_APPROVAL'
+    ])
+    expect(history.map(h => h.at)).toEqual([...history.map(h => h.at)].sort())
+  })
+
+  it('buildHistory records human decisions and terminal reasons', () => {
+    const base = { executionId: 'e', service: 's', originalCode: 'c', userIdHash: 'h', currentActivity: 1, runCount: 2 }
+    const h = buildHistory(
+      { ...base, status: EXECUTION_STATUS.DENIED, createdAt: 't0', updatedAt: 't9', terminalReason: { code: 'GOVERNANCE_DENIED', message: 'm' } },
+      [], [{
+        approvalId: 'a', executionId: 'e', activitySequence: 1, status: APPROVAL_STATUS.REJECTED, createdAt: 't1', decidedAt: 't2',
+        decidedVia: 'mcp-elicitation', summary: { service: 's', method: 'POST', specPath: '/p', reason: 'r', matchedRules: [] }
+      }], []
+    )
+    expect(h.map(x => x.event)).toEqual(['CREATED', 'REQUESTED', 'REJECTED', 'DENIED'])
+    expect(h[2]?.detail).toBe('mcp-elicitation')
+    expect(h[3]?.detail).toBe('GOVERNANCE_DENIED')
+  })
+})
