@@ -239,3 +239,18 @@ export class ActivityOutcomeUnknownError extends ExecutionError {
     this.name = 'ActivityOutcomeUnknownError'
   }
 }
+
+export class ApprovalNotFoundError extends ExecutionError {
+  constructor(readonly approvalId: string) {
+    super(`Unknown approval ${approvalId}`, ERR.APPROVAL_NOT_FOUND, false)
+    this.name = 'ApprovalNotFoundError'
+  }
+}
+
+/** Approvals are single-use: a second decision on the same approval is refused, never re-applied. */
+export class ApprovalAlreadyDecidedError extends ExecutionError {
+  constructor(readonly approvalId: string, readonly status: ApprovalStatus) {
+    super(`Approval ${approvalId} was already decided (${status})`, ERR.APPROVAL_ALREADY_DECIDED, false)
+    this.name = 'ApprovalAlreadyDecidedError'
+  }
+}
