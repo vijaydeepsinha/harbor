@@ -2,6 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { v4 as uuidv4 } from 'uuid'
+import type { ElicitRequestFormParams } from '@modelcontextprotocol/server'
 import type { CodeModeStore } from '../../spi/execution/execution-store.js'
 import type { ExecutionManager } from './execution-manager.js'
 import {
@@ -27,14 +28,10 @@ export interface ApprovalDecisionResult {
   outcome: 'APPROVED' | 'REJECTED' | 'CANCELLED'
 }
 
-/** Shape of the embedded form elicitation the tool returns inside `input_required`. */
+/** Shape of the embedded form elicitation the tool returns inside `input_required` (the SDK's wire type). */
 export interface ApprovalElicitation {
   message: string
-  requestedSchema: {
-    type: 'object'
-    properties: Record<string, { type: 'boolean' | 'string'; title?: string; description?: string; default?: boolean | string }>
-    required: string[]
-  }
+  requestedSchema: ElicitRequestFormParams['requestedSchema']
 }
 
 /**
@@ -138,10 +135,10 @@ export class ApprovalService {
     return {
       message: lines.join('\n'),
       requestedSchema: {
-        type: 'object',
+        type: 'object' as const,
         properties: {
-          approve: { type: 'boolean', title: 'Approve this operation?', description: 'true executes it; false denies it' },
-          comment: { type: 'string', title: 'Comment', description: 'Optional note kept with the decision' }
+          approve: { type: 'boolean' as const, title: 'Approve this operation?', description: 'true executes it; false denies it' },
+          comment: { type: 'string' as const, title: 'Comment', description: 'Optional note kept with the decision' }
         },
         required: ['approve']
       }

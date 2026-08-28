@@ -12,6 +12,7 @@ import { registerGetSkillDetailsTool } from '../../tools/get-skill-details.tool.
 import { registerSearchCodeTool } from '../../tools/search-code.tool.js'
 import { registerExecuteApiTool } from '../../tools/execute-api.tool.js'
 import { GATEWAY_NAME, GATEWAY_VERSION } from '../../core/constants.js'
+import type { CodeModeRuntime } from '../execution/code-mode-runtime.js'
 
 /** Options accepted by the `McpServer` constructor's second argument. */
 type McpServerOptions = NonNullable<ConstructorParameters<typeof McpServer>[1]>
@@ -32,8 +33,12 @@ type McpServerOptions = NonNullable<ConstructorParameters<typeof McpServer>[1]>
  *   hint stays at the conservative defaults — private scope, no shared caching,
  *   `ttlMs: 0`. No aggressive TTL is invented (§16).
  */
-export function buildMcpServerOptions(): McpServerOptions {
+export function buildMcpServerOptions(codeMode?: CodeModeRuntime): McpServerOptions {
   return {
+    // MRTR requestState integrity: the seam verifies every echoed state
+    // (HMAC, TTL, method binding) before api_execute runs — spec MUST for
+    // state that drives authorization. Absent runtime ⇒ no governance ⇒ no state.
+    ...(codeMode ? { requestState: { verify: (state: string, ctx: McpRequestContextForVerify) => codeMode.requestState.verify(state, ctx) } } : {}),
     capabilities: { tools: {} },
     instructions:
       'Harbor is an MCP gateway to backend services. Workflow: ' +
@@ -49,6 +54,8 @@ export function buildMcpServerOptions(): McpServerOptions {
   }
 }
 
+type McpRequestContextForVerify = Parameters<CodeModeRuntime['requestState']['verify']>[1]
+
 /** Factory signature shared by HTTP (`createMcpHandler`) and stdio (`serveStdio`). */
 export type McpServerFactory = (ctx: McpRequestContext) => McpServer
 
@@ -59,6 +66,8 @@ export interface BuildMcpServerFactoryOptions {
   metrics: MetricsCollector
   /** Fallback token for stdio transport where `ctx.authInfo` is never set. */
   stdioToken?: string
+  /** Code Mode governance layer; absent ⇒ legacy api_execute. */
+  codeMode?: CodeModeRuntime
 }
 
 /**
@@ -66,16 +75,16 @@ export interface BuildMcpServerFactoryOptions {
  * from `ctx.authInfo`; stdio mode falls back to the pre-configured token.
  */
 export function buildMcpServerFactory(opts: BuildMcpServerFactoryOptions): McpServerFactory {
-  const { registry, globalConfig, logger, metrics, stdioToken = '' } = opts
+  const { registry, globalConfig, logger, metrics, stdioToken = '', codeMode } = opts
 
   return (ctx: McpRequestContext) => {
     const clientToken = ctx.authInfo?.token ?? stdioToken
-    const mcpServer = new McpServer({ name: GATEWAY_NAME, version: GATEWAY_VERSION }, buildMcpServerOptions())
+    const mcpServer = new McpServer({ name: GATEWAY_NAME, version: GATEWAY_VERSION }, buildMcpServerOptions(codeMode))
     registerDiscoverServicesTool(mcpServer, registry, logger, metrics)
     registerDiscoverSkillsTool(mcpServer, registry, logger, metrics, clientToken)
     registerGetSkillDetailsTool(mcpServer, registry, logger, metrics, clientToken)
     registerSearchCodeTool(mcpServer, registry, logger, metrics, clientToken)
-    registerExecuteApiTool(mcpServer, registry, globalConfig, logger, metrics, clientToken)
+    registerExecuteApiTool(mcpServer, registry, globalConfig, logger, metrics, clientToken, codeMode)
     return mcpServer
   }
 }

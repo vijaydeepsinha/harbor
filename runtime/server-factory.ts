@@ -10,6 +10,7 @@ import { buildTokenCacheStrategy } from './gateway/strategy-builders.js'
 import { buildServiceResources } from './gateway/service-resources-factory.js'
 import { startHttpGateway } from './http/http-gateway.js'
 import { buildMcpServerFactory } from './http/mcp-server-factory.js'
+import { buildCodeModeRuntime } from './execution/code-mode-runtime.js'
 import { startStdioGateway } from './transport/stdio-gateway.js'
 import { GATEWAY_NAME, STORE_TYPE } from '../core/constants.js'
 import { errorMessage } from '../core/utils/errors.js'
@@ -67,12 +68,16 @@ export async function createMcpGateway(
   const transportMode = globalConfig.mcp.transport
   const stdioPat = globalConfig.mcp.token ?? ''
 
+  // Process-wide Code Mode governance layer: executions outlive requests and isolates.
+  const codeMode = buildCodeModeRuntime(globalConfig.codeMode, gatewayLogger)
+
   const createMcpServer = buildMcpServerFactory({
     registry,
     globalConfig,
     logger: gatewayLogger,
     metrics: gatewayMetrics,
-    stdioToken: transportMode === 'stdio' ? stdioPat : undefined
+    stdioToken: transportMode === 'stdio' ? stdioPat : undefined,
+    codeMode
   })
 
   // Shared shutdown tail. Both transports must tear down cache, registry,

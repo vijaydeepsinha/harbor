@@ -25,6 +25,8 @@ export interface AuditRecord {
   outcome: AuditOutcome
   errorType?: string
   errorCode?: string
+  /** Durable Code Mode execution this call belonged to (absent on the legacy, store-less path). */
+  executionId?: string
 }
 
 /**

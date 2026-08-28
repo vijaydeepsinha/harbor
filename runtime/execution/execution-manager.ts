@@ -19,6 +19,7 @@ import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS } from '../../core/c
 export type RunOutcome =
   | { kind: 'completed'; result: unknown }
   | { kind: 'waitingApproval'; approvalId: string }
+  | { kind: 'interrupted'; code: string; message: string }
   | { kind: 'failed'; code: string; message: string }
   | { kind: 'denied'; code: string; message: string }
   | { kind: 'cancelled'; code: string; message: string }
@@ -119,6 +120,10 @@ export class ExecutionManager {
         case 'waitingApproval':
           record.status = EXECUTION_STATUS.WAITING_APPROVAL
           record.pendingApprovalId = outcome.approvalId
+          break
+        case 'interrupted':
+          record.status = EXECUTION_STATUS.INTERRUPTED
+          record.terminalReason = { code: outcome.code, message: outcome.message }
           break
         case 'failed':
           record.status = EXECUTION_STATUS.FAILED

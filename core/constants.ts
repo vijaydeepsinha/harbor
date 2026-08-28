@@ -255,6 +255,8 @@ export const EXECUTION_STATUS = {
   CREATED: 'CREATED',
   RUNNING: 'RUNNING',
   WAITING_APPROVAL: 'WAITING_APPROVAL',
+  /** A run ended on a retryable error (circuit open, timeout, transport) before completing; resumable. */
+  INTERRUPTED: 'INTERRUPTED',
   COMPLETED: 'COMPLETED',
   FAILED: 'FAILED',
   DENIED: 'DENIED',
