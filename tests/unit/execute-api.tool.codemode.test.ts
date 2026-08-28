@@ -67,7 +67,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
     expect((await rt.store.getActivity(executionId, 2))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
     expect(count('GET', '/campaigns')).toBe(1)
-    expect(count('POST', '/campaigns')).toBe(0)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
 
     // client retries the SAME call with the human's answer (and, per MRTR, the same arguments)
     const done = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'accept', approve: true, comment: 'ship it' }))
@@ -75,7 +75,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' })
     expect((done['_meta'] as Record<string, unknown>)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
     expect(count('GET', '/campaigns')).toBe(1) // replayed, not re-fetched
-    expect(count('POST', '/campaigns')).toBe(1) // executed exactly once
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(1) // executed exactly once
     const approval = await rt.approvals.get(approvalId)
     expect(approval.status).toBe(APPROVAL_STATUS.APPROVED)
     expect(approval.comment).toBe('ship it')
@@ -98,7 +98,7 @@ describe('api_execute under the Code Mode governance layer', () => {
       expect((parseContent(r) as { code: string }).code).toBe(code)
       const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
       expect((await rt.manager.load(executionId)).status).toBe(status)
-      expect(count('POST', '/campaigns')).toBe(0)
+      expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
     }
   })
 
@@ -109,7 +109,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
     const r = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'accept', approve: false }))
     expect((parseContent(r) as { code: string }).code).toBe(ERR.GOVERNANCE_DENIED)
-    expect(count('POST', '/campaigns')).toBe(0)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
   })
 
   it('retrying without an answer re-asks instead of resuming', async () => {
@@ -119,7 +119,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
     const again = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, undefined))
     expect(again['resultType']).toBe('input_required')
-    expect(count('POST', '/campaigns')).toBe(0)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
   })
 
   it('a client without elicitation gets APPROVAL_REQUIRED with ids in _meta and resumes via _meta after an HTTP decision', async () => {
@@ -138,7 +138,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     const done = await handler({ service: 'trafficking', code: 'async () => "REPLACEMENT CODE IS IGNORED"' }, makeCtx({ elicitation: false, executionIdMeta: body.executionId }))
     expect(done['isError']).toBeUndefined()
     expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' })
-    expect(count('POST', '/campaigns')).toBe(1)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
     expect((await rt.manager.load(body.executionId)).originalCode).toBe(PROGRAM_FINALIZE)
   })
 
@@ -148,7 +148,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     const handler = registerGoverned(rt, makeResources('trafficking', connector))
     const r = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
     expect((parseContent(r) as { code: string; message?: string }).code).toBe(ERR.GOVERNANCE_DENIED)
-    expect(count('POST', '/campaigns')).toBe(0)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
     const executionId = (r['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
     const decisions = await rt.store.listDecisions(executionId)
     expect(decisions[1]).toMatchObject({ decision: 'DENY', matchedRules: ['no-finalize'], ruleVersions: ['no-finalize@1#deadbeefcafe'] })

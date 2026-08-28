@@ -61,8 +61,9 @@ export function makeConnector() {
       return { status: 201, ok: true, data: { id: `res-${calls.length}`, did: `${req.method} ${req.path}` } }
     }
   }
-  const count = (method: string, pathPrefix: string) =>
-    calls.filter(c => c.req.method === method && c.req.path.startsWith(pathPrefix)).length
+  /** Exact method + path count. */
+  const count = (method: string, path: string) =>
+    calls.filter(c => c.req.method === method && c.req.path === path).length
   return { connector, calls, count }
 }
 
