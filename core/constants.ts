@@ -265,6 +265,8 @@ export type ExecutionStatus = (typeof EXECUTION_STATUS)[keyof typeof EXECUTION_S
 export const ACTIVITY_STATUS = {
   /** Governance said REQUIRE_APPROVAL; no human decision yet. */
   WAITING_APPROVAL: 'WAITING_APPROVAL',
+  /** The external call is in flight. Found on resume ⇒ the process died mid-call: safe methods re-execute, others fail closed. */
+  EXECUTING: 'EXECUTING',
   /** Approved by a human; the external call has not been made yet. */
   APPROVED: 'APPROVED',
   /** External call made and a response (any HTTP status) recorded — replayable. */
