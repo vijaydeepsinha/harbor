@@ -74,7 +74,10 @@
                 "health"
               ]
             },
-            "description": "Basic liveness check \u2014 no auth required."
+            "description": "Basic liveness check \u2014 no auth required.",
+            "auth": {
+              "type": "noauth"
+            }
           },
           "response": [],
           "event": [
@@ -136,6 +139,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -200,6 +206,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -221,7 +230,10 @@
           ]
         }
       ],
-      "description": "No auth-strategy-specific setup needed \u2014 works against Harbor started any way (static-token demo or OAuth mode)."
+      "description": "No auth-strategy-specific setup needed \u2014 works against Harbor started any way (static-token demo or OAuth mode).",
+      "auth": {
+        "type": "noauth"
+      }
     },
     {
       "name": "Auth \u2014 static-token (product/order/tasks)",
@@ -274,6 +286,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -341,6 +356,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -387,6 +405,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -446,6 +467,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -464,7 +488,10 @@
           ]
         }
       ],
-      "description": "Prerequisite: `bash examples/demo/start.sh` \u2014 starts Harbor with product/order/tasks enabled (default demo mode)."
+      "description": "Prerequisite: `bash examples/demo/start.sh` \u2014 starts Harbor with product/order/tasks enabled (default demo mode).",
+      "auth": {
+        "type": "noauth"
+      }
     },
     {
       "name": "Auth \u2014 oauth-2.1 (billing)",
@@ -639,6 +666,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -706,6 +736,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -772,6 +805,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -819,6 +855,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -836,7 +875,10 @@
           ]
         }
       ],
-      "description": "Prerequisites: docker compose -f examples/07-oauth/docker-compose.yml up -d; enable services/billing (enabled:true) and disable product/order/tasks; run node examples/demo/billing-service.js; start Harbor with HARBOR_RESOURCE_URI=http://127.0.0.1:3333 and HARBOR_AUTH_SERVERS=http://localhost:8080/default. See tests/demo_e2e.py's _switch_to_oauth_mode()/_start_harbor_oauth() for the exact automated sequence."
+      "description": "Prerequisites: docker compose -f examples/07-oauth/docker-compose.yml up -d; enable services/billing (enabled:true) and disable product/order/tasks; run node examples/demo/billing-service.js; start Harbor with HARBOR_RESOURCE_URI=http://127.0.0.1:3333 and HARBOR_AUTH_SERVERS=http://localhost:8080/default. See tests/demo_e2e.py's _switch_to_oauth_mode()/_start_harbor_oauth() for the exact automated sequence.",
+      "auth": {
+        "type": "noauth"
+      }
     },
     {
       "name": "Auth \u2014 jwt-validation (billing-jwt)",
@@ -1011,6 +1053,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -1078,6 +1123,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -1144,6 +1192,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -1191,6 +1242,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -1208,7 +1262,10 @@
           ]
         }
       ],
-      "description": "Same prerequisites as the oauth-2.1 folder, plus services/billing-jwt enabled:true. This strategy verifies the JWT locally against the same mock AS's JWKS directly (jwksUri configured explicitly, no RFC 8414 discovery) \u2014 same confused-deputy protection, different code path."
+      "description": "Same prerequisites as the oauth-2.1 folder, plus services/billing-jwt enabled:true. This strategy verifies the JWT locally against the same mock AS's JWKS directly (jwksUri configured explicitly, no RFC 8414 discovery) \u2014 same confused-deputy protection, different code path.",
+      "auth": {
+        "type": "noauth"
+      }
     },
     {
       "name": "Auth \u2014 oauth-introspection (billing-introspection)",
@@ -1260,6 +1317,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -1327,6 +1387,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -1393,6 +1456,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -1459,6 +1525,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -1505,6 +1574,9 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "noauth"
             }
           },
           "response": [],
@@ -1522,7 +1594,13 @@
           ]
         }
       ],
-      "description": "Prerequisites: services/billing-introspection enabled:true; run node examples/demo/mock-introspection-server.js (port 3008); billing-service.js running (port 3004). Uses fixed test-fixture bearer tokens (not real JWTs) \u2014 see examples/demo/mock-introspection-server.js for the token \u2192 introspection-response mapping."
+      "description": "Prerequisites: services/billing-introspection enabled:true; run node examples/demo/mock-introspection-server.js (port 3008); billing-service.js running (port 3004). Uses fixed test-fixture bearer tokens (not real JWTs) \u2014 see examples/demo/mock-introspection-server.js for the token \u2192 introspection-response mapping.",
+      "auth": {
+        "type": "noauth"
+      }
     }
-  ]
+  ],
+  "auth": {
+    "type": "noauth"
+  }
 }
