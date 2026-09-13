@@ -1,0 +1,38 @@
+{
+  "description": "Billing service (jwt-validation variant) — same backend as `billing`, protected by Harbor's jwt-validation auth strategy instead of oauth-2.1. Enable to test jwt-validation end-to-end; disable to use the static-token demo services.",
+  "api": {
+    "protocol": "http",
+    "host": "localhost",
+    "port": 3004,
+    "basePath": "",
+    "requestTimeoutMs": 10000,
+    "maxRetries": 1
+  },
+  "enabled": false,
+  "auth": {
+    "type": "jwt-validation",
+    "jwksUri": "http://localhost:8080/default/jwks",
+    "issuer": "http://localhost:8080/default",
+    "audience": "http://localhost:3333",
+    "clockToleranceSec": 30,
+    "metadataMapping": {
+      "userId": "sub",
+      "clientId": "client_id"
+    }
+  },
+  "spec": {
+    "source": "file"
+  },
+  "serviceRefreshIntervalMs": 0,
+  "circuitBreaker": {
+    "type": "noop"
+  },
+  "idempotency": {
+    "type": "noop"
+  },
+  "sandbox": {
+    "executeTimeoutMs": 10000,
+    "maxApiCalls": 20,
+    "maxConcurrentCalls": 3
+  }
+}

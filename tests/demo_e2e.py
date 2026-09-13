@@ -63,11 +63,26 @@ MCP_PROTOCOL  = "2026-07-28"
 MCP_META_PROTOCOL   = "io.modelcontextprotocol/protocolVersion"
 MCP_META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
 MCP_META_CLIENT_CAPS = "io.modelcontextprotocol/clientCapabilities"
+MCP_META_SERVER_INFO = "io.modelcontextprotocol/serverInfo"
 SERVICE_STARTUP_WAIT_S = 1
 
 OAUTH_AS_BASE      = "http://localhost:8080/default"
 OAUTH_CLIENT_ID    = "harbor-test-client"
 OAUTH_CLIENT_SECRET = "test-secret"
+
+# jwt-validation and oauth-introspection both reuse the billing backend
+# (:3004) with a different Harbor-side service config — same upstream data,
+# different auth strategy under test.
+JWT_VALIDATION_SERVICE  = "billing-jwt"
+INTROSPECTION_SERVICE   = "billing-introspection"
+INTROSPECTION_PORT      = 3008
+
+# Fixed test fixtures known to examples/demo/mock-introspection-server.js.
+# All >=32 chars so Harbor's bearer-format pre-check lets them through to the
+# introspection strategy itself (see spi/auth/bearer-authorization.ts).
+INTROSPECT_TOKEN_VALID      = "introspection-valid-token-abc123"
+INTROSPECT_TOKEN_WRONG_AUD  = "introspection-wrong-aud-token-xyz789"
+INTROSPECT_TOKEN_REVOKED    = "introspection-revoked-token-00000000"
 
 ROOT         = Path(__file__).parent.parent
 COMPOSE_FILE = ROOT / "examples" / "07-oauth" / "docker-compose.yml"
@@ -91,6 +106,7 @@ def section(title): print(f"\n{BOLD}{CYAN}── {title}{RESET}")
 _procs: list[subprocess.Popen] = []
 _oauth_harbor_proc: Optional[subprocess.Popen] = None
 _billing_proc: Optional[subprocess.Popen] = None
+_introspection_proc: Optional[subprocess.Popen] = None
 
 def _find_node() -> str:
     for candidate in [
@@ -220,16 +236,18 @@ def _set_service_enabled(name: str, enabled: bool):
     cfg_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
 
 def _switch_to_oauth_mode():
-    _set_service_enabled("billing", True)
+    for svc in ("billing", JWT_VALIDATION_SERVICE, INTROSPECTION_SERVICE):
+        _set_service_enabled(svc, True)
     for svc in ("product", "order", "tasks"):
         _set_service_enabled(svc, False)
-    info("Service mode: billing=enabled, product/order/tasks=disabled")
+    info("Service mode: billing/billing-jwt/billing-introspection=enabled, product/order/tasks=disabled")
 
 def _switch_to_token_mode():
-    _set_service_enabled("billing", False)
+    for svc in ("billing", JWT_VALIDATION_SERVICE, INTROSPECTION_SERVICE):
+        _set_service_enabled(svc, False)
     for svc in ("product", "order", "tasks"):
         _set_service_enabled(svc, True)
-    info("Service mode restored: product/order/tasks=enabled, billing=disabled")
+    info("Service mode restored: product/order/tasks=enabled, billing/billing-jwt/billing-introspection=disabled")
 
 def _start_harbor_oauth(oauth_env: dict):
     global _oauth_harbor_proc
@@ -321,6 +339,46 @@ def _stop_billing_backend():
             pass
     _billing_proc = None
     info("billing backend stopped")
+
+def _start_introspection_server():
+    """Start the mock RFC 7662 introspection server (:3008) for oauth-introspection."""
+    global _introspection_proc
+    node = _find_node()
+    script = ROOT / "examples" / "demo" / "mock-introspection-server.js"
+    _introspection_proc = subprocess.Popen(
+        [node, str(script)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={**os.environ, "NODE_PATH": str(ROOT / "node_modules")},
+        cwd=str(ROOT),
+        start_new_session=True,
+    )
+    info(f"Started mock-introspection-server.js (pid {_introspection_proc.pid})")
+    for _ in range(20):
+        try:
+            urllib.request.urlopen(f"http://localhost:{INTROSPECTION_PORT}/introspect?token=x", timeout=1)
+            return
+        except Exception:
+            time.sleep(0.5)
+    raise RuntimeError(f"mock introspection server (:{INTROSPECTION_PORT}) did not become ready")
+
+def _stop_introspection_server():
+    global _introspection_proc
+    if _introspection_proc is None:
+        return
+    try:
+        os.killpg(os.getpgid(_introspection_proc.pid), signal.SIGTERM)
+    except Exception:
+        pass
+    try:
+        _introspection_proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(_introspection_proc.pid), signal.SIGKILL)
+        except Exception:
+            pass
+    _introspection_proc = None
+    info("mock introspection server stopped")
 
 def _get_real_jwt() -> str:
     data = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode()
@@ -491,7 +549,9 @@ def mcp_init() -> bool:
     if "error" in resp:
         print(f"{RED}server/discover failed: {resp['error']}{RESET}")
         return False
-    server_info = resp.get("result", {}).get("serverInfo", {})
+    # Final 2026-07-28 revision: serverInfo lives in the result `_meta`, not
+    # the result body (SDK v2 beta.5+ / GA — see MCP_META_* constants below).
+    server_info = resp.get("result", {}).get("_meta", {}).get(MCP_META_SERVER_INFO, {})
     return server_info.get("name") == "harbor"
 
 def call_tool(name: str, args: dict, req_id: int) -> dict:
@@ -871,7 +931,7 @@ def test_docker_oauth(resource_uri: str):
     assert_true("result" in discover_resp,
                 f"server/discover with real JWT → result present  {discover_resp.get('_error', '')}")
     assert_eq(
-        discover_resp.get("result", {}).get("serverInfo", {}).get("name"),
+        discover_resp.get("result", {}).get("_meta", {}).get(MCP_META_SERVER_INFO, {}).get("name"),
         "harbor",
         "server/discover → serverInfo.name = harbor",
     )
@@ -911,6 +971,18 @@ def test_docker_oauth(resource_uri: str):
         inv_ids = [i.get("id") for i in invoices]
         assert_in("inv-001", inv_ids, "live billing backend returned inv-001")
 
+    # (a2) A second, distinct authenticated tool call with the SAME token —
+    #      confirms auth success isn't a one-off fluke and the token is
+    #      genuinely usable for repeat calls, not just the first one.
+    DETAIL_CODE = ('async () => { const r = await api.request({ method: "GET", '
+                   'path: "/invoices/inv-001" }); return r.data; }')
+    detail = api_exec_jwt("billing", DETAIL_CODE, 602, jwt)
+    assert_true(not detail["is_error"],
+                f"second call — api_execute(billing) GET /invoices/inv-001 → success  "
+                f"{(detail['parsed'] or {}).get('error', '')}")
+    assert_eq((detail["parsed"] or {}).get("id"), "inv-001",
+              "second call → correct invoice detail returned")
+
     # (b) Wrong-aud JWT (same AS, same signature, aud = not-harbor) → resource
     #     binding REJECTS. Confused-deputy / token pass-through must fail closed.
     try:
@@ -930,6 +1002,122 @@ def test_docker_oauth(resource_uri: str):
         code = bad_parsed.get("code", "")
         assert_eq(code, "TOKEN_INVALID",
                   "wrong-aud rejection carries the deterministic TOKEN_INVALID code")
+
+def test_jwt_validation():
+    """jwt-validation strategy, live: local JWT verification against the same
+    Docker mock AS's JWKS (no discovery — jwksUri/issuer/audience configured
+    directly). Same confused-deputy protection as oauth-2.1, exercised via a
+    separate Harbor service (`billing-jwt`) pointed at the same billing
+    backend so only the auth strategy under test differs."""
+    section("jwt-validation — real JWT, direct JWKS (billing-jwt)")
+
+    CODE = ('async () => { const r = await api.request({ method: "GET", '
+            'path: "/invoices" }); return r.data; }')
+
+    try:
+        jwt = _get_real_jwt()
+    except Exception as e:
+        assert_true(False, f"JWT acquired from mock AS  →  {e}")
+        return
+
+    # (a) Correct-aud JWT → jwt-validation accepts it, backend reached.
+    good = api_exec_jwt(JWT_VALIDATION_SERVICE, CODE, 610, jwt)
+    assert_true(not good["is_error"],
+                f"api_execute({JWT_VALIDATION_SERVICE}) with correct-aud JWT → success  "
+                f"{(good['parsed'] or {}).get('error', '')}")
+    invoices = (good["parsed"] or {}).get("invoices", [])
+    assert_true(len(invoices) > 0,
+                f"correct-aud JWT → {len(invoices)} invoices returned from live backend")
+
+    # (a2) A second, distinct authenticated tool call with the SAME token —
+    #      confirms the auth pass isn't a one-off fluke.
+    DETAIL_CODE = ('async () => { const r = await api.request({ method: "GET", '
+                   'path: "/invoices/inv-001" }); return r.data; }')
+    detail = api_exec_jwt(JWT_VALIDATION_SERVICE, DETAIL_CODE, 612, jwt)
+    assert_true(not detail["is_error"],
+                f"second call — api_execute({JWT_VALIDATION_SERVICE}) GET /invoices/inv-001 → success  "
+                f"{(detail['parsed'] or {}).get('error', '')}")
+    assert_eq((detail["parsed"] or {}).get("id"), "inv-001",
+              "second call → correct invoice detail returned")
+
+    # (b) Wrong-aud JWT (same AS, same signature, different aud) → rejected.
+    try:
+        wrong_jwt = _get_jwt_wrong_aud()
+    except Exception as e:
+        assert_true(False, f"wrong-aud JWT acquired from mock AS  →  {e}")
+        wrong_jwt = None
+
+    if wrong_jwt:
+        bad = api_exec_jwt(JWT_VALIDATION_SERVICE, CODE, 611, wrong_jwt)
+        assert_true(bad["is_error"],
+                    f"api_execute({JWT_VALIDATION_SERVICE}) with wrong-aud JWT → rejected (isError)")
+        bad_parsed = bad["parsed"] or {}
+        assert_true("invoices" not in bad_parsed,
+                    "wrong-aud JWT → NO invoice data leaked")
+        assert_eq(bad_parsed.get("code", ""), "TOKEN_INVALID",
+                  "wrong-aud rejection carries the deterministic TOKEN_INVALID code")
+
+    # (c) No token → 401 before the strategy (or the backend) is ever reached.
+    status, _ = _post_with_bearer("/mcp", "")
+    # An empty bearer is sent as `Authorization: Bearer `, which the parser
+    # treats as a missing/malformed credential — same 401 path as no header.
+    assert_true(status in (400, 401), f"empty bearer rejected before dispatch (status {status})")
+
+def test_oauth_introspection():
+    """oauth-introspection strategy, live: Harbor calls a real HTTP
+    introspection endpoint (examples/demo/mock-introspection-server.js) for
+    every request — no JWT parsing/JWKS involved at all. Exercises the
+    best-effort (not fail-closed) resource-binding check documented on
+    `OAuthIntrospectionConfig.audience` (RFC 7662 §2.2 makes `aud` optional
+    in a real introspection response)."""
+    section("oauth-introspection — real HTTP introspection call (billing-introspection)")
+
+    CODE = ('async () => { const r = await api.request({ method: "GET", '
+            'path: "/invoices" }); return r.data; }')
+
+    # (a) Valid, correct-audience token → introspection returns active+matching
+    #     aud, backend reached.
+    good = api_exec_jwt(INTROSPECTION_SERVICE, CODE, 620, INTROSPECT_TOKEN_VALID)
+    assert_true(not good["is_error"],
+                f"api_execute({INTROSPECTION_SERVICE}) with valid token → success  "
+                f"{(good['parsed'] or {}).get('error', '')}")
+    invoices = (good["parsed"] or {}).get("invoices", [])
+    assert_true(len(invoices) > 0,
+                f"valid token → {len(invoices)} invoices returned from live backend")
+
+    # (a2) A second, distinct authenticated tool call with the SAME token —
+    #      confirms the auth pass isn't a one-off fluke.
+    DETAIL_CODE = ('async () => { const r = await api.request({ method: "GET", '
+                   'path: "/invoices/inv-001" }); return r.data; }')
+    detail = api_exec_jwt(INTROSPECTION_SERVICE, DETAIL_CODE, 623, INTROSPECT_TOKEN_VALID)
+    assert_true(not detail["is_error"],
+                f"second call — api_execute({INTROSPECTION_SERVICE}) GET /invoices/inv-001 → success  "
+                f"{(detail['parsed'] or {}).get('error', '')}")
+    assert_eq((detail["parsed"] or {}).get("id"), "inv-001",
+              "second call → correct invoice detail returned")
+
+    # (b) Introspection-active token, but wrong `aud` in the response → the
+    #     best-effort resource-binding check rejects it.
+    wrong_aud = api_exec_jwt(INTROSPECTION_SERVICE, CODE, 621, INTROSPECT_TOKEN_WRONG_AUD)
+    assert_true(wrong_aud["is_error"],
+                f"api_execute({INTROSPECTION_SERVICE}) with wrong-aud token → rejected (isError)")
+    wrong_aud_parsed = wrong_aud["parsed"] or {}
+    assert_true("invoices" not in wrong_aud_parsed,
+                "wrong-aud token → NO invoice data leaked")
+    assert_eq(wrong_aud_parsed.get("code", ""), "TOKEN_INVALID",
+              "wrong-aud rejection carries the deterministic TOKEN_INVALID code")
+
+    # (c) Revoked/unknown token → introspection returns `{active: false}`
+    #     (no expires_in) → rejected.
+    revoked = api_exec_jwt(INTROSPECTION_SERVICE, CODE, 622, INTROSPECT_TOKEN_REVOKED)
+    assert_true(revoked["is_error"],
+                f"api_execute({INTROSPECTION_SERVICE}) with revoked token → rejected (isError)")
+    assert_true("invoices" not in (revoked["parsed"] or {}),
+                "revoked token → NO invoice data leaked")
+
+    # (d) No token → 401 before introspection is ever called.
+    status, _ = _post_no_token("/mcp")
+    assert_eq(status, 401, "POST /mcp without token → 401 (introspection never called)")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -1006,15 +1194,19 @@ def main():
             _docker_oauth_up()
             try:
                 _start_billing_backend()
+                _start_introspection_server()
                 _start_harbor_oauth({
                     "HARBOR_RESOURCE_URI":    args.oauth_resource_uri,
                     "HARBOR_AUTH_SERVERS":    OAUTH_AS_BASE,
                     "HARBOR_SCOPES_SUPPORTED": "api:read,api:write",
                 })
                 test_docker_oauth(args.oauth_resource_uri)
+                test_jwt_validation()
+                test_oauth_introspection()
             finally:
                 _stop_harbor_oauth()
                 _stop_billing_backend()
+                _stop_introspection_server()
                 _docker_oauth_down()
                 _switch_to_token_mode()
                 info("Phase-2 cleanup complete")
