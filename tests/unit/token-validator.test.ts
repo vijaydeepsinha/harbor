@@ -97,4 +97,59 @@ describe('OAuthIntrospectionStrategy', () => {
     const allLogCalls = logSpy.mock.calls.flat().join(' ')
     expect(allLogCalls).not.toContain('super-secret-raw-token-value')
   })
+
+  describe('resource binding (spec §17, RFC 8707) — best-effort, RFC 7662 `aud` is optional', () => {
+    it('no audience configured → aud claim in response is ignored', async () => {
+      vi.mocked(axios.post).mockResolvedValueOnce({
+        status: 200,
+        data: { access_token: 'abc', expires_in: 3600, aud: 'https://not-harbor.example.com' }
+      })
+
+      const result = await strategy.validate('token')
+      expect(result.access_token).toBe('abc')
+    })
+
+    it('audience configured, response has no aud claim → validation skipped (accepted)', async () => {
+      const s = new OAuthIntrospectionStrategy({ ...config, audience: 'https://harbor.example.com' })
+      vi.mocked(axios.post).mockResolvedValueOnce({
+        status: 200,
+        data: { access_token: 'abc', expires_in: 3600 }
+      })
+
+      const result = await s.validate('token')
+      expect(result.access_token).toBe('abc')
+    })
+
+    it('audience configured, response aud matches (string) → accepted', async () => {
+      const s = new OAuthIntrospectionStrategy({ ...config, audience: 'https://harbor.example.com' })
+      vi.mocked(axios.post).mockResolvedValueOnce({
+        status: 200,
+        data: { access_token: 'abc', expires_in: 3600, aud: 'https://harbor.example.com' }
+      })
+
+      const result = await s.validate('token')
+      expect(result.access_token).toBe('abc')
+    })
+
+    it('audience configured, response aud matches (array) → accepted', async () => {
+      const s = new OAuthIntrospectionStrategy({ ...config, audience: 'https://harbor.example.com' })
+      vi.mocked(axios.post).mockResolvedValueOnce({
+        status: 200,
+        data: { access_token: 'abc', expires_in: 3600, aud: ['https://other.example.com', 'https://harbor.example.com'] }
+      })
+
+      const result = await s.validate('token')
+      expect(result.access_token).toBe('abc')
+    })
+
+    it('audience configured, response aud mismatches → TokenInvalidError (rejected)', async () => {
+      const s = new OAuthIntrospectionStrategy({ ...config, audience: 'https://harbor.example.com' })
+      vi.mocked(axios.post).mockResolvedValueOnce({
+        status: 200,
+        data: { access_token: 'abc', expires_in: 3600, aud: 'https://not-harbor.example.com' }
+      })
+
+      await expect(s.validate('token')).rejects.toThrow(TokenInvalidError)
+    })
+  })
 })

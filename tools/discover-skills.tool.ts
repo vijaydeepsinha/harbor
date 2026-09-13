@@ -2,7 +2,6 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { McpServer } from '@modelcontextprotocol/server'
-import { z } from 'zod'
 import type { ServiceRegistry } from '../runtime/registry/service-registry.js'
 import type { Logger } from '../runtime/observability/logger.js'
 import type { MetricsCollector } from '../core/types/metrics.types.js'
@@ -11,7 +10,8 @@ import {
   extractCorrelationId,
   resolveService,
   isToolError,
-  runSandboxTool
+  runSandboxTool,
+  serviceCodeSchema
 } from './tool-helpers.js'
 import { TOOL, LOG_PREFIX } from '../core/constants.js'
 
@@ -71,7 +71,7 @@ After finding the relevant skill, use get_skill_details() to read the full SOP.`
 
   server.registerTool(
     TOOL.DISCOVER_SKILLS,
-    { description: DESCRIPTION, inputSchema: z.object({ service: z.string(), code: z.string() }) },
+    { description: DESCRIPTION, inputSchema: serviceCodeSchema },
     async ({ service, code }, ctx) => {
       const correlationId = extractCorrelationId(ctx)
 

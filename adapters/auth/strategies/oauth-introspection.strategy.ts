@@ -43,6 +43,22 @@ export interface OAuthIntrospectionConfig {
   tokenRefreshBufferSec?: number
   responseMapping?: ResponseMapping
   metadataMapping?: MetadataMapping
+  /**
+   * Canonical resource identifier this gateway accepts tokens for (RFC 8707
+   * resource indicator). OPTIONAL, unlike the `oauth-2.1`/`jwt-validation`
+   * strategies' `audience`, because RFC 7662 introspection responses do not
+   * universally carry an audience-equivalent claim — support here is
+   * best-effort and AS-dependent.
+   *
+   * When set, this is matched against the introspection response's `aud`
+   * claim (RFC 7662 §2.2 lists `aud` as an optional response member; string
+   * or string-array values are both accepted). If the AS's introspection
+   * response omits `aud` entirely, validation is skipped (cannot verify what
+   * isn't present) — configuring this field narrows, but does not eliminate,
+   * the confused-deputy exposure for ASes that omit `aud` from introspection
+   * responses. If `aud` IS present and does not match, the token is rejected.
+   */
+  audience?: string
 }
 
 export class OAuthIntrospectionStrategy implements AuthStrategy {
@@ -55,6 +71,7 @@ export class OAuthIntrospectionStrategy implements AuthStrategy {
   private readonly tokenParamName: string
   private readonly responseMapping: ResponseMapping
   private readonly metadataMapping: MetadataMapping
+  private readonly audience?: string
 
   constructor(private readonly config: OAuthIntrospectionConfig) {
     const scheme = config.protocol ?? 'http'
@@ -68,6 +85,7 @@ export class OAuthIntrospectionStrategy implements AuthStrategy {
     this.tokenRefreshBufferSec = config.tokenRefreshBufferSec ?? 300
     this.responseMapping = config.responseMapping ?? {}
     this.metadataMapping = config.metadataMapping ?? {}
+    this.audience = config.audience && config.audience.trim() !== '' ? config.audience : undefined
 
     if (config.refreshPath) {
       this.refreshUrl = joinUrl(origin, config.refreshPath)
@@ -185,6 +203,21 @@ export class OAuthIntrospectionStrategy implements AuthStrategy {
     const expiresIn = Number(resolve(this.responseMapping.expires_in, 'expiresIn', 'expires_in'))
     if (!Number.isFinite(expiresIn) || expiresIn <= 0) {
       throw new TokenExpiredError('expires_in <= 0 or invalid in auth response')
+    }
+
+    // Resource binding (RFC 8707 / MCP 2026-07-28 §17), best-effort: only
+    // checked when `audience` is configured AND the introspection response
+    // actually carries an `aud` claim (RFC 7662 §2.2 — `aud` is an optional
+    // response member, so many ASes omit it; we cannot fail closed on
+    // absence the way the JWT-based strategies do on a missing config value).
+    if (this.audience !== undefined) {
+      const rawAud = body['aud']
+      if (rawAud !== undefined) {
+        const audValues = Array.isArray(rawAud) ? rawAud : [rawAud]
+        if (!audValues.includes(this.audience)) {
+          throw new TokenInvalidError('resource binding: aud mismatch')
+        }
+      }
     }
 
     const accessToken = (resolve(this.responseMapping.access_token, 'token', 'access_token') ?? rawToken) as string

@@ -11,7 +11,8 @@ import { registerDiscoverSkillsTool } from '../../tools/discover-skills.tool.js'
 import { registerGetSkillDetailsTool } from '../../tools/get-skill-details.tool.js'
 import { registerSearchCodeTool } from '../../tools/search-code.tool.js'
 import { registerExecuteApiTool } from '../../tools/execute-api.tool.js'
-import { GATEWAY_NAME, GATEWAY_VERSION } from '../../core/constants.js'
+import { GATEWAY_NAME, GATEWAY_VERSION, TOOL } from '../../core/constants.js'
+import { errorMessage } from '../../core/utils/errors.js'
 
 /** Options accepted by the `McpServer` constructor's second argument. */
 type McpServerOptions = NonNullable<ConstructorParameters<typeof McpServer>[1]>
@@ -49,8 +50,13 @@ export function buildMcpServerOptions(): McpServerOptions {
   }
 }
 
-/** Factory signature shared by HTTP (`createMcpHandler`) and stdio (`serveStdio`). */
-export type McpServerFactory = (ctx: McpRequestContext) => McpServer
+/**
+ * Factory signature shared by HTTP (`createMcpHandler`) and stdio
+ * (`serveStdio`). Named distinctly from the SDK's own exported
+ * `McpServerFactory` type (narrower here — synchronous, no `Promise` return)
+ * to avoid ambiguity between the two similarly-named types.
+ */
+export type GatewayMcpServerFactory = (ctx: McpRequestContext) => McpServer
 
 export interface BuildMcpServerFactoryOptions {
   registry: ServiceRegistry
@@ -65,17 +71,33 @@ export interface BuildMcpServerFactoryOptions {
  * Builds a per-request MCP server factory. HTTP mode reads the validated bearer
  * from `ctx.authInfo`; stdio mode falls back to the pre-configured token.
  */
-export function buildMcpServerFactory(opts: BuildMcpServerFactoryOptions): McpServerFactory {
+export function buildMcpServerFactory(opts: BuildMcpServerFactoryOptions): GatewayMcpServerFactory {
   const { registry, globalConfig, logger, metrics, stdioToken = '' } = opts
 
   return (ctx: McpRequestContext) => {
     const clientToken = ctx.authInfo?.token ?? stdioToken
     const mcpServer = new McpServer({ name: GATEWAY_NAME, version: GATEWAY_VERSION }, buildMcpServerOptions())
-    registerDiscoverServicesTool(mcpServer, registry, logger, metrics)
-    registerDiscoverSkillsTool(mcpServer, registry, logger, metrics, clientToken)
-    registerGetSkillDetailsTool(mcpServer, registry, logger, metrics, clientToken)
-    registerSearchCodeTool(mcpServer, registry, logger, metrics, clientToken)
-    registerExecuteApiTool(mcpServer, registry, globalConfig, logger, metrics, clientToken)
+
+    // Each tool is registered in its own try/catch: a construction-time throw
+    // from one tool (e.g. a schema-construction error) must not abort
+    // registration of the other four — it degrades to "N of 5 tools
+    // available" for this request/connection instead of zero.
+    const registrations: Array<[string, () => void]> = [
+      [TOOL.DISCOVER_SERVICES, () => registerDiscoverServicesTool(mcpServer, registry, logger, metrics)],
+      [TOOL.DISCOVER_SKILLS, () => registerDiscoverSkillsTool(mcpServer, registry, logger, metrics, clientToken)],
+      [TOOL.GET_SKILL_DETAILS, () => registerGetSkillDetailsTool(mcpServer, registry, logger, metrics, clientToken)],
+      [TOOL.SEARCH_CODE, () => registerSearchCodeTool(mcpServer, registry, logger, metrics, clientToken)],
+      [TOOL.API_EXECUTE, () => registerExecuteApiTool(mcpServer, registry, globalConfig, logger, metrics, clientToken)]
+    ]
+
+    for (const [toolName, register] of registrations) {
+      try {
+        register()
+      } catch (err) {
+        logger.error({ tool: toolName, error: errorMessage(err) }, 'Tool registration failed — continuing with remaining tools')
+      }
+    }
+
     return mcpServer
   }
 }

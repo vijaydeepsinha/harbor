@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
-import { createMcpHandler, type AuthInfo } from '@modelcontextprotocol/server'
+import { createMcpHandler, UnsupportedProtocolVersionError, type AuthInfo } from '@modelcontextprotocol/server'
 import { toNodeHandler, type NodeMcpRequestHandler } from '@modelcontextprotocol/node'
 import type { Logger } from '../observability/logger.js'
 import type { ServiceRegistry } from '../registry/service-registry.js'
@@ -14,15 +14,26 @@ import { sendJson, sendGatewayError } from './send-response.js'
 import { HttpError } from './http-error.js'
 import { ERR, HTTP_ROUTES, MCP_PROTOCOL_VERSION } from '../../core/constants.js'
 import { errorMessage } from '../../core/utils/errors.js'
-import type { McpServerFactory } from './mcp-server-factory.js'
+import type { GatewayMcpServerFactory } from './mcp-server-factory.js'
 
 /** Node request with pass-through auth for {@linkcode toNodeHandler}. */
 type AuthenticatedIncomingMessage = IncomingMessage & { auth?: AuthInfo }
 
+/**
+ * Placeholder `AuthInfo.clientId` for every request. Harbor's current bearer
+ * auth flow does not derive a real per-principal client id or scopes from the
+ * token — the SDK's `AuthInfo` type documents these as carrying real
+ * per-principal semantics, so this sentinel is named and commented explicitly
+ * (rather than a bare literal) to stay grep-able as a known placeholder
+ * pending real per-principal `clientId`/`scopes` derivation (e.g. from token
+ * introspection/claims).
+ */
+const UNSCOPED_CLIENT_ID = 'harbor-client' as const
+
 export interface HttpGatewayOptions {
   host: string
   port: number
-  createMcpServer: McpServerFactory
+  createMcpServer: GatewayMcpServerFactory
   registry: ServiceRegistry
   logger: Logger
   oauthConfig?: OAuthResourceConfig
@@ -45,8 +56,27 @@ export interface HttpGatewayHandle {
 export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
   const { host, port, createMcpServer, registry, logger, oauthConfig } = opts
 
-  const mcpHandler = createMcpHandler(createMcpServer, { legacy: 'reject' })
-  const nodeMcpHandler = toNodeHandler(mcpHandler)
+  // Both `createMcpHandler` and `toNodeHandler` catch every failure internally
+  // and always resolve/write a response — neither one ever throws back to the
+  // caller. `onerror` is the SDK's only hook for observing these failures
+  // (including a legacy-protocol client hitting `legacy: 'reject'`), so it is
+  // the sole mechanism for the operator-visible signal below; a try/catch
+  // around the handler call cannot observe them.
+  const mcpHandler = createMcpHandler(createMcpServer, {
+    legacy: 'reject',
+    onerror: (error) => {
+      if (error instanceof UnsupportedProtocolVersionError) {
+        logger.warn({ event: 'legacy_client_rejected', error: errorMessage(error) }, 'MCP handler dispatch failed')
+      } else {
+        logger.warn({ error: errorMessage(error) }, 'MCP handler dispatch failed')
+      }
+    }
+  })
+  const nodeMcpHandler = toNodeHandler(mcpHandler, {
+    onerror: (error) => {
+      logger.error({ error: errorMessage(error) }, 'MCP node adapter error before response written')
+    }
+  })
 
   const server = createServer(async (req, res) => {
     try {
@@ -152,19 +182,19 @@ async function handleAuthenticatedMcpRequest(
   const authReq = req as AuthenticatedIncomingMessage
   authReq.auth = {
     token: extracted.token,
-    clientId: 'harbor-client',
-    scopes: []
+    clientId: UNSCOPED_CLIENT_ID,
+    scopes: [] as string[] /* not yet derived from auth flow */
   }
 
-  // Normalized MCP request identity from HTTP headers (spec §14). Advisory:
-  // used for routing/observability only — the SDK validates these headers and
-  // reconciles them with the JSON-RPC body; auth stays keyed to the token.
-  const mcpIdentity = readMcpRequestIdentity(req.headers)
+  // Normalized MCP request identity from HTTP headers (spec §14) — advisory:
+  // routing and observability only, never auth (the SDK validates/reconciles
+  // these headers against the JSON-RPC body itself).
+  logger.debug({ ...readMcpRequestIdentity(req.headers) }, 'Dispatching MCP request')
 
-  try {
-    await nodeMcpHandler(authReq, res)
-  } catch (err) {
-    logger.warn({ error: errorMessage(err), ...mcpIdentity }, 'MCP handler dispatch failed')
-    throw err
-  }
+  // `nodeMcpHandler` (built from `createMcpHandler` + `toNodeHandler`) catches
+  // every internal failure itself and always writes a response — it does not
+  // throw. Dispatch failures, including a legacy-protocol client rejection,
+  // are observed via the `onerror` hooks passed to those two factories above,
+  // not via a try/catch here.
+  await nodeMcpHandler(authReq, res)
 }

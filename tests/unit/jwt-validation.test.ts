@@ -82,8 +82,26 @@ describe('JwtValidationStrategy', () => {
   })
 
   it('jwtValidation() factory returns a JwtValidationStrategy', () => {
-    const s = jwtValidation({ jwksUri: jwksUrl, issuer: ISSUER })
+    const s = jwtValidation({ jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE })
     expect(s).toBeInstanceOf(JwtValidationStrategy)
+  })
+
+  describe('resource binding (spec §17, RFC 8707)', () => {
+    it('constructor fails closed when audience/resource binding is absent', () => {
+      expect(() =>
+        new JwtValidationStrategy({ jwksUri: jwksUrl, issuer: ISSUER } as never)
+      ).toThrow(/audience/)
+    })
+
+    it('constructor fails closed when audience is blank', () => {
+      expect(() =>
+        new JwtValidationStrategy({ jwksUri: jwksUrl, issuer: ISSUER, audience: '   ' })
+      ).toThrow(/resource binding/)
+    })
+
+    it('jwtValidation() factory also fails closed without audience', () => {
+      expect(() => jwtValidation({ jwksUri: jwksUrl, issuer: ISSUER } as never)).toThrow(/audience/)
+    })
   })
 
   describe('validate — happy path', () => {
@@ -153,12 +171,6 @@ describe('JwtValidationStrategy', () => {
       expect(payload.metadata).toBeUndefined()
     })
 
-    it('strategy without audience accepts tokens regardless of aud claim', async () => {
-      const s = new JwtValidationStrategy({ jwksUri: jwksUrl, issuer: ISSUER })
-      const token = await sign({}, { audience: 'any-audience' })
-      const payload = await s.validate(token)
-      expect(payload.token_type).toBe('bearer')
-    })
   })
 
   describe('validate — error mapping', () => {
@@ -179,6 +191,13 @@ describe('JwtValidationStrategy', () => {
     it('wrong audience → TokenInvalidError', async () => {
       const token = await sign({}, { audience: 'https://other-resource.example.com' })
       await expect(strategy.validate(token)).rejects.toBeInstanceOf(TokenInvalidError)
+    })
+
+    it('wrong audience → client-facing message does not echo the failing claim value', async () => {
+      const token = await sign({}, { audience: 'https://other-resource.example.com' })
+      await expect(strategy.validate(token)).rejects.toMatchObject({
+        message: expect.not.stringContaining('other-resource'),
+      })
     })
 
     it('token signed with unknown key → TokenInvalidError', async () => {
@@ -205,6 +224,7 @@ describe('JwtValidationStrategy', () => {
       const s = new JwtValidationStrategy({
         jwksUri: 'http://127.0.0.1:1/.well-known/jwks.json',
         issuer: ISSUER,
+        audience: AUDIENCE,
       })
       const token = await sign({})
       await expect(s.validate(token)).rejects.toBeInstanceOf(TokenIntrospectionError)
