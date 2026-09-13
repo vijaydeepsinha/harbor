@@ -6,17 +6,19 @@ import pino from 'pino'
 import {
   extractCorrelationId,
   extractSessionId,
+  readRequestMeta,
   resolveService,
   isToolError,
   mcpError,
   mcpSuccess,
+  buildResponseMeta,
   validateAuth,
   runSandboxTool,
   type ToolResponse
 } from '../../tools/tool-helpers.js'
 import type { ServiceRegistry, ServiceResources } from '../../runtime/registry/service-registry.js'
 import { MissingTokenError, SessionExpiredError, type TokenPayload } from '../../core/types/auth.types.js'
-import { ERR, METRIC, OUTCOME } from '../../core/constants.js'
+import { ERR, METRIC, OUTCOME, GATEWAY_NAME, GATEWAY_VERSION, SERVER_INFO_META_KEY } from '../../core/constants.js'
 
 const silentLogger = pino({ level: 'silent' })
 
@@ -51,8 +53,8 @@ function makeMetrics() {
 }
 
 describe('tool-helpers extractors', () => {
-  it('extractCorrelationId returns the provided id', () => {
-    expect(extractCorrelationId({ correlationId: 'abc' })).toBe('abc')
+  it('extractCorrelationId returns the MCP request id', () => {
+    expect(extractCorrelationId({ mcpReq: { id: 'abc' } })).toBe('abc')
   })
 
   it('extractCorrelationId falls back to a uuid when absent', () => {
@@ -60,13 +62,55 @@ describe('tool-helpers extractors', () => {
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
   })
 
-  it('extractSessionId returns the provided id', () => {
+  it('extractSessionId returns the transport session id', () => {
     expect(extractSessionId({ sessionId: 'sess-1' })).toBe('sess-1')
   })
 
   it('extractSessionId falls back to a uuid when absent', () => {
     const id = extractSessionId(undefined)
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
+  })
+})
+
+describe('readRequestMeta (spec §9)', () => {
+  const PV = 'io.modelcontextprotocol/protocolVersion'
+  const CI = 'io.modelcontextprotocol/clientInfo'
+  const CC = 'io.modelcontextprotocol/clientCapabilities'
+
+  it('reads protocol version, clientInfo and capabilities from the envelope', () => {
+    const ctx = {
+      mcpReq: {
+        envelope: {
+          [PV]: '2026-07-28',
+          [CI]: { name: 'demo-client', version: '9.9' },
+          [CC]: { sampling: {} }
+        }
+      }
+    }
+    const view = readRequestMeta(ctx)
+    expect(view.protocolVersion).toBe('2026-07-28')
+    expect(view.clientInfo).toEqual({ name: 'demo-client', version: '9.9' })
+    expect(view.clientCapabilities).toEqual({ sampling: {} })
+  })
+
+  it('falls back to params _meta when the envelope is absent', () => {
+    const ctx = { mcpReq: { _meta: { [PV]: '2026-07-28' } } }
+    expect(readRequestMeta(ctx).protocolVersion).toBe('2026-07-28')
+  })
+
+  it('envelope wins over params _meta on key collision', () => {
+    const ctx = { mcpReq: { _meta: { [PV]: 'old' }, envelope: { [PV]: '2026-07-28' } } }
+    expect(readRequestMeta(ctx).protocolVersion).toBe('2026-07-28')
+  })
+
+  it('returns an empty view for missing/blank context', () => {
+    expect(readRequestMeta(undefined)).toEqual({})
+    expect(readRequestMeta({ mcpReq: {} })).toEqual({})
+  })
+
+  it('ignores malformed values (wrong types) without throwing', () => {
+    const ctx = { mcpReq: { envelope: { [PV]: 123, [CI]: 'nope', [CC]: null } } }
+    expect(readRequestMeta(ctx)).toEqual({})
   })
 })
 
@@ -118,6 +162,50 @@ describe('tool-helpers responses', () => {
     expect(isToolError(mcpError('x', 'y'))).toBe(true)
     expect(isToolError(mcpSuccess('x'))).toBe(false)
     expect(isToolError({})).toBe(false)
+  })
+})
+
+describe('response _meta / serverInfo (spec §10, §11)', () => {
+  const expectedServerInfo = { name: GATEWAY_NAME, version: GATEWAY_VERSION }
+
+  it('mcpSuccess carries mandatory serverInfo in _meta', () => {
+    const r = mcpSuccess({ a: 1 })
+    expect(r._meta?.[SERVER_INFO_META_KEY]).toEqual(expectedServerInfo)
+  })
+
+  it('mcpError carries mandatory serverInfo in _meta', () => {
+    const r = mcpError('boom', ERR.API_ERROR)
+    expect(r._meta?.[SERVER_INFO_META_KEY]).toEqual(expectedServerInfo)
+  })
+
+  it('serverInfo never leaks into model-visible content', () => {
+    const r = mcpSuccess({ a: 1 })
+    expect(r.content[0].text).not.toContain('serverInfo')
+    expect(r.content[0].text).not.toContain(GATEWAY_NAME)
+    const e = mcpError('boom', ERR.API_ERROR, false, { progress: 1 })
+    expect(e.content[0].text).not.toContain('serverInfo')
+  })
+
+  it('mcpSuccess merges application _meta alongside serverInfo', () => {
+    const r = mcpSuccess({ a: 1 }, { 'harbor/correlationId': 'cid-9' })
+    expect(r._meta?.['harbor/correlationId']).toBe('cid-9')
+    expect(r._meta?.[SERVER_INFO_META_KEY]).toEqual(expectedServerInfo)
+  })
+
+  it('mcpError merges application _meta alongside serverInfo', () => {
+    const r = mcpError('boom', ERR.API_ERROR, true, undefined, { 'harbor/auditId': 'aud-1' })
+    expect(r._meta?.['harbor/auditId']).toBe('aud-1')
+    expect(r._meta?.[SERVER_INFO_META_KEY]).toEqual(expectedServerInfo)
+  })
+
+  it('application _meta cannot spoof the reserved serverInfo key', () => {
+    const spoof = buildResponseMeta({ [SERVER_INFO_META_KEY]: { name: 'evil', version: '0' } })
+    expect(spoof[SERVER_INFO_META_KEY]).toEqual(expectedServerInfo)
+  })
+
+  it('application _meta does not leak into content', () => {
+    const r = mcpSuccess({ a: 1 }, { 'harbor/auditId': 'aud-secret' })
+    expect(r.content[0].text).not.toContain('aud-secret')
   })
 })
 

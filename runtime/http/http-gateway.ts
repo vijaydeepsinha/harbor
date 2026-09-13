@@ -2,22 +2,38 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import { createMcpHandler, UnsupportedProtocolVersionError, type AuthInfo } from '@modelcontextprotocol/server'
+import { toNodeHandler, type NodeMcpRequestHandler } from '@modelcontextprotocol/node'
 import type { Logger } from '../observability/logger.js'
 import type { ServiceRegistry } from '../registry/service-registry.js'
 import type { OAuthResourceConfig } from '../../core/types/oauth.types.js'
 import { extractBearerFromRequest, bearerFailureToHttpResponse } from '../../spi/auth/bearer-authorization.js'
 import { handleProtectedResourceMetadata } from './oauth-metadata-handler.js'
+import { readMcpRequestIdentity } from './mcp-request-identity.js'
 import { sendJson, sendGatewayError } from './send-response.js'
 import { HttpError } from './http-error.js'
-import { ERR, HTTP_ROUTES } from '../../core/constants.js'
+import { ERR, HTTP_ROUTES, MCP_PROTOCOL_VERSION } from '../../core/constants.js'
 import { errorMessage } from '../../core/utils/errors.js'
+import type { GatewayMcpServerFactory } from './mcp-server-factory.js'
+
+/** Node request with pass-through auth for {@linkcode toNodeHandler}. */
+type AuthenticatedIncomingMessage = IncomingMessage & { auth?: AuthInfo }
+
+/**
+ * Placeholder `AuthInfo.clientId` for every request. Harbor's current bearer
+ * auth flow does not derive a real per-principal client id or scopes from the
+ * token — the SDK's `AuthInfo` type documents these as carrying real
+ * per-principal semantics, so this sentinel is named and commented explicitly
+ * (rather than a bare literal) to stay grep-able as a known placeholder
+ * pending real per-principal `clientId`/`scopes` derivation (e.g. from token
+ * introspection/claims).
+ */
+const UNSCOPED_CLIENT_ID = 'harbor-client' as const
 
 export interface HttpGatewayOptions {
   host: string
   port: number
-  createMcpServer: (clientToken: string) => McpServer
+  createMcpServer: GatewayMcpServerFactory
   registry: ServiceRegistry
   logger: Logger
   oauthConfig?: OAuthResourceConfig
@@ -32,12 +48,35 @@ export interface HttpGatewayHandle {
  * Creates and starts the Streamable-HTTP MCP gateway.
  *
  * This module owns the HTTP surface end-to-end: routing, bearer-auth
- * extraction, and stateless per-request MCP transport handling. The boot
+ * extraction, and stateless per-request MCP handler dispatch via the SDK v2
+ * `createMcpHandler` entry (`legacy: 'reject'` — 2026-07-28 only). The boot
  * logic in `server-factory.ts` depends only on the returned handle — it does
- * not need to know about `node:http` or the SDK transport.
+ * not need to know about `node:http` or transport wiring.
  */
 export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
   const { host, port, createMcpServer, registry, logger, oauthConfig } = opts
+
+  // Both `createMcpHandler` and `toNodeHandler` catch every failure internally
+  // and always resolve/write a response — neither one ever throws back to the
+  // caller. `onerror` is the SDK's only hook for observing these failures
+  // (including a legacy-protocol client hitting `legacy: 'reject'`), so it is
+  // the sole mechanism for the operator-visible signal below; a try/catch
+  // around the handler call cannot observe them.
+  const mcpHandler = createMcpHandler(createMcpServer, {
+    legacy: 'reject',
+    onerror: (error) => {
+      if (error instanceof UnsupportedProtocolVersionError) {
+        logger.warn({ event: 'legacy_client_rejected', error: errorMessage(error) }, 'MCP handler dispatch failed')
+      } else {
+        logger.warn({ error: errorMessage(error) }, 'MCP handler dispatch failed')
+      }
+    }
+  })
+  const nodeMcpHandler = toNodeHandler(mcpHandler, {
+    onerror: (error) => {
+      logger.error({ error: errorMessage(error) }, 'MCP node adapter error before response written')
+    }
+  })
 
   const server = createServer(async (req, res) => {
     try {
@@ -46,6 +85,10 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
       if (url === HTTP_ROUTES.HEALTH) {
         sendJson(res, 200, {
           status: 'ok',
+          // Single protocol version Harbor speaks (spec §20). Harbor rejects
+          // legacy clients at the transport (`legacy: 'reject'`); this makes
+          // the supported version explicit for operators and monitoring.
+          protocolVersion: MCP_PROTOCOL_VERSION,
           services: registry.serviceNames()
         })
         return
@@ -64,7 +107,7 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
       }
 
       if (url === HTTP_ROUTES.MCP) {
-        await handleAuthenticatedMcpRequest(req, res, createMcpServer, logger, oauthConfig)
+        await handleAuthenticatedMcpRequest(req, res, nodeMcpHandler, logger, oauthConfig)
         return
       }
 
@@ -107,7 +150,7 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
         health: `http://${host}:${port}${HTTP_ROUTES.HEALTH}`,
         services: registry.serviceNames()
       },
-      '🚀 Harbor ready (Streamable HTTP) — waiting for Clients to connect'
+      '🚀 Harbor ready (Streamable HTTP, MCP 2026-07-28) — waiting for Clients to connect'
     )
   })
 
@@ -115,16 +158,15 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
 }
 
 /**
- * Handles a request on the `/mcp` route using a fresh stateless transport and
- * McpServer per HTTP request (`sessionIdGenerator: undefined`).
- *
- * Auth failures throw {@link HttpError}; only the transport itself owns the
+ * Validates bearer auth, attaches pass-through {@link AuthInfo} on the Node
+ * request (consumed by {@linkcode toNodeHandler}), and delegates to the MCP
+ * handler. Auth failures throw {@link HttpError}; the MCP handler owns the
  * response stream on the happy path.
  */
 async function handleAuthenticatedMcpRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  createMcpServer: (clientToken: string) => McpServer,
+  nodeMcpHandler: NodeMcpRequestHandler,
   logger: Logger,
   oauthConfig?: OAuthResourceConfig
 ): Promise<void> {
@@ -137,32 +179,22 @@ async function handleAuthenticatedMcpRequest(
     throw new HttpError(status, extracted.error.code, body.error, { reason: body.reason }, { reason: extracted.reason }, headers)
   }
 
-  const clientToken = extracted.token
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined
-  })
-  let mcpServer: McpServer | undefined
-
-  let cleanedUp = false
-  const cleanup = (): void => {
-    if (cleanedUp) return
-    cleanedUp = true
-    void transport.close?.().catch((err) => {
-      logger.warn({ error: errorMessage(err) }, 'Stateless transport close failed')
-    })
-    void mcpServer?.close().catch((err) => {
-      logger.warn({ error: errorMessage(err) }, 'Stateless McpServer close failed')
-    })
+  const authReq = req as AuthenticatedIncomingMessage
+  authReq.auth = {
+    token: extracted.token,
+    clientId: UNSCOPED_CLIENT_ID,
+    scopes: [] as string[] /* not yet derived from auth flow */
   }
 
-  res.on('close', cleanup)
+  // Normalized MCP request identity from HTTP headers (spec §14) — advisory:
+  // routing and observability only, never auth (the SDK validates/reconciles
+  // these headers against the JSON-RPC body itself).
+  logger.debug({ ...readMcpRequestIdentity(req.headers) }, 'Dispatching MCP request')
 
-  try {
-    mcpServer = createMcpServer(clientToken)
-    await mcpServer.connect(transport)
-    await transport.handleRequest(req, res)
-  } catch (err) {
-    cleanup()
-    throw err
-  }
+  // `nodeMcpHandler` (built from `createMcpHandler` + `toNodeHandler`) catches
+  // every internal failure itself and always writes a response — it does not
+  // throw. Dispatch failures, including a legacy-protocol client rejection,
+  // are observed via the `onerror` hooks passed to those two factories above,
+  // not via a try/catch here.
+  await nodeMcpHandler(authReq, res)
 }

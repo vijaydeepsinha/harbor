@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { z } from 'zod'
+import { McpServer } from '@modelcontextprotocol/server'
 import { v4 as uuidv4 } from 'uuid'
 import { createHash } from 'node:crypto'
 import type { ServiceRegistry } from '../runtime/registry/service-registry.js'
@@ -19,7 +18,9 @@ import {
   mcpError, mcpSuccess,
   extractCorrelationId, extractSessionId,
   resolveService, isToolError,
-  validateAuth
+  validateAuth,
+  readRequestMeta,
+  serviceCodeSchema
 } from './tool-helpers.js'
 import { TOOL, LOG_PREFIX, METRIC, OUTCOME } from '../core/constants.js'
 import type { AuditOutcome } from '../core/constants.js'
@@ -122,13 +123,16 @@ async () => {
 
   server.registerTool(
     TOOL.API_EXECUTE,
-    { description: EXECUTE_DESCRIPTION, inputSchema: { service: z.string(), code: z.string() } },
-    async ({ service, code }, extra) => {
-      const correlationId = extractCorrelationId(extra)
-      const sessionId = extractSessionId(extra)
+    { description: EXECUTE_DESCRIPTION, inputSchema: serviceCodeSchema },
+    async ({ service, code }, ctx) => {
+      const correlationId = extractCorrelationId(ctx)
+      const sessionId = extractSessionId(ctx)
+      // Advisory-only (never auth) request metadata, logged here as its first
+      // real production consumer — see AdvisoryRequestMeta's invariant note.
+      const requestMeta = readRequestMeta(ctx)
 
       logger.info(
-        { correlationId, tool: TOOL.API_EXECUTE, service },
+        { correlationId, tool: TOOL.API_EXECUTE, service, ...requestMeta },
         `${LOG_PREFIX.MCP_IN} ${TOOL.API_EXECUTE} — request received from AI client`
       )
 

@@ -95,13 +95,31 @@ describe('OAuthDiscoveryStrategy', () => {
   })
 
   it('tokenRefreshBufferSec is undefined', () => {
-    const s = new OAuthDiscoveryStrategy({ authorizationServer: asBaseUrl })
+    const s = new OAuthDiscoveryStrategy({ authorizationServer: asBaseUrl, audience: 'https://harbor.example.com' })
     expect(s.tokenRefreshBufferSec).toBeUndefined()
   })
 
   it('oauthDiscovery() factory returns OAuthDiscoveryStrategy', () => {
-    const s = oauthDiscovery({ authorizationServer: asBaseUrl })
+    const s = oauthDiscovery({ authorizationServer: asBaseUrl, audience: 'https://harbor.example.com' })
     expect(s).toBeInstanceOf(OAuthDiscoveryStrategy)
+  })
+
+  describe('resource binding (spec §17, RFC 8707)', () => {
+    it('constructor fails closed when audience/resource binding is absent', () => {
+      expect(() =>
+        new OAuthDiscoveryStrategy({ authorizationServer: asBaseUrl } as never)
+      ).toThrow(/audience/)
+    })
+
+    it('constructor fails closed when audience is blank', () => {
+      expect(() =>
+        new OAuthDiscoveryStrategy({ authorizationServer: asBaseUrl, audience: '   ' })
+      ).toThrow(/resource binding/)
+    })
+
+    it('oauthDiscovery() factory also fails closed without audience', () => {
+      expect(() => oauthDiscovery({ authorizationServer: asBaseUrl } as never)).toThrow(/audience/)
+    })
   })
 
   describe('validate — discovery + happy path', () => {
@@ -217,6 +235,7 @@ describe('OAuthDiscoveryStrategy', () => {
     it('unreachable AS → TokenIntrospectionError', async () => {
       const s = new OAuthDiscoveryStrategy({
         authorizationServer: 'http://127.0.0.1:1',
+        audience: 'https://harbor.example.com',
         discoveryTimeoutMs: 500,
       })
       const token = await sign({})
@@ -233,7 +252,7 @@ describe('OAuthDiscoveryStrategy', () => {
       const { port } = failServer.address() as AddressInfo
       const failUrl = `http://127.0.0.1:${port}`
 
-      const s = new OAuthDiscoveryStrategy({ authorizationServer: failUrl })
+      const s = new OAuthDiscoveryStrategy({ authorizationServer: failUrl, audience: 'https://harbor.example.com' })
       const token = await sign({})
       await expect(s.validate(token)).rejects.toBeInstanceOf(TokenIntrospectionError)
       await expect(s.validate(token)).rejects.toBeInstanceOf(TokenIntrospectionError)
@@ -255,7 +274,7 @@ describe('OAuthDiscoveryStrategy', () => {
       await new Promise<void>(resolve => noJwksServer.listen(0, '127.0.0.1', resolve))
       const { port } = noJwksServer.address() as AddressInfo
 
-      const s = new OAuthDiscoveryStrategy({ authorizationServer: `http://127.0.0.1:${port}` })
+      const s = new OAuthDiscoveryStrategy({ authorizationServer: `http://127.0.0.1:${port}`, audience: 'https://harbor.example.com' })
       const token = await sign({})
       await expect(s.validate(token)).rejects.toBeInstanceOf(TokenIntrospectionError)
 

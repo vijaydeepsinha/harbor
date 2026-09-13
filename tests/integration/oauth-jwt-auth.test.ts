@@ -208,6 +208,7 @@ describe('oauth-2.1 discovery strategy through InMemoryTokenCache', () => {
   it('unreachable AS → TokenIntrospectionError', async () => {
     const strategy = new OAuthDiscoveryStrategy({
       authorizationServer: 'http://127.0.0.1:1',
+      audience: AUDIENCE,
       discoveryTimeoutMs: 500,
     })
     const cache = new InMemoryTokenCache(300_000)
