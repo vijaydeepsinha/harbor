@@ -134,3 +134,14 @@ during manual testing, not as a required gate.
 - Full command-level equivalents of everything these scripts do are in
   `tests/demo_e2e.py`'s `_switch_to_oauth_mode()` / `_start_harbor_oauth()`
   / `_start_introspection_server()` if you need to debug a step manually.
+- **`{{bearer_token_...}}` "value is not initialised", or a request that
+  should send `Bearer not-a-real-token` instead comes back with
+  `MISSING_TOKEN` / `malformed_scheme`** — every level of this collection
+  (root, every folder, every request) has its Authorization tab explicitly
+  set to **No Auth**, precisely so nothing overrides the literal
+  `Authorization` header each request already sets in its Headers tab. If
+  you still see this, your Postman *workspace* has local, previously-synced
+  auth state on top of the file (Postman stores per-item UI edits separately
+  from the imported JSON) — re-check the Authorization tab at the request,
+  its parent folder, and the collection root, and set any that aren't
+  already "No Auth" back to it.
