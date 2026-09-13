@@ -42,5 +42,10 @@ const server = http.createServer((req, res) => {
   send(res, 404, { error: 'Not found' })
 })
 
+server.on('error', (err) => {
+  console.error(`[billing-service] server error: ${err.message}`)
+  process.exit(1)
+})
+
 const PORT = 3004
 server.listen(PORT, () => console.log(`[billing-service] running on http://localhost:${PORT}`))

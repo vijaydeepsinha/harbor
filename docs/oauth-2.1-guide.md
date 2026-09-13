@@ -109,14 +109,27 @@ Full field reference: [`configuration.md — oauth-2.1`](configuration.md#oauth-
 
 Discovery tries `/.well-known/openid-configuration` first, then `/.well-known/oauth-authorization-server`. The result is cached per strategy instance; Harbor does not re-fetch on every token.
 
-> **`audience` is required (MCP 2026-07-28, RFC 8707 resource binding).** The
-> `oauth-2.1` strategy fails closed at startup if `audience` is missing or
-> blank. `audience` is the gateway's canonical resource identifier — set it to
-> the same value you advertise as `resource` in the Protected Resource Metadata
-> (`HARBOR_RESOURCE_URI`). This ensures Harbor rejects an access token minted
-> for a *different* resource behind the same authorization server, closing the
-> confused-deputy / token pass-through gap. The lower-level `jwt-validation`
-> strategy keeps `audience` optional for standalone use.
+> Note: `services/billing/config.json`'s `audience` (`http://localhost:3333`)
+> intentionally does not match this guide's default `HARBOR_RESOURCE_URI`
+> example (`http://127.0.0.1:3333`) or the `demo_e2e.py` default — a service's
+> `audience` and the gateway's advertised `HARBOR_RESOURCE_URI` are
+> independently configured values that happen to often be the same string in
+> practice, not the same setting. `mock-oauth2-config.json` mints its
+> "correct" demo JWT with `aud: ["http://localhost:3333"]` to match the
+> service config, not the resource-metadata default.
+
+> **`audience` is required (MCP 2026-07-28, RFC 8707 resource binding).** Both
+> the `oauth-2.1` and `jwt-validation` strategies fail closed at startup if
+> `audience` is missing or blank. `audience` is the gateway's canonical
+> resource identifier — set it to the same value you advertise as `resource`
+> in the Protected Resource Metadata (`HARBOR_RESOURCE_URI`). This ensures
+> Harbor rejects an access token minted for a *different* resource behind the
+> same authorization server, closing the confused-deputy / token pass-through
+> gap for both strategies. `oauth-introspection` supports an optional
+> `audience` field too, but per RFC 7662 §2.2 the introspection response isn't
+> guaranteed to include an `aud` claim — see
+> [`configuration.md — oauth-introspection`](configuration.md#oauth-introspection-recommended-for-production)
+> for its best-effort (not fail-closed) semantics.
 
 ### oauth-introspection — token introspection (RFC 7662)
 
@@ -144,6 +157,7 @@ Use when the AS does not issue JWTs or when you need server-side revocation chec
 | Client sends no token, `HARBOR_RESOURCE_URI` not set | Unchanged — plain 401, no `WWW-Authenticate` |
 | Client sends no token, `HARBOR_RESOURCE_URI` set | **New** — 401 with `WWW-Authenticate: Bearer resource_metadata="..."` |
 | `stdio` transport | Completely unaffected — MCP spec exempts stdio from OAuth 2.1 |
+| Existing `oauth-2.1` service config with no `audience` | **Breaking** — fails at startup (fail-closed, see note above). Set `audience` to the resource identifier your AS mints tokens for — typically the same value as `HARBOR_RESOURCE_URI` if you use RFC 9728 discovery, or the gateway's own base URL if you don't. |
 
 ## Running the E2E test suite
 

@@ -20,8 +20,8 @@ The upgrade moves Harbor onto the MCP SDK v2 packages
 cache-field emission, `server/discover`, `tools/list`). Harbor's own changes are
 confined to the application-facing seams the SDK leaves to the server:
 
-- response `_meta` carrying mandatory `io.modelcontextprotocol/serverInfo`, plus
-  a clean application-metadata channel;
+- response `_meta` carrying `io.modelcontextprotocol/serverInfo` (spec §10,
+  recommended), plus a clean application-metadata channel;
 - an advisory reader for request `_meta` and for the normalized MCP HTTP headers
   (routing/observability only, never authorization);
 - explicit `server/discover` options — real capabilities, instructions, and
@@ -47,7 +47,7 @@ authentication are unchanged.
 | `server/discover` | implicit | explicit capabilities + instructions + cache hints | REQUIRED — done |
 | Request `_meta` | none | advisory reader (protocol version, clientInfo, clientCapabilities) | REQUIRED — done |
 | Response `_meta` | none | attached to every tool result | REQUIRED — done |
-| `serverInfo` | none | `io.modelcontextprotocol/serverInfo` on every response | REQUIRED — done |
+| `serverInfo` | none | `io.modelcontextprotocol/serverInfo` on every response | RECOMMENDED (SHOULD) — done |
 | `ttlMs` / `cacheScope` | none | conservative hints for `tools/list`, `server/discover` | REQUIRED — done |
 | OAuth 2.1 | present, `audience` optional | present, resource binding required | REQUIRED — hardened |
 | RFC 9728 Protected Resource Metadata | none | served at `/.well-known/oauth-protected-resource` | REQUIRED — done |
@@ -103,9 +103,10 @@ See [`oauth-2.1-guide.md`](oauth-2.1-guide.md).
   **never** consulted for authentication or authorization (spec §9, §19).
 - **Response `_meta`** — every tool result carries `_meta`, built by a single
   helper so metadata never mixes into model-visible `content`.
-- **`serverInfo`** — the mandatory `io.modelcontextprotocol/serverInfo`
-  (`{ name, version }`) is emitted on every response and cannot be overridden by
-  application metadata (serverInfo is written last).
+- **`serverInfo`** — `io.modelcontextprotocol/serverInfo` (`{ name, version }`)
+  is emitted on every response and cannot be overridden by application
+  metadata (serverInfo is written last). Spec §10, recommended (SHOULD, not
+  mandatory).
 - **Application metadata** — the same `_meta` helper accepts an optional
   application-metadata object, establishing a clean client-facing channel
   (correlation/audit/workflow ids in future) without contaminating content.

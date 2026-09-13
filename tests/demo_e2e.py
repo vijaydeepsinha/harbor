@@ -928,8 +928,8 @@ def test_docker_oauth(resource_uri: str):
         assert_true("invoices" not in bad_parsed,
                     "wrong-aud JWT → NO invoice data leaked")
         code = bad_parsed.get("code", "")
-        assert_true(code in ("TOKEN_INVALID", "AUTH_FAILED", "TOKEN_EXPIRED"),
-                    f"wrong-aud rejection carries an auth error code (got {code!r})")
+        assert_eq(code, "TOKEN_INVALID",
+                  "wrong-aud rejection carries the deterministic TOKEN_INVALID code")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 

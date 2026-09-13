@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
+import {
+  PROTOCOL_VERSION_META_KEY as SDK_PROTOCOL_VERSION_META_KEY,
+  CLIENT_INFO_META_KEY as SDK_CLIENT_INFO_META_KEY,
+  CLIENT_CAPABILITIES_META_KEY as SDK_CLIENT_CAPABILITIES_META_KEY,
+  SERVER_INFO_META_KEY as SDK_SERVER_INFO_META_KEY
+} from '@modelcontextprotocol/server'
+
 // ── Deployment environments ──────────────────────────────────────────────────
 
 export const ENV = {
@@ -197,17 +204,31 @@ export const GATEWAY_VERSION = '1.0.0'
 // carried out-of-band from model-visible `content`. Harbor treats inbound
 // values as untrusted (never for auth/security) and only *emits* serverInfo.
 
-/** Response `_meta` key carrying server identity (spec §10, MANDATORY). */
-export const SERVER_INFO_META_KEY = 'io.modelcontextprotocol/serverInfo'
+/**
+ * Response `_meta` key carrying server identity (spec §10). Recommended
+ * (SHOULD, not mandatory). Re-exported from the SDK's own reserved-key
+ * constant so Harbor and the SDK cannot silently drift on this string.
+ */
+export const SERVER_INFO_META_KEY = SDK_SERVER_INFO_META_KEY
 
-/** Request `_meta` key carrying the negotiated protocol version (spec §9). */
-export const PROTOCOL_VERSION_META_KEY = 'io.modelcontextprotocol/protocolVersion'
+/**
+ * Request `_meta` key carrying the negotiated protocol version (spec §9).
+ * Re-exported from the SDK's own reserved-key constant so Harbor and the SDK
+ * cannot silently drift on this string.
+ */
+export const PROTOCOL_VERSION_META_KEY = SDK_PROTOCOL_VERSION_META_KEY
 
-/** Request `_meta` key carrying client implementation info (spec §9). */
-export const CLIENT_INFO_META_KEY = 'io.modelcontextprotocol/clientInfo'
+/**
+ * Request `_meta` key carrying client implementation info (spec §9).
+ * Re-exported from the SDK's own reserved-key constant.
+ */
+export const CLIENT_INFO_META_KEY = SDK_CLIENT_INFO_META_KEY
 
-/** Request `_meta` key carrying client capabilities (spec §9). */
-export const CLIENT_CAPABILITIES_META_KEY = 'io.modelcontextprotocol/clientCapabilities'
+/**
+ * Request `_meta` key carrying client capabilities (spec §9).
+ * Re-exported from the SDK's own reserved-key constant.
+ */
+export const CLIENT_CAPABILITIES_META_KEY = SDK_CLIENT_CAPABILITIES_META_KEY
 
 /** The single MCP protocol version this gateway speaks (spec §20). */
 export const MCP_PROTOCOL_VERSION = '2026-07-28'
