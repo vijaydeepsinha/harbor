@@ -3,6 +3,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import pino from 'pino'
+import { type ZodObject } from 'zod'
+import { makeServerCtx } from './mcp-test-context.js'
 
 vi.mock('../../runtime/sandbox/skills-search-in-sandbox.js', () => ({
   runSkillsSearchInSandbox: vi.fn()
@@ -12,7 +14,7 @@ import { runSkillsSearchInSandbox } from '../../runtime/sandbox/skills-search-in
 import { registerDiscoverSkillsTool } from '../../tools/discover-skills.tool.js'
 import { TOOL, METRIC, OUTCOME, ERR, AUTH_SCHEME } from '../../core/constants.js'
 import type { ServiceRegistry, ServiceResources } from '../../runtime/registry/service-registry.js'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { McpServer } from '@modelcontextprotocol/server'
 import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
 import type { TokenPayload } from '../../core/types/auth.types.js'
 import { MissingTokenError } from '../../core/types/auth.types.js'
@@ -106,8 +108,8 @@ describe('registerDiscoverSkillsTool', () => {
     const entry = server.handlers[TOOL.DISCOVER_SKILLS]
     expect(entry).toBeDefined()
     expect(entry!.def.description).toContain('tasks')
-    const schema = entry!.def.inputSchema as Record<string, unknown>
-    expect(Object.keys(schema)).toEqual(expect.arrayContaining(['service', 'code']))
+    const schema = entry!.def.inputSchema as ZodObject
+    expect(Object.keys(schema.shape)).toEqual(expect.arrayContaining(['service', 'code']))
   })
 
   it('returns UNKNOWN_SERVICE mcpError when service is not registered', async () => {
@@ -122,7 +124,7 @@ describe('registerDiscoverSkillsTool', () => {
 
     const r = await server.handlers[TOOL.DISCOVER_SKILLS]!.handler(
       { service: 'ghost', code: 'async () => skills' },
-      { correlationId: 'cid', sessionId: 'sid' }
+      makeServerCtx('cid', 'sid')
     )
     expect(r.isError).toBe(true)
     const body = JSON.parse(r.content[0]!.text)
@@ -149,7 +151,7 @@ describe('registerDiscoverSkillsTool', () => {
 
     const r = await server.handlers[TOOL.DISCOVER_SKILLS]!.handler(
       { service: 'tasks', code: 'async () => skills' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
     expect(r.isError).toBe(true)
     expect(JSON.parse(r.content[0]!.text).code).toBe(ERR.MISSING_TOKEN)
@@ -174,7 +176,7 @@ describe('registerDiscoverSkillsTool', () => {
 
     const r = await server.handlers[TOOL.DISCOVER_SKILLS]!.handler(
       { service: 'tasks', code: 'async () => skills.filter(...)' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBeUndefined()
@@ -207,7 +209,7 @@ describe('registerDiscoverSkillsTool', () => {
 
     await server.handlers[TOOL.DISCOVER_SKILLS]!.handler(
       { service: 'tasks', code: 'async () => []' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
 
     expect(validate).toHaveBeenCalledWith(`${AUTH_SCHEME} abc123`, 'cid')
@@ -227,7 +229,7 @@ describe('registerDiscoverSkillsTool', () => {
 
     const r = await server.handlers[TOOL.DISCOVER_SKILLS]!.handler(
       { service: 'tasks', code: 'async () => crash()' },
-      { correlationId: 'cid' }
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)

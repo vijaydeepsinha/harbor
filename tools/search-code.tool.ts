@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { z } from 'zod'
+import { McpServer } from '@modelcontextprotocol/server'
 import type { ServiceRegistry } from '../runtime/registry/service-registry.js'
 import type { Logger } from '../runtime/observability/logger.js'
 import type { MetricsCollector } from '../core/types/metrics.types.js'
@@ -11,7 +10,8 @@ import {
   extractCorrelationId,
   resolveService,
   isToolError,
-  runSandboxTool
+  runSandboxTool,
+  serviceCodeSchema
 } from './tool-helpers.js'
 import { TOOL, LOG_PREFIX } from '../core/constants.js'
 
@@ -90,9 +90,9 @@ This keeps each search result small and readable.`
 
   server.registerTool(
     TOOL.SEARCH_CODE,
-    { description: SEARCH_CODE_DESCRIPTION, inputSchema: { service: z.string(), code: z.string() } },
-    async ({ service, code }, extra) => {
-      const correlationId = extractCorrelationId(extra)
+    { description: SEARCH_CODE_DESCRIPTION, inputSchema: serviceCodeSchema },
+    async ({ service, code }, ctx) => {
+      const correlationId = extractCorrelationId(ctx)
 
       logger.info(
         { correlationId, tool: TOOL.SEARCH_CODE, service, codeReceived: code },

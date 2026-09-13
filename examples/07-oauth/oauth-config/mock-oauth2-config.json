@@ -6,6 +6,16 @@
       "tokenExpiry": 3600,
       "requestMappings": [
         {
+          "requestParam": "scope",
+          "match": "confused-deputy",
+          "claims": {
+            "sub": "harbor-test-client",
+            "client_id": "harbor-test-client",
+            "aud": ["https://not-harbor.example.com"],
+            "scope": "confused-deputy"
+          }
+        },
+        {
           "requestParam": "grant_type",
           "match": "client_credentials",
           "claims": {

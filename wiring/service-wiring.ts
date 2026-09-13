@@ -10,6 +10,7 @@ import { staticToken } from '../adapters/auth/strategies/static-token.strategy.j
 import { oauthIntrospection } from '../adapters/auth/strategies/oauth-introspection.strategy.js'
 import { jwtValidation } from '../adapters/auth/strategies/jwt-validation.strategy.js'
 import { oauthDiscovery } from '../adapters/auth/strategies/oauth-discovery.strategy.js'
+import { requireResourceBindingAudience } from '../adapters/auth/strategies/resource-binding.js'
 import { noopCircuitBreaker } from '../spi/resilience/strategies/noop-circuit-breaker.strategy.js'
 import { countBasedCircuitBreaker } from '../adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
 
@@ -38,21 +39,30 @@ export function resolveAuth(auth: ServiceAuthConfig | undefined, logger?: Logger
         tokenRefreshBufferSec: auth.tokenRefreshBufferSec,
         responseMapping: auth.responseMapping,
         metadataMapping: auth.metadataMapping,
+        ...(auth.audience !== undefined ? { audience: auth.audience } : {}),
       })
     case AUTH_TYPE.JWT_VALIDATION:
+      requireResourceBindingAudience(
+        auth.audience,
+        'config.auth.audience (resource binding) is required for jwt-validation auth'
+      )
       return jwtValidation({
         jwksUri: auth.jwksUri,
         issuer: auth.issuer,
-        ...(auth.audience !== undefined ? { audience: auth.audience } : {}),
+        audience: auth.audience,
         ...(auth.clockToleranceSec !== undefined ? { clockToleranceSec: auth.clockToleranceSec } : {}),
         ...(auth.scopeClaim !== undefined ? { scopeClaim: auth.scopeClaim } : {}),
         ...(auth.metadataMapping !== undefined ? { metadataMapping: auth.metadataMapping } : {}),
         ...(logger !== undefined ? { logger } : {}),
       })
     case AUTH_TYPE.OAUTH_2_1:
+      requireResourceBindingAudience(
+        auth.audience,
+        'config.auth.audience (resource binding) is required for oauth-2.1 auth'
+      )
       return oauthDiscovery({
         authorizationServer: auth.authorizationServer,
-        ...(auth.audience !== undefined ? { audience: auth.audience } : {}),
+        audience: auth.audience,
         ...(auth.clockToleranceSec !== undefined ? { clockToleranceSec: auth.clockToleranceSec } : {}),
         ...(auth.scopeClaim !== undefined ? { scopeClaim: auth.scopeClaim } : {}),
         ...(auth.metadataMapping !== undefined ? { metadataMapping: auth.metadataMapping } : {}),

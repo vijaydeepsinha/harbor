@@ -1,0 +1,641 @@
+openapi: 3.0.3
+info:
+  title: IRCTC Railway Booking API
+  version: 0.1.0
+  description: >
+    Search trains, check seat availability, calculate fares, and create or cancel
+    bookings.
+
+    Call order: GET /health (get today's date + valid booking window) -> searchTrains
+    -> checkAvailability -> calculateFare (optional) -> createBooking ->
+    getBookingByPnr / cancelBooking. See the `00-start-here` skill for full usage
+    rules before making calls.
+
+servers:
+  - url: http://localhost:3005
+
+paths:
+  /stations/search:
+    get:
+      operationId: searchStations
+      summary: Search stations
+      description: Search stations by code, name, or city (case-insensitive, partial match).
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search text, e.g. 'Delhi' or 'NDLS'
+      responses:
+        '200':
+          description: Matching stations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Station'
+
+  /trains/search:
+    get:
+      operationId: searchTrains
+      summary: Search trains between two stations
+      description: >
+        Search trains running between a source and destination station on a given
+        date, optionally filtered by preferred departure time window. The `date` and
+        `preferred_departure_*` parameters do all the filtering — do not post-process
+        the `results` array yourself.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            example: NDLS
+          description: Source station code (one of NDLS, PRYJ, LKO, BSB, CNB, BCT, HWH)
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            example: PRYJ
+          description: Destination station code (one of NDLS, PRYJ, LKO, BSB, CNB, BCT, HWH)
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Journey date (YYYY-MM-DD), must be within the next 30 days from today
+        - name: preferred_departure_after
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Only include trains departing at/after this time (HH:MM)
+        - name: preferred_departure_before
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Only include trains departing at/before this time (HH:MM)
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TrainSearchResult'
+        '404':
+          description: Source or destination station code not recognized — re-check spelling, do not retry as-is
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /trains/{train_number}:
+    get:
+      operationId: getTrainDetails
+      summary: Get train details
+      description: Get full details for a train including route, schedule, running days, classes and fares.
+      parameters:
+        - name: train_number
+          in: path
+          required: true
+          schema:
+            type: string
+            example: '12418'
+      responses:
+        '200':
+          description: Train details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainDetail'
+        '404':
+          description: Train number not found — get valid train numbers from GET /trains/search first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /availability:
+    get:
+      operationId: checkAvailability
+      summary: Check seat availability
+      description: >
+        Check seat availability for a train, date, and travel class. Read-only; does
+        not modify seats. Some trains are intentionally scarce (2-4 seats) or fully
+        sold out (available_seats: 0) by design — a 0 does not mean the API is
+        broken, it means offer the user a different train/date/class.
+      parameters:
+        - name: train_number
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '12418'
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Must be within the next 30 days from today
+        - name: travel_class
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/TravelClass'
+        - name: tatkal
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: >
+            Availability details. Check available_seats before booking — 0 is a
+            valid, expected result for some trains, not an error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Availability'
+        '400':
+          description: Invalid travel class for this train — see GET /trains/{train_number} for its offered classes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Train not found, or no seeded data for this date (date is outside the 30-day window)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /fare:
+    get:
+      operationId: calculateFare
+      summary: Calculate fare
+      description: Calculate the fare breakdown (base fare, Tatkal surcharge, total) for a booking scenario.
+      parameters:
+        - name: train_number
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '12418'
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Must be within the next 30 days from today
+        - name: travel_class
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/TravelClass'
+        - name: passenger_count
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 6
+        - name: tatkal
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Fare breakdown
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FareBreakdown'
+        '400':
+          description: Invalid travel class for this train — see GET /trains/{train_number} for its offered classes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Train not found, or no seeded data for this date (date is outside the 30-day window)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /bookings:
+    post:
+      operationId: createBooking
+      summary: Create a booking
+      description: >
+        Create a new ticket booking. Validates the train, date, route, class, and
+        availability, calculates the fare, generates a PNR, and reduces available
+        seats. Call GET /availability first to confirm enough seats exist — this
+        avoids a wasted 409. Intentionally allows Tatkal bookings for any passenger
+        count and any fare amount — policy enforcement is expected from Harbor, not
+        this service; do not reject a request yourself for those reasons.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookingRequest'
+            example:
+              train_number: '12418'
+              journey_date: '2026-09-07'
+              from: NDLS
+              to: PRYJ
+              travel_class: 3A
+              tatkal: false
+              passengers:
+                - name: Rahul Sharma
+                  age: 32
+                  gender: M
+      responses:
+        '201':
+          description: Booking created — return the pnr to the user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          description: Validation error (bad route, class, or journey date) — fix the request, do not retry as-is
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Train or station not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: >
+            Not enough seats for this train/date/class/tatkal combination
+            (INSUFFICIENT_SEATS). Some trains run with limited or sold-out capacity
+            — call GET /trains/search again and offer the user a different train,
+            date, or class instead of retrying the same request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /bookings/{pnr}:
+    get:
+      operationId: getBookingByPnr
+      summary: Get booking by PNR
+      description: Retrieve complete booking details using the PNR.
+      parameters:
+        - name: pnr
+          in: path
+          required: true
+          schema:
+            type: string
+            example: '8732076977'
+      responses:
+        '200':
+          description: Booking details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '404':
+          description: No booking exists for this PNR — double-check the value returned by createBooking, do not guess a PNR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /bookings/{pnr}/cancel:
+    post:
+      operationId: cancelBooking
+      summary: Cancel a booking
+      description: Cancel a confirmed booking, restore seats to availability, and calculate the refund amount.
+      parameters:
+        - name: pnr
+          in: path
+          required: true
+          schema:
+            type: string
+            example: '8732076977'
+      responses:
+        '200':
+          description: Cancellation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cancellation'
+        '400':
+          description: Booking is already CANCELLED — do not call cancel again, tell the user its current status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No booking exists for this PNR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      description: >
+        Returns service status plus the server's current date and the valid
+        journey_date booking window. Call this first if unsure what "today" is —
+        never guess or assume a year/date for journey_date on other endpoints.
+      responses:
+        '200':
+          description: Service healthy — use `today` and `booking_window` to pick a valid journey_date
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  today:
+                    type: string
+                    format: date
+                    description: Server's current date — use this, not a guessed year
+                  booking_window:
+                    type: object
+                    properties:
+                      from:
+                        type: string
+                        format: date
+                      to:
+                        type: string
+                        format: date
+                    description: journey_date must fall within this inclusive range on every other endpoint
+
+  /demo/reset:
+    post:
+      operationId: resetDemoData
+      summary: Reset booking data
+      description: Removes all bookings and restores every availability record to its initial state.
+      responses:
+        '200':
+          description: Reset confirmation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+
+components:
+  schemas:
+    TravelClass:
+      type: string
+      enum: [SL, 3A, 2A, 1A]
+
+    BookingStatus:
+      type: string
+      enum: [CONFIRMED, CANCELLED]
+
+    Gender:
+      type: string
+      enum: [M, F, O]
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+    Station:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        city:
+          type: string
+
+    TrainSearchResult:
+      type: object
+      properties:
+        train_number:
+          type: string
+        train_name:
+          type: string
+        source_station:
+          type: string
+        destination_station:
+          type: string
+        departure_time:
+          type: string
+        arrival_time:
+          type: string
+        duration_minutes:
+          type: integer
+        available_classes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TravelClass'
+        fare:
+          type: object
+          additionalProperties:
+            type: number
+        tatkal_available:
+          type: boolean
+
+    TrainDetail:
+      type: object
+      properties:
+        train_number:
+          type: string
+        train_name:
+          type: string
+        source_station:
+          type: string
+        destination_station:
+          type: string
+        departure_time:
+          type: string
+        arrival_time:
+          type: string
+        duration_minutes:
+          type: integer
+        running_days:
+          type: array
+          items:
+            type: string
+        classes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TravelClass'
+        base_fare:
+          type: number
+        tatkal_available:
+          type: boolean
+        route:
+          type: array
+          items:
+            type: object
+            properties:
+              station_code:
+                type: string
+              station_name:
+                type: string
+              role:
+                type: string
+
+    Availability:
+      type: object
+      properties:
+        train_number:
+          type: string
+        date:
+          type: string
+        travel_class:
+          $ref: '#/components/schemas/TravelClass'
+        tatkal:
+          type: boolean
+        available_seats:
+          type: integer
+        total_seats:
+          type: integer
+        fare:
+          type: number
+
+    FareBreakdown:
+      type: object
+      properties:
+        train_number:
+          type: string
+        date:
+          type: string
+        travel_class:
+          $ref: '#/components/schemas/TravelClass'
+        passenger_count:
+          type: integer
+        tatkal:
+          type: boolean
+        base_fare_per_passenger:
+          type: number
+        tatkal_surcharge_per_passenger:
+          type: number
+        total_fare:
+          type: number
+
+    PassengerIn:
+      type: object
+      required: [name, age, gender]
+      properties:
+        name:
+          type: string
+        age:
+          type: integer
+          minimum: 1
+          maximum: 120
+        gender:
+          $ref: '#/components/schemas/Gender'
+        id_type:
+          type: string
+          nullable: true
+          description: ID type, e.g. AADHAAR, PASSPORT
+        id_number:
+          type: string
+          nullable: true
+          description: ID number corresponding to id_type
+
+    CreateBookingRequest:
+      type: object
+      required: [train_number, journey_date, from, to, travel_class, tatkal, passengers]
+      properties:
+        train_number:
+          type: string
+          example: '12418'
+        journey_date:
+          type: string
+          format: date
+          description: Must be within the next 30 days from today
+        from:
+          type: string
+          example: NDLS
+        to:
+          type: string
+          example: PRYJ
+        travel_class:
+          $ref: '#/components/schemas/TravelClass'
+        tatkal:
+          type: boolean
+        passengers:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PassengerIn'
+
+    Booking:
+      type: object
+      properties:
+        pnr:
+          type: string
+        train_number:
+          type: string
+        train_name:
+          type: string
+        journey_date:
+          type: string
+        source:
+          type: string
+        destination:
+          type: string
+        travel_class:
+          $ref: '#/components/schemas/TravelClass'
+        tatkal:
+          type: boolean
+        passengers:
+          type: array
+          items:
+            $ref: '#/components/schemas/PassengerIn'
+        total_fare:
+          type: number
+        status:
+          $ref: '#/components/schemas/BookingStatus'
+        created_at:
+          type: string
+          format: date-time
+
+    Cancellation:
+      type: object
+      properties:
+        pnr:
+          type: string
+        status:
+          $ref: '#/components/schemas/BookingStatus'
+        refund_amount:
+          type: number
+        message:
+          type: string

@@ -10,6 +10,7 @@ Four demo services are included so the framework works out of the box:
 | `order/` | 3002 | static-token | Order management — place and track |
 | `tasks/` | 3003 | static-token | Task CRUD — create, assign, complete |
 | `billing/` | 3004 | oauth-2.1 | Billing — demonstrates OAuth 2.1 JWT validation (disabled by default) |
+| `irctc/` | 3005 | static-token | IRCTC railway booking — search, availability, fare, book, cancel |
 
 Start the token-mode demo backends: `bash examples/demo/start.sh`
 
@@ -34,4 +35,4 @@ See `docs/service-onboarding.md` for the full `config.json` reference.
 
 ## Removing the demo services
 
-Delete any of the `product/`, `order/`, `tasks/`, or `billing/` folders you don't need. The gateway only registers folders that contain a valid `spec.yaml` + `config.json`.
+Delete any of the `product/`, `order/`, `tasks/`, `billing/`, or `irctc/` folders you don't need. The gateway only registers folders that contain a valid `spec.yaml` + `config.json`, and skips any folder whose `config.json` has `"enabled": false` — set that instead of deleting if you just want to disable a service temporarily.

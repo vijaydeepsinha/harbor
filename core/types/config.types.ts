@@ -41,9 +41,9 @@ export type IdempotencyBackendConfig =
 
 export type ServiceAuthConfig =
   | { type: 'static-token'; token?: string; protocol?: 'http' | 'https'; host?: string; port?: number; introspectionPath?: string; authTimeoutMs?: number; method?: 'GET' | 'POST'; tokenPassMode?: 'query' | 'body' | 'header'; tokenParamName?: string; refreshPath?: string; tokenRefreshBufferSec?: number }
-  | { type: 'oauth-introspection'; protocol?: 'http' | 'https'; host: string; port: number; introspectionPath: string; authTimeoutMs?: number; method?: 'GET' | 'POST'; tokenPassMode?: 'query' | 'body' | 'header'; tokenParamName?: string; refreshPath?: string; tokenRefreshBufferSec?: number; responseMapping?: Record<string, string>; metadataMapping?: Record<string, string> }
-  | { type: 'jwt-validation'; jwksUri: string; issuer: string; audience?: string; clockToleranceSec?: number; scopeClaim?: string; metadataMapping?: Record<string, string> }
-  | { type: 'oauth-2.1'; authorizationServer: string; audience?: string; clockToleranceSec?: number; scopeClaim?: string; metadataMapping?: Record<string, string>; discoveryTimeoutMs?: number }
+  | { type: 'oauth-introspection'; protocol?: 'http' | 'https'; host: string; port: number; introspectionPath: string; authTimeoutMs?: number; method?: 'GET' | 'POST'; tokenPassMode?: 'query' | 'body' | 'header'; tokenParamName?: string; refreshPath?: string; tokenRefreshBufferSec?: number; responseMapping?: Record<string, string>; metadataMapping?: Record<string, string>; audience?: string }
+  | { type: 'jwt-validation'; jwksUri: string; issuer: string; audience: string; clockToleranceSec?: number; scopeClaim?: string; metadataMapping?: Record<string, string> }
+  | { type: 'oauth-2.1'; authorizationServer: string; audience: string; clockToleranceSec?: number; scopeClaim?: string; metadataMapping?: Record<string, string>; discoveryTimeoutMs?: number }
 
 export type ServiceCircuitBreakerConfig =
   | { type: 'noop' }

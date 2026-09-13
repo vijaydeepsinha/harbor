@@ -16,19 +16,33 @@ The AI client connects via HTTP POST to `http://<host>:<port>/mcp`.
 - `Content-Type: application/json`
 - `Accept: application/json, text/event-stream`
 - `Authorization: Bearer <token>` — required on every request
+- `MCP-Protocol-Version: 2026-07-28`
+- `Mcp-Method: <json-rpc-method>` — must match the body's `method` field
+- `Mcp-Name: <tool-name>` — required for `tools/call` (must match `params.name`)
 
-**Stateless request flow:**
+**Stateless request flow (2026-07-28):**
 
-HTTP mode uses a **stateless** Streamable HTTP transport (`sessionIdGenerator: undefined` in the MCP SDK). Each `POST /mcp` request gets a fresh `McpServer` and transport instance. The bearer token is validated on every request — no `mcp-session-id` header is issued or required.
+Harbor 1.0 serves MCP protocol revision **2026-07-28** only (`legacy: 'reject'`). Each `POST /mcp` request carries a per-request `_meta` envelope and gets a fresh `McpServer` from the SDK v2 `createMcpHandler` entry. The bearer token is validated on every request — no session header is issued or required.
+
+Every request body's `params` must include:
+
+```json
+"_meta": {
+  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+  "io.modelcontextprotocol/clientInfo": { "name": "...", "version": "..." },
+  "io.modelcontextprotocol/clientCapabilities": {}
+}
+```
 
 ```
-1. POST /mcp   { method: "initialize" }
-   → Response includes server capabilities (no session header)
+1. POST /mcp   { method: "server/discover", params: { _meta: {...} } }
+   → Response includes serverInfo and supportedVersions
 
-2. POST /mcp   { method: "tools/list" }         ← optional discovery
+2. POST /mcp   { method: "tools/list", params: { _meta: {...} } }         ← optional discovery
    → Returns the 5 tool definitions with input schemas
 
-3. POST /mcp   { method: "tools/call", params: { name: "...", arguments: {...} } }
+3. POST /mcp   { method: "tools/call", params: { name: "...", arguments: {...}, _meta: {...} } }
+   Mcp-Name: <tool-name>
    → Returns tool result (SSE stream or JSON, depending on Accept)
 ```
 
@@ -66,8 +80,8 @@ All structured logs go to **stderr**. Stdout is reserved for the MCP protocol st
 ### Per-request lifecycle (HTTP)
 
 Each HTTP request creates a fresh `McpServer` with the client's bearer token bound into the tool handlers. Request-scoped state includes:
-- The raw bearer token from the `Authorization` header
-- A `correlationId` for request tracing (from the MCP SDK `extra` bag)
+- The raw bearer token from the `Authorization` header (via `ctx.authInfo` in the SDK v2 factory)
+- A `correlationId` for request tracing (from the MCP request id in `ServerContext`)
 - Active sandbox isolates for concurrent calls within that request
 
 When the HTTP response closes, the transport and `McpServer` are torn down.

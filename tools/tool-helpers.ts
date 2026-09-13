@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
+import { z } from 'zod'
 import type { TokenPayload, AuthResult } from '../core/types/auth.types.js'
 import { SessionExpiredError } from '../core/types/auth.types.js'
 import type { ServiceRegistry, ServiceResources } from '../runtime/registry/service-registry.js'
@@ -11,25 +12,44 @@ import {
   AUTH_SCHEME,
   METRIC,
   OUTCOME,
-  LOG_PREFIX
+  LOG_PREFIX,
+  GATEWAY_NAME,
+  GATEWAY_VERSION,
+  SERVER_INFO_META_KEY,
+  PROTOCOL_VERSION_META_KEY,
+  CLIENT_INFO_META_KEY,
+  CLIENT_CAPABILITIES_META_KEY
 } from '../core/constants.js'
 import { ensureError, errorCode, errorRetryable } from '../core/utils/errors.js'
+
+/** Server identity emitted in every response `_meta` (spec §10, recommended). */
+const SERVER_INFO = Object.freeze({ name: GATEWAY_NAME, version: GATEWAY_VERSION })
+
+/**
+ * Application-level metadata a tool may attach to a response `_meta` channel
+ * (spec §11). This is transport for the MCP client/application — correlation
+ * ids, audit ids, downstream ids — and is kept strictly out of model-visible
+ * `content`. It is NOT Human-in-the-Loop: no approval/elicitation/task state.
+ */
+export type AppMeta = Record<string, unknown>
+
+/**
+ * Builds a response `_meta` object. Server identity under the reserved
+ * `io.modelcontextprotocol/serverInfo` key is always present and always wins:
+ * application metadata is merged first so it can never spoof server identity.
+ */
+export function buildResponseMeta(appMeta?: AppMeta): Record<string, unknown> {
+  return { ...(appMeta ?? {}), [SERVER_INFO_META_KEY]: SERVER_INFO }
+}
 
 /** MCP tool handlers expect `Record<string, unknown>`-compatible objects. */
 export type ToolResponse = {
   content: Array<{ type: 'text'; text: string }>
   isError?: boolean
+  _meta?: Record<string, unknown>
 } & Record<string, unknown>
 
-/**
- * Shape of the `extra` bag the MCP SDK passes to tool handlers. Only the
- * fields the gateway actually reads are declared — the SDK may attach more
- * but we don't depend on them.
- */
-export interface McpToolExtra {
-  correlationId?: string
-  sessionId?: string
-}
+import type { ServerContext } from '@modelcontextprotocol/server'
 
 /**
  * Builds the standard `isError` MCP tool response. The on-wire payload always
@@ -39,12 +59,16 @@ export interface McpToolExtra {
  * only read the three core fields.
  *
  * Reserved keys (`error`, `code`, `retryable`) cannot be overridden by `extra`.
+ *
+ * `appMeta` is carried on the response `_meta` channel (spec §11), alongside
+ * serverInfo — never mixed into the model-visible error `content`.
  */
 export function mcpError(
   message: string,
   code: string,
   retryable = false,
-  extra?: Record<string, unknown>
+  extra?: Record<string, unknown>,
+  appMeta?: AppMeta
 ): ToolResponse {
   const payload: Record<string, unknown> = { ...(extra ?? {}), error: message, code, retryable }
   return {
@@ -52,28 +76,72 @@ export function mcpError(
       type: 'text' as const,
       text: JSON.stringify(payload)
     }],
-    isError: true
+    isError: true,
+    _meta: buildResponseMeta(appMeta)
   }
 }
 
-export function mcpSuccess(data: unknown): ToolResponse {
+export function mcpSuccess(data: unknown, appMeta?: AppMeta): ToolResponse {
   return {
     content: [{
       type: 'text' as const,
       text: typeof data === 'string' ? data : JSON.stringify(data, null, 2)
-    }]
+    }],
+    _meta: buildResponseMeta(appMeta)
   }
 }
 
-/** Reads `correlationId` off the MCP `extra` bag, falling back to a fresh UUID. */
-export function extractCorrelationId(extra: unknown): string {
-  return (extra as McpToolExtra | undefined)?.correlationId ?? crypto.randomUUID()
+/** Reads correlation id from the MCP handler context, falling back to a fresh UUID. */
+export function extractCorrelationId(ctx: ServerContext | undefined): string {
+  const id = ctx?.mcpReq?.id
+  if (id !== undefined && id !== null) return String(id)
+  return crypto.randomUUID()
 }
 
-/** Reads `sessionId` off the MCP `extra` bag, falling back to a fresh UUID. */
-export function extractSessionId(extra: unknown): string {
-  return (extra as McpToolExtra | undefined)?.sessionId ?? crypto.randomUUID()
+/** Reads session id from the MCP handler context, falling back to a fresh UUID. */
+export function extractSessionId(ctx: ServerContext | undefined): string {
+  return ctx?.sessionId ?? crypto.randomUUID()
 }
+
+/**
+ * Advisory-only view of per-request MCP metadata (spec §9): the negotiated
+ * protocol version, client implementation info, and client capabilities. The
+ * SDK lifts the reserved `io.modelcontextprotocol/*` envelope keys out of the
+ * params `_meta` the handler sees and onto `ctx.mcpReq.envelope`; this reads
+ * both, envelope-first.
+ *
+ * Untrusted, client-supplied — for logging/telemetry only. MUST NOT be used
+ * for authentication or authorization; auth flows through the validated
+ * bearer token (see {@link validateAuth}).
+ */
+export interface AdvisoryRequestMeta {
+  protocolVersion?: string
+  clientInfo?: { name?: string; version?: string } & Record<string, unknown>
+  clientCapabilities?: Record<string, unknown>
+}
+
+export function readRequestMeta(ctx: ServerContext | undefined): AdvisoryRequestMeta {
+  const mcpReq = ctx?.mcpReq
+  const src: Record<string, unknown> = {
+    ...((mcpReq?._meta as Record<string, unknown> | undefined) ?? {}),
+    ...((mcpReq?.envelope as Record<string, unknown> | undefined) ?? {})
+  }
+  const view: AdvisoryRequestMeta = {}
+  const pv = src[PROTOCOL_VERSION_META_KEY]
+  if (typeof pv === 'string') view.protocolVersion = pv
+  const ci = src[CLIENT_INFO_META_KEY]
+  if (ci !== null && typeof ci === 'object') view.clientInfo = ci as AdvisoryRequestMeta['clientInfo']
+  const cc = src[CLIENT_CAPABILITIES_META_KEY]
+  if (cc !== null && typeof cc === 'object') view.clientCapabilities = cc as Record<string, unknown>
+  return view
+}
+
+/**
+ * Shared `{ service, code }` input schema for the sandboxed-code tools
+ * (`discover_skills`, `search_code`, `api_execute`). Kept in one place so the
+ * contract only needs to change in a single spot.
+ */
+export const serviceCodeSchema = z.object({ service: z.string(), code: z.string() })
 
 export function resolveService(
   registry: ServiceRegistry,

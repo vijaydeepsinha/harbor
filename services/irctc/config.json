@@ -1,0 +1,31 @@
+{
+  "description": "IRCTC railway booking service — search trains, check seat availability, calculate fares, and create or cancel bookings. READ THE '00-start-here' SKILL FIRST. Call GET /health before picking any journey_date — never guess a year/date from memory. Never write custom filtering/sorting code or invent parameters — use only what the OpenAPI spec documents. Some trains run with limited or sold-out capacity (0 seats is a valid result, not a bug). This service does not enforce booking policy (Tatkal group size, max fare) — that is Harbor's job, not yours.",
+  "api": {
+    "protocol": "http",
+    "host": "localhost",
+    "port": 3005,
+    "basePath": "",
+    "requestTimeoutMs": 10000,
+    "maxRetries": 1
+  },
+  "enabled": true,
+  "auth": {
+    "type": "static-token",
+    "token": "demo-token-123"
+  },
+  "spec": {
+    "source": "file"
+  },
+  "serviceRefreshIntervalMs": 0,
+  "circuitBreaker": {
+    "type": "noop"
+  },
+  "idempotency": {
+    "type": "noop"
+  },
+  "sandbox": {
+    "executeTimeoutMs": 10000,
+    "maxApiCalls": 20,
+    "maxConcurrentCalls": 3
+  }
+}

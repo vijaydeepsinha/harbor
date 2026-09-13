@@ -4,11 +4,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$SCRIPT_DIR/.."
 
-echo "=== MCP Demo: Product + Order + Task services ==="
+export UVICORN_PORT="${UVICORN_PORT:-3005}"
+
+echo "=== MCP Demo: Product + Order + Task + IRCTC services ==="
 echo ""
 
 # Kill any leftover processes on demo ports
-for PORT in 3001 3002 3003; do
+for PORT in 3001 3002 3003 "$UVICORN_PORT"; do
   PID=$(lsof -ti tcp:$PORT 2>/dev/null || true)
   if [ -n "$PID" ]; then
     echo "Killing existing process on port $PORT (pid $PID)"
@@ -29,6 +31,10 @@ echo "Starting task-service on :3003 ..."
 node "$SCRIPT_DIR/task-service.js" &
 TASK_PID=$!
 
+echo "Starting irctc-service on :$UVICORN_PORT ..."
+(cd "$SCRIPT_DIR/irctc" && exec "$SCRIPT_DIR/irctc/.venv/bin/python3" -m app.main) &
+IRCTC_PID=$!
+
 # Give them a moment to bind
 sleep 0.5
 
@@ -45,7 +51,7 @@ MCP_PID=$!
 cleanup() {
   echo ""
   echo "Shutting down..."
-  kill "$PRODUCT_PID" "$ORDER_PID" "$TASK_PID" "$MCP_PID" 2>/dev/null || true
+  kill "$PRODUCT_PID" "$ORDER_PID" "$TASK_PID" "$IRCTC_PID" "$MCP_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -53,6 +59,7 @@ echo "=== All services running ==="
 echo "  product-service : http://localhost:3001"
 echo "  order-service   : http://localhost:3002"
 echo "  task-service    : http://localhost:3003"
+echo "  irctc-service   : http://localhost:$UVICORN_PORT"
 echo "  Harbor          : http://localhost:3333/mcp"
 echo ""
 echo "Connect your MCP client to http://localhost:3333/mcp"

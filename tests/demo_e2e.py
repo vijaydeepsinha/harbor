@@ -59,11 +59,30 @@ from typing import Optional
 GATEWAY_BASE  = "http://127.0.0.1:3333"
 GATEWAY_URL   = f"{GATEWAY_BASE}/mcp"
 BEARER_TOKEN  = "TestBearerTokenForE2ETestingOnly"
+MCP_PROTOCOL  = "2026-07-28"
+MCP_META_PROTOCOL   = "io.modelcontextprotocol/protocolVersion"
+MCP_META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
+MCP_META_CLIENT_CAPS = "io.modelcontextprotocol/clientCapabilities"
+MCP_META_SERVER_INFO = "io.modelcontextprotocol/serverInfo"
 SERVICE_STARTUP_WAIT_S = 1
 
 OAUTH_AS_BASE      = "http://localhost:8080/default"
 OAUTH_CLIENT_ID    = "harbor-test-client"
 OAUTH_CLIENT_SECRET = "test-secret"
+
+# jwt-validation and oauth-introspection both reuse the billing backend
+# (:3004) with a different Harbor-side service config — same upstream data,
+# different auth strategy under test.
+JWT_VALIDATION_SERVICE  = "billing-jwt"
+INTROSPECTION_SERVICE   = "billing-introspection"
+INTROSPECTION_PORT      = 3008
+
+# Fixed test fixtures known to examples/demo/mock-introspection-server.js.
+# All >=32 chars so Harbor's bearer-format pre-check lets them through to the
+# introspection strategy itself (see spi/auth/bearer-authorization.ts).
+INTROSPECT_TOKEN_VALID      = "introspection-valid-token-abc123"
+INTROSPECT_TOKEN_WRONG_AUD  = "introspection-wrong-aud-token-xyz789"
+INTROSPECT_TOKEN_REVOKED    = "introspection-revoked-token-00000000"
 
 ROOT         = Path(__file__).parent.parent
 COMPOSE_FILE = ROOT / "examples" / "07-oauth" / "docker-compose.yml"
@@ -86,6 +105,8 @@ def section(title): print(f"\n{BOLD}{CYAN}── {title}{RESET}")
 
 _procs: list[subprocess.Popen] = []
 _oauth_harbor_proc: Optional[subprocess.Popen] = None
+_billing_proc: Optional[subprocess.Popen] = None
+_introspection_proc: Optional[subprocess.Popen] = None
 
 def _find_node() -> str:
     for candidate in [
@@ -215,16 +236,18 @@ def _set_service_enabled(name: str, enabled: bool):
     cfg_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
 
 def _switch_to_oauth_mode():
-    _set_service_enabled("billing", True)
+    for svc in ("billing", JWT_VALIDATION_SERVICE, INTROSPECTION_SERVICE):
+        _set_service_enabled(svc, True)
     for svc in ("product", "order", "tasks"):
         _set_service_enabled(svc, False)
-    info("Service mode: billing=enabled, product/order/tasks=disabled")
+    info("Service mode: billing/billing-jwt/billing-introspection=enabled, product/order/tasks=disabled")
 
 def _switch_to_token_mode():
-    _set_service_enabled("billing", False)
+    for svc in ("billing", JWT_VALIDATION_SERVICE, INTROSPECTION_SERVICE):
+        _set_service_enabled(svc, False)
     for svc in ("product", "order", "tasks"):
         _set_service_enabled(svc, True)
-    info("Service mode restored: product/order/tasks=enabled, billing=disabled")
+    info("Service mode restored: product/order/tasks=enabled, billing/billing-jwt/billing-introspection=disabled")
 
 def _start_harbor_oauth(oauth_env: dict):
     global _oauth_harbor_proc
@@ -272,6 +295,91 @@ def _stop_harbor_oauth():
     _oauth_harbor_proc = None
     info("Harbor (OAuth mode) stopped")
 
+def _start_billing_backend():
+    """Start the billing backend (examples/demo/billing-service.js) on :3004.
+
+    Needed for the resource-binding test: a token that passes oauth-2.1
+    validation must reach a *real* backend for a genuine 200, and a rejected
+    token must never reach it.
+    """
+    global _billing_proc
+    node = _find_node()
+    script = ROOT / "examples" / "demo" / "billing-service.js"
+    _billing_proc = subprocess.Popen(
+        [node, str(script)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={**os.environ, "NODE_PATH": str(ROOT / "node_modules")},
+        cwd=str(ROOT),
+        start_new_session=True,
+    )
+    info(f"Started billing-service.js (pid {_billing_proc.pid})")
+    for _ in range(20):
+        try:
+            urllib.request.urlopen("http://localhost:3004/invoices", timeout=1)
+            return
+        except Exception:
+            time.sleep(0.5)
+    raise RuntimeError("billing backend (:3004) did not become ready")
+
+def _stop_billing_backend():
+    global _billing_proc
+    if _billing_proc is None:
+        return
+    try:
+        os.killpg(os.getpgid(_billing_proc.pid), signal.SIGTERM)
+    except Exception:
+        pass
+    try:
+        _billing_proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(_billing_proc.pid), signal.SIGKILL)
+        except Exception:
+            pass
+    _billing_proc = None
+    info("billing backend stopped")
+
+def _start_introspection_server():
+    """Start the mock RFC 7662 introspection server (:3008) for oauth-introspection."""
+    global _introspection_proc
+    node = _find_node()
+    script = ROOT / "examples" / "demo" / "mock-introspection-server.js"
+    _introspection_proc = subprocess.Popen(
+        [node, str(script)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={**os.environ, "NODE_PATH": str(ROOT / "node_modules")},
+        cwd=str(ROOT),
+        start_new_session=True,
+    )
+    info(f"Started mock-introspection-server.js (pid {_introspection_proc.pid})")
+    for _ in range(20):
+        try:
+            urllib.request.urlopen(f"http://localhost:{INTROSPECTION_PORT}/introspect?token=x", timeout=1)
+            return
+        except Exception:
+            time.sleep(0.5)
+    raise RuntimeError(f"mock introspection server (:{INTROSPECTION_PORT}) did not become ready")
+
+def _stop_introspection_server():
+    global _introspection_proc
+    if _introspection_proc is None:
+        return
+    try:
+        os.killpg(os.getpgid(_introspection_proc.pid), signal.SIGTERM)
+    except Exception:
+        pass
+    try:
+        _introspection_proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(_introspection_proc.pid), signal.SIGKILL)
+        except Exception:
+            pass
+    _introspection_proc = None
+    info("mock introspection server stopped")
+
 def _get_real_jwt() -> str:
     data = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode()
     credentials = base64.b64encode(f"{OAUTH_CLIENT_ID}:{OAUTH_CLIENT_SECRET}".encode()).decode()
@@ -287,103 +395,111 @@ def _get_real_jwt() -> str:
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode())["access_token"]
 
-def _mcp_init_with_jwt(jwt: str) -> dict:
-    """Returns parsed initialize response, or {_error: ...} on failure."""
-    payload = json.dumps({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "smoke", "version": "1"},
-        },
+def _get_jwt_wrong_aud() -> str:
+    """Mint a JWT from the SAME mock AS but bound to a *different* resource.
+
+    The mock AS config matches `scope=confused-deputy` first and stamps
+    `aud: ["https://not-harbor.example.com"]`. The token is otherwise
+    well-formed and signed by the same key Harbor discovers via JWKS — only the
+    audience differs. This is the confused-deputy / token pass-through scenario
+    Harbor's oauth-2.1 resource binding (RFC 8707, MCP 2026-07-28 §17) must
+    reject.
+    """
+    data = urllib.parse.urlencode({
+        "grant_type": "client_credentials",
+        "scope": "confused-deputy",
     }).encode()
+    credentials = base64.b64encode(f"{OAUTH_CLIENT_ID}:{OAUTH_CLIENT_SECRET}".encode()).decode()
+    req = urllib.request.Request(
+        f"{OAUTH_AS_BASE}/token",
+        data=data,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Basic {credentials}",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode())["access_token"]
+
+def _mcp_envelope() -> dict:
+    return {
+        MCP_META_PROTOCOL: MCP_PROTOCOL,
+        MCP_META_CLIENT_INFO: {"name": "e2e-smoke", "version": "1"},
+        MCP_META_CLIENT_CAPS: {},
+    }
+
+def _mcp_params(params: dict) -> dict:
+    return {**params, "_meta": _mcp_envelope()}
+
+def _mcp_headers(method: str, token: str, name: Optional[str] = None) -> dict:
+    headers = {
+        "Content-Type":           "application/json",
+        "Authorization":          f"Bearer {token}",
+        "Accept":                 "application/json, text/event-stream",
+        "MCP-Protocol-Version":   MCP_PROTOCOL,
+        "Mcp-Method":             method,
+    }
+    if name is not None:
+        headers["Mcp-Name"] = name
+    return headers
+
+def _parse_mcp_response(raw: str) -> dict:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    for line in raw.splitlines():
+        if line.startswith("data: "):
+            return json.loads(line[6:])
+    return {"_transport_error": f"unparseable response: {raw[:200]}"}
+
+def _mcp_discover_with_jwt(jwt: str) -> dict:
+    """Returns parsed server/discover response, or {_error: ...} on failure."""
+    payload = {
+        "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+        "params": _mcp_params({}),
+    }
     req = urllib.request.Request(
         GATEWAY_URL,
-        data=payload,
-        headers={
-            "Content-Type":  "application/json",
-            "Authorization": f"Bearer {jwt}",
-            "Accept":        "application/json, text/event-stream",
-        },
+        data=json.dumps(payload).encode(),
+        headers=_mcp_headers("server/discover", jwt),
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode()
-        for line in raw.splitlines():
-            if line.startswith("data: "):
-                return json.loads(line[6:])
-        try:
-            return json.loads(raw)
-        except Exception:
-            pass
+            return _parse_mcp_response(resp.read().decode())
     except Exception as e:
         return {"_error": str(e)}
-    return {"_error": "no data: line in SSE response"}
 
-
-def _mcp_notify_initialized_jwt(jwt: str):
-    """Send notifications/initialized (fire-and-forget, no response expected)."""
-    body = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}).encode()
-    req  = urllib.request.Request(
-        GATEWAY_URL, data=body,
-        headers={
-            "Content-Type":   "application/json",
-            "Accept":         "application/json, text/event-stream",
-            "Authorization":  f"Bearer {jwt}",
-        },
-        method="POST",
-    )
-    try:
-        urllib.request.urlopen(req, timeout=5)
-    except Exception:
-        pass
-
-
-def _mcp_post_jwt(payload: dict, jwt: str) -> dict:
-    """POST an MCP request using a JWT (stateless — bearer on every request)."""
-    body = json.dumps(payload).encode()
-    req  = urllib.request.Request(
-        GATEWAY_URL, data=body,
-        headers={
-            "Content-Type":   "application/json",
-            "Accept":         "application/json, text/event-stream",
-            "Authorization":  f"Bearer {jwt}",
-        },
+def _mcp_post_jwt(payload: dict, jwt: str, mcp_name: Optional[str] = None) -> dict:
+    """POST an MCP request using a JWT (2026-07-28 envelope + headers)."""
+    method = payload["method"]
+    body_payload = dict(payload)
+    if "params" in body_payload and isinstance(body_payload["params"], dict):
+        body_payload["params"] = _mcp_params(body_payload["params"])
+    req = urllib.request.Request(
+        GATEWAY_URL,
+        data=json.dumps(body_payload).encode(),
+        headers=_mcp_headers(method, jwt, mcp_name),
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode()
-        for line in raw.splitlines():
-            if line.startswith("data: "):
-                return json.loads(line[6:])
-        try:
-            return json.loads(raw)
-        except Exception:
-            return {"_error": f"unparseable: {raw[:200]}"}
+            return _parse_mcp_response(resp.read().decode())
     except urllib.error.HTTPError as e:
         return {"_error": f"HTTP {e.code}: {e.read().decode()[:200]}"}
-
 
 def _post_with_bearer(path: str, token: str) -> tuple[int, dict]:
     """POST to path with an explicit Bearer token; returns (status, headers)."""
     url = f"{GATEWAY_BASE}{path}"
-    payload = json.dumps({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "test", "version": "1"},
-        },
-    }).encode()
+    payload = {
+        "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+        "params": _mcp_params({}),
+    }
     req = urllib.request.Request(
-        url, data=payload,
-        headers={
-            "Content-Type":  "application/json",
-            "Accept":        "application/json, text/event-stream",
-            "Authorization": f"Bearer {token}",
-        },
+        url, data=json.dumps(payload).encode(),
+        headers=_mcp_headers("server/discover", token),
         method="POST",
     )
     try:
@@ -394,55 +510,49 @@ def _post_with_bearer(path: str, token: str) -> tuple[int, dict]:
 
 # ── MCP transport helpers ─────────────────────────────────────────────────────
 
-def _mcp_post(payload: dict) -> dict:
-    body = json.dumps(payload).encode()
-    headers = {
-        "Content-Type":  "application/json",
-        "Authorization": f"Bearer {BEARER_TOKEN}",
-        "Accept":        "application/json, text/event-stream",
-    }
+def _mcp_post(payload: dict, token: str = BEARER_TOKEN) -> dict:
+    method = payload["method"]
+    mcp_name = None
+    params = payload.get("params") or {}
+    if method == "tools/call":
+        mcp_name = params.get("name")
+    body_payload = dict(payload)
+    if "params" in body_payload and isinstance(body_payload["params"], dict):
+        body_payload["params"] = _mcp_params(body_payload["params"])
 
-    req = urllib.request.Request(GATEWAY_URL, data=body, headers=headers, method="POST")
+    req = urllib.request.Request(
+        GATEWAY_URL,
+        data=json.dumps(body_payload).encode(),
+        headers=_mcp_headers(method, token, mcp_name),
+        method="POST",
+    )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read().decode()
+            return _parse_mcp_response(resp.read().decode())
     except Exception as e:
         return {"_transport_error": str(e)}
 
-    for line in raw.splitlines():
-        if line.startswith("data: "):
-            return json.loads(line[6:])
-    return {"_transport_error": "no data line in SSE response"}
-
 def mcp_init() -> bool:
     payload = {
-        "jsonrpc": "2.0", "id": 0, "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "e2e-smoke", "version": "1"},
-        },
+        "jsonrpc": "2.0", "id": 0, "method": "server/discover",
+        "params": {},
     }
-    body = json.dumps(payload).encode()
-    headers = {
-        "Content-Type":  "application/json",
-        "Authorization": f"Bearer {BEARER_TOKEN}",
-        "Accept":        "application/json, text/event-stream",
-    }
-    req = urllib.request.Request(GATEWAY_URL, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode()
+        resp = _mcp_post(payload)
     except Exception as e:
         print(f"{RED}Gateway not reachable: {e}{RESET}")
         return False
 
-    for line in raw.splitlines():
-        if line.startswith("data: "):
-            d = json.loads(line[6:])
-            if "result" in d and "serverInfo" in d["result"]:
-                return True
-    return False
+    if "_transport_error" in resp:
+        print(f"{RED}Gateway not reachable: {resp['_transport_error']}{RESET}")
+        return False
+    if "error" in resp:
+        print(f"{RED}server/discover failed: {resp['error']}{RESET}")
+        return False
+    # Final 2026-07-28 revision: serverInfo lives in the result `_meta`, not
+    # the result body (SDK v2 beta.5+ / GA — see MCP_META_* constants below).
+    server_info = resp.get("result", {}).get("_meta", {}).get(MCP_META_SERVER_INFO, {})
+    return server_info.get("name") == "harbor"
 
 def call_tool(name: str, args: dict, req_id: int) -> dict:
     resp = _mcp_post({
@@ -461,6 +571,30 @@ def call_tool(name: str, args: dict, req_id: int) -> dict:
 
 def api_exec(service: str, code: str, req_id: int) -> dict:
     return call_tool("api_execute", {"service": service, "code": code}, req_id)
+
+def api_exec_jwt(service: str, code: str, req_id: int, jwt: str) -> dict:
+    """Run api_execute over a JWT-authenticated MCP call.
+
+    Returns a normalized dict so resource-binding assertions can inspect both
+    the transport/JSON-RPC outcome and the tool-level result:
+      { is_error: bool, parsed: dict|None, raw: dict }
+    `is_error` is the MCP tool-result `isError` flag; `parsed` is the decoded
+    first text-content block (Harbor serializes both success data and error
+    envelopes as JSON there).
+    """
+    resp = _mcp_post_jwt({
+        "jsonrpc": "2.0", "id": req_id, "method": "tools/call",
+        "params": {"name": "api_execute", "arguments": {"service": service, "code": code}},
+    }, jwt, mcp_name="api_execute")
+    if "_error" in resp:
+        return {"is_error": True, "parsed": {"error": resp["_error"]}, "raw": resp}
+    result = resp.get("result", {})
+    parsed = None
+    try:
+        parsed = json.loads(result["content"][0]["text"])
+    except Exception:
+        pass
+    return {"is_error": bool(result.get("isError")), "parsed": parsed, "raw": resp}
 
 # ── Assertions ────────────────────────────────────────────────────────────────
 
@@ -791,22 +925,19 @@ def test_docker_oauth(resource_uri: str):
     bad_status, _ = _post_with_bearer("/mcp", "this-is-not-a-valid-jwt-token")
     assert_eq(bad_status, 401, "weak token rejected with 401")
 
-    # ── MCP handshake with real JWT ───────────────────────────────────────────
-    section("OAuth 2.1 — MCP handshake with real JWT")
-    init_resp = _mcp_init_with_jwt(jwt)
-    assert_true("result" in init_resp,
-                f"initialize with real JWT → result present  {init_resp.get('_error', '')}")
+    # ── MCP handshake with real JWT (2026-07-28) ───────────────────────────────
+    section("OAuth 2.1 — MCP server/discover with real JWT")
+    discover_resp = _mcp_discover_with_jwt(jwt)
+    assert_true("result" in discover_resp,
+                f"server/discover with real JWT → result present  {discover_resp.get('_error', '')}")
     assert_eq(
-        init_resp.get("result", {}).get("serverInfo", {}).get("name"),
+        discover_resp.get("result", {}).get("_meta", {}).get(MCP_META_SERVER_INFO, {}).get("name"),
         "harbor",
-        "initialize → serverInfo.name = harbor",
+        "server/discover → serverInfo.name = harbor",
     )
 
-    _mcp_notify_initialized_jwt(jwt)
-    ok("notifications/initialized sent")
-
     tools_resp = _mcp_post_jwt(
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         jwt,
     )
     assert_true("_error" not in tools_resp,
@@ -816,6 +947,177 @@ def test_docker_oauth(resource_uri: str):
     tool_names = [t["name"] for t in tools]
     for name in ("discover_services", "discover_skills", "search_code", "api_execute"):
         assert_in(name, tool_names, f"tool '{name}' present")
+
+    # ── Resource binding (MCP 2026-07-28 §17 / RFC 8707) — LIVE ────────────────
+    # Per-service oauth-2.1 JWT validation (signature via discovered JWKS,
+    # issuer, AND audience) fires inside api_execute BEFORE the backend call.
+    # server/discover and tools/list do NOT trigger it, so resource binding must
+    # be exercised through api_execute on the billing service.
+    section("OAuth 2.1 — resource binding via api_execute (billing)")
+
+    BILLING_CODE = ('async () => { const r = await api.request({ method: "GET", '
+                    'path: "/invoices" }); return r.data; }')
+
+    # (a) Correct-aud JWT (aud = http://localhost:3333) → validation PASSES,
+    #     backend reached, real invoices returned.
+    good = api_exec_jwt("billing", BILLING_CODE, 600, jwt)
+    assert_true(not good["is_error"],
+                f"api_execute(billing) with correct-aud JWT → success  "
+                f"{(good['parsed'] or {}).get('error', '')}")
+    invoices = (good["parsed"] or {}).get("invoices", [])
+    assert_true(len(invoices) > 0,
+                f"correct-aud JWT → {len(invoices)} invoices returned from live backend")
+    if invoices:
+        inv_ids = [i.get("id") for i in invoices]
+        assert_in("inv-001", inv_ids, "live billing backend returned inv-001")
+
+    # (a2) A second, distinct authenticated tool call with the SAME token —
+    #      confirms auth success isn't a one-off fluke and the token is
+    #      genuinely usable for repeat calls, not just the first one.
+    DETAIL_CODE = ('async () => { const r = await api.request({ method: "GET", '
+                   'path: "/invoices/inv-001" }); return r.data; }')
+    detail = api_exec_jwt("billing", DETAIL_CODE, 602, jwt)
+    assert_true(not detail["is_error"],
+                f"second call — api_execute(billing) GET /invoices/inv-001 → success  "
+                f"{(detail['parsed'] or {}).get('error', '')}")
+    assert_eq((detail["parsed"] or {}).get("id"), "inv-001",
+              "second call → correct invoice detail returned")
+
+    # (b) Wrong-aud JWT (same AS, same signature, aud = not-harbor) → resource
+    #     binding REJECTS. Confused-deputy / token pass-through must fail closed.
+    try:
+        wrong_jwt = _get_jwt_wrong_aud()
+    except Exception as e:
+        assert_true(False, f"wrong-aud JWT acquired from mock AS  →  {e}")
+        wrong_jwt = None
+
+    if wrong_jwt:
+        assert_eq(len(wrong_jwt.split(".")), 3, "wrong-aud JWT is a well-formed JWT")
+        bad = api_exec_jwt("billing", BILLING_CODE, 601, wrong_jwt)
+        assert_true(bad["is_error"],
+                    "api_execute(billing) with wrong-aud JWT → rejected (isError)")
+        bad_parsed = bad["parsed"] or {}
+        assert_true("invoices" not in bad_parsed,
+                    "wrong-aud JWT → NO invoice data leaked")
+        code = bad_parsed.get("code", "")
+        assert_eq(code, "TOKEN_INVALID",
+                  "wrong-aud rejection carries the deterministic TOKEN_INVALID code")
+
+def test_jwt_validation():
+    """jwt-validation strategy, live: local JWT verification against the same
+    Docker mock AS's JWKS (no discovery — jwksUri/issuer/audience configured
+    directly). Same confused-deputy protection as oauth-2.1, exercised via a
+    separate Harbor service (`billing-jwt`) pointed at the same billing
+    backend so only the auth strategy under test differs."""
+    section("jwt-validation — real JWT, direct JWKS (billing-jwt)")
+
+    CODE = ('async () => { const r = await api.request({ method: "GET", '
+            'path: "/invoices" }); return r.data; }')
+
+    try:
+        jwt = _get_real_jwt()
+    except Exception as e:
+        assert_true(False, f"JWT acquired from mock AS  →  {e}")
+        return
+
+    # (a) Correct-aud JWT → jwt-validation accepts it, backend reached.
+    good = api_exec_jwt(JWT_VALIDATION_SERVICE, CODE, 610, jwt)
+    assert_true(not good["is_error"],
+                f"api_execute({JWT_VALIDATION_SERVICE}) with correct-aud JWT → success  "
+                f"{(good['parsed'] or {}).get('error', '')}")
+    invoices = (good["parsed"] or {}).get("invoices", [])
+    assert_true(len(invoices) > 0,
+                f"correct-aud JWT → {len(invoices)} invoices returned from live backend")
+
+    # (a2) A second, distinct authenticated tool call with the SAME token —
+    #      confirms the auth pass isn't a one-off fluke.
+    DETAIL_CODE = ('async () => { const r = await api.request({ method: "GET", '
+                   'path: "/invoices/inv-001" }); return r.data; }')
+    detail = api_exec_jwt(JWT_VALIDATION_SERVICE, DETAIL_CODE, 612, jwt)
+    assert_true(not detail["is_error"],
+                f"second call — api_execute({JWT_VALIDATION_SERVICE}) GET /invoices/inv-001 → success  "
+                f"{(detail['parsed'] or {}).get('error', '')}")
+    assert_eq((detail["parsed"] or {}).get("id"), "inv-001",
+              "second call → correct invoice detail returned")
+
+    # (b) Wrong-aud JWT (same AS, same signature, different aud) → rejected.
+    try:
+        wrong_jwt = _get_jwt_wrong_aud()
+    except Exception as e:
+        assert_true(False, f"wrong-aud JWT acquired from mock AS  →  {e}")
+        wrong_jwt = None
+
+    if wrong_jwt:
+        bad = api_exec_jwt(JWT_VALIDATION_SERVICE, CODE, 611, wrong_jwt)
+        assert_true(bad["is_error"],
+                    f"api_execute({JWT_VALIDATION_SERVICE}) with wrong-aud JWT → rejected (isError)")
+        bad_parsed = bad["parsed"] or {}
+        assert_true("invoices" not in bad_parsed,
+                    "wrong-aud JWT → NO invoice data leaked")
+        assert_eq(bad_parsed.get("code", ""), "TOKEN_INVALID",
+                  "wrong-aud rejection carries the deterministic TOKEN_INVALID code")
+
+    # (c) No token → 401 before the strategy (or the backend) is ever reached.
+    status, _ = _post_with_bearer("/mcp", "")
+    # An empty bearer is sent as `Authorization: Bearer `, which the parser
+    # treats as a missing/malformed credential — same 401 path as no header.
+    assert_true(status in (400, 401), f"empty bearer rejected before dispatch (status {status})")
+
+def test_oauth_introspection():
+    """oauth-introspection strategy, live: Harbor calls a real HTTP
+    introspection endpoint (examples/demo/mock-introspection-server.js) for
+    every request — no JWT parsing/JWKS involved at all. Exercises the
+    best-effort (not fail-closed) resource-binding check documented on
+    `OAuthIntrospectionConfig.audience` (RFC 7662 §2.2 makes `aud` optional
+    in a real introspection response)."""
+    section("oauth-introspection — real HTTP introspection call (billing-introspection)")
+
+    CODE = ('async () => { const r = await api.request({ method: "GET", '
+            'path: "/invoices" }); return r.data; }')
+
+    # (a) Valid, correct-audience token → introspection returns active+matching
+    #     aud, backend reached.
+    good = api_exec_jwt(INTROSPECTION_SERVICE, CODE, 620, INTROSPECT_TOKEN_VALID)
+    assert_true(not good["is_error"],
+                f"api_execute({INTROSPECTION_SERVICE}) with valid token → success  "
+                f"{(good['parsed'] or {}).get('error', '')}")
+    invoices = (good["parsed"] or {}).get("invoices", [])
+    assert_true(len(invoices) > 0,
+                f"valid token → {len(invoices)} invoices returned from live backend")
+
+    # (a2) A second, distinct authenticated tool call with the SAME token —
+    #      confirms the auth pass isn't a one-off fluke.
+    DETAIL_CODE = ('async () => { const r = await api.request({ method: "GET", '
+                   'path: "/invoices/inv-001" }); return r.data; }')
+    detail = api_exec_jwt(INTROSPECTION_SERVICE, DETAIL_CODE, 623, INTROSPECT_TOKEN_VALID)
+    assert_true(not detail["is_error"],
+                f"second call — api_execute({INTROSPECTION_SERVICE}) GET /invoices/inv-001 → success  "
+                f"{(detail['parsed'] or {}).get('error', '')}")
+    assert_eq((detail["parsed"] or {}).get("id"), "inv-001",
+              "second call → correct invoice detail returned")
+
+    # (b) Introspection-active token, but wrong `aud` in the response → the
+    #     best-effort resource-binding check rejects it.
+    wrong_aud = api_exec_jwt(INTROSPECTION_SERVICE, CODE, 621, INTROSPECT_TOKEN_WRONG_AUD)
+    assert_true(wrong_aud["is_error"],
+                f"api_execute({INTROSPECTION_SERVICE}) with wrong-aud token → rejected (isError)")
+    wrong_aud_parsed = wrong_aud["parsed"] or {}
+    assert_true("invoices" not in wrong_aud_parsed,
+                "wrong-aud token → NO invoice data leaked")
+    assert_eq(wrong_aud_parsed.get("code", ""), "TOKEN_INVALID",
+              "wrong-aud rejection carries the deterministic TOKEN_INVALID code")
+
+    # (c) Revoked/unknown token → introspection returns `{active: false}`
+    #     (no expires_in) → rejected.
+    revoked = api_exec_jwt(INTROSPECTION_SERVICE, CODE, 622, INTROSPECT_TOKEN_REVOKED)
+    assert_true(revoked["is_error"],
+                f"api_execute({INTROSPECTION_SERVICE}) with revoked token → rejected (isError)")
+    assert_true("invoices" not in (revoked["parsed"] or {}),
+                "revoked token → NO invoice data leaked")
+
+    # (d) No token → 401 before introspection is ever called.
+    status, _ = _post_no_token("/mcp")
+    assert_eq(status, 401, "POST /mcp without token → 401 (introspection never called)")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -866,7 +1168,7 @@ def main():
         if not args.start_services:
             print("Run with --start-services, or start the demo manually first.")
         sys.exit(1)
-    ok("Gateway connected (stateless HTTP)")
+    ok("Gateway connected (MCP 2026-07-28)")
 
     try:
         test_discover_services()
@@ -891,14 +1193,20 @@ def main():
             _switch_to_oauth_mode()
             _docker_oauth_up()
             try:
+                _start_billing_backend()
+                _start_introspection_server()
                 _start_harbor_oauth({
                     "HARBOR_RESOURCE_URI":    args.oauth_resource_uri,
                     "HARBOR_AUTH_SERVERS":    OAUTH_AS_BASE,
                     "HARBOR_SCOPES_SUPPORTED": "api:read,api:write",
                 })
                 test_docker_oauth(args.oauth_resource_uri)
+                test_jwt_validation()
+                test_oauth_introspection()
             finally:
                 _stop_harbor_oauth()
+                _stop_billing_backend()
+                _stop_introspection_server()
                 _docker_oauth_down()
                 _switch_to_token_mode()
                 info("Phase-2 cleanup complete")

@@ -3,19 +3,29 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { ERR } from '../../core/constants.js'
+import type { AuthInfo } from '@modelcontextprotocol/server'
+import { ERR, MCP_PROTOCOL_VERSION } from '../../core/constants.js'
 
-const { mockHandleRequest, mockTransportClose } = vi.hoisted(() => ({
-  mockHandleRequest: vi.fn(),
-  mockTransportClose: vi.fn().mockResolvedValue(undefined)
-}))
+const { mockNodeMcpHandler, mockCreateMcpHandler, mockToNodeHandler } = vi.hoisted(() => {
+  const nodeHandler = vi.fn()
+  return {
+    mockNodeMcpHandler: nodeHandler,
+    mockCreateMcpHandler: vi.fn(() => ({ fetch: vi.fn() })),
+    mockToNodeHandler: vi.fn(() => nodeHandler)
+  }
+})
 
-vi.mock('@modelcontextprotocol/sdk/server/streamableHttp.js', () => ({
-  StreamableHTTPServerTransport: vi.fn().mockImplementation(() => ({
-    handleRequest: mockHandleRequest,
-    close: mockTransportClose
-  }))
+vi.mock('@modelcontextprotocol/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@modelcontextprotocol/server')>()
+  return {
+    ...actual,
+    createMcpHandler: mockCreateMcpHandler,
+    UnsupportedProtocolVersionError: class UnsupportedProtocolVersionError extends Error {}
+  }
+})
+
+vi.mock('@modelcontextprotocol/node', () => ({
+  toNodeHandler: mockToNodeHandler
 }))
 
 import { startHttpGateway, type HttpGatewayHandle } from '../../runtime/http/http-gateway.js'
@@ -24,10 +34,9 @@ import type { Logger } from '../../runtime/observability/logger.js'
 
 /**
  * The gateway is tested end-to-end against a real `node:http` listener on an
- * ephemeral port. Routes that never reach `transport.handleRequest` (health,
- * 404s, and every auth rejection path) can be asserted without any MCP SDK
- * plumbing because the gateway short-circuits before handing off to the
- * transport.
+ * ephemeral port. Routes that never reach the MCP handler (health, 404s, and
+ * every auth rejection path) can be asserted without any SDK plumbing because
+ * the gateway short-circuits before delegating to `toNodeHandler`.
  */
 
 function makeLogger(): Logger {
@@ -69,10 +78,22 @@ describe('startHttpGateway', () => {
   let cleanup: (() => Promise<void>) | null = null
 
   afterEach(async () => {
+    mockNodeMcpHandler.mockReset()
+    mockCreateMcpHandler.mockClear()
+    mockToNodeHandler.mockClear()
     if (cleanup) {
       await cleanup()
       cleanup = null
     }
+  })
+
+  it('constructs the MCP handler with { legacy: "reject" } — the PR\'s headline breaking change (C-1)', async () => {
+    const { close } = await startForTest()
+    cleanup = close
+
+    expect(mockCreateMcpHandler).toHaveBeenCalledTimes(1)
+    const [, options] = mockCreateMcpHandler.mock.calls[0] as [unknown, { legacy?: string }]
+    expect(options).toMatchObject({ legacy: 'reject' })
   })
 
   it('GET /health returns 200 with service registry snapshot', async () => {
@@ -83,9 +104,19 @@ describe('startHttpGateway', () => {
     const res = await fetch(`${baseUrl}/health`)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('application/json')
-    const body = await res.json() as { status: string; services: string[] }
+    const body = await res.json() as { status: string; protocolVersion: string; services: string[] }
     expect(body.status).toBe('ok')
     expect(body.services).toEqual([])
+  })
+
+  it('GET /health advertises the single supported protocol version (spec §20)', async () => {
+    const { baseUrl, close } = await startForTest()
+    cleanup = close
+
+    const res = await fetch(`${baseUrl}/health`)
+    const body = await res.json() as { protocolVersion: string }
+    expect(body.protocolVersion).toBe(MCP_PROTOCOL_VERSION)
+    expect(body.protocolVersion).toBe('2026-07-28')
   })
 
   it('unknown route returns 404 with the gateway error envelope', async () => {
@@ -98,20 +129,14 @@ describe('startHttpGateway', () => {
     expect(body.code).toBe(ERR.NOT_FOUND)
   })
 
-  it('POST /mcp without Authorization is rejected before creating a server', async () => {
-    let createMcpServerCalled = false
-    const { baseUrl, close } = await startForTest({
-      createMcpServer: () => {
-        createMcpServerCalled = true
-        throw new Error('should not reach createMcpServer')
-      }
-    })
+  it('POST /mcp without Authorization is rejected before MCP dispatch', async () => {
+    const { baseUrl, close } = await startForTest()
     cleanup = close
 
     const res = await fetch(`${baseUrl}/mcp`, { method: 'POST' })
     expect(res.status).toBeGreaterThanOrEqual(400)
     expect(res.status).toBeLessThan(500)
-    expect(createMcpServerCalled).toBe(false)
+    expect(mockNodeMcpHandler).not.toHaveBeenCalled()
     const body = await res.json() as { code: string }
     expect(body.code).toBe(ERR.MISSING_TOKEN)
   })
@@ -147,27 +172,19 @@ describe('startHttpGateway', () => {
     expect(body.code).toBe(ERR.INTERNAL)
   })
 
-  it('POST /mcp with valid bearer connects transport, handles request, and cleans up', async () => {
-    mockHandleRequest.mockReset()
-    mockTransportClose.mockClear()
-
-    let capturedToken = ''
-    const mockConnect = vi.fn().mockResolvedValue(undefined)
-    const mockServerClose = vi.fn().mockResolvedValue(undefined)
-
-    mockHandleRequest.mockImplementation(async (_req, res) => {
+  it('POST /mcp with valid bearer attaches authInfo and delegates to the MCP handler', async () => {
+    mockNodeMcpHandler.mockImplementation(async (req, res) => {
       res.statusCode = 200
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ ok: true }))
     })
 
+    let factoryCalled = false
     const { baseUrl, close } = await startForTest({
-      createMcpServer: (clientToken: string) => {
-        capturedToken = clientToken
-        return {
-          connect: mockConnect,
-          close: mockServerClose
-        } as unknown as McpServer
+      createMcpServer: (ctx) => {
+        factoryCalled = true
+        expect(ctx.authInfo?.token).toBeDefined()
+        return {} as never
       }
     })
     cleanup = close
@@ -179,12 +196,55 @@ describe('startHttpGateway', () => {
     })
 
     expect(res.status).toBe(200)
-    expect(capturedToken).toBe(testToken)
-    expect(mockConnect).toHaveBeenCalledTimes(1)
-    expect(mockHandleRequest).toHaveBeenCalledTimes(1)
+    expect(mockNodeMcpHandler).toHaveBeenCalledTimes(1)
 
-    await new Promise<void>(resolve => setTimeout(resolve, 20))
-    expect(mockServerClose).toHaveBeenCalledTimes(1)
-    expect(mockTransportClose).toHaveBeenCalledTimes(1)
+    const [req] = mockNodeMcpHandler.mock.calls[0] as [{ auth?: AuthInfo }]
+    expect(req.auth?.token).toBe(testToken)
+    // Factory is invoked by createMcpHandler at handler construction time in
+    // production; here we only assert auth passthrough on the Node request.
+    expect(factoryCalled).toBe(false)
+  })
+
+  it('wires onerror into createMcpHandler and logs a distinguishing event for legacy client rejection (H-11)', async () => {
+    // `createMcpHandler`/`toNodeHandler` catch every internal failure
+    // themselves and never throw back to the caller (confirmed against the
+    // installed SDK source) — so the only way to observe a legacy-rejected
+    // request is the `onerror` hook passed at construction time. This test
+    // invokes that real callback directly rather than mocking a throw the
+    // SDK never actually produces.
+    const warnSpy = vi.fn()
+    const logger = { ...makeLogger(), warn: warnSpy } as unknown as Logger
+    const { close } = await startForTest({ logger })
+    cleanup = close
+
+    expect(mockCreateMcpHandler).toHaveBeenCalledTimes(1)
+    const [, options] = mockCreateMcpHandler.mock.calls[0] as [unknown, { onerror?: (error: Error) => void }]
+    expect(options.onerror).toBeInstanceOf(Function)
+
+    const { UnsupportedProtocolVersionError } = await import('@modelcontextprotocol/server')
+    options.onerror?.(new UnsupportedProtocolVersionError({} as never))
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'legacy_client_rejected' }),
+      'MCP handler dispatch failed'
+    )
+  })
+
+  it('wires onerror into toNodeHandler for adapter-level errors (request conversion / fetch throw)', async () => {
+    const errorSpy = vi.fn()
+    const logger = { ...makeLogger(), error: errorSpy } as unknown as Logger
+    const { close } = await startForTest({ logger })
+    cleanup = close
+
+    expect(mockToNodeHandler).toHaveBeenCalledTimes(1)
+    const [, options] = mockToNodeHandler.mock.calls[0] as [unknown, { onerror?: (error: Error) => void }]
+    expect(options.onerror).toBeInstanceOf(Function)
+
+    options.onerror?.(new Error('adapter boom'))
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.stringContaining('adapter boom') }),
+      'MCP node adapter error before response written'
+    )
   })
 })

@@ -226,6 +226,7 @@ All fields and their roles:
 | `tokenRefreshBufferSec` |          | —          | Seconds before expiry to trigger proactive refresh.                                                                                                 |
 | `responseMapping`       |          | —          | Dot-path mapping from introspection response fields to `TokenPayload` fields (`access_token`, `expires_in`, `refresh_token`, `scope`).              |
 | `metadataMapping`       |          | —          | Dot-path mapping from introspection response to `TokenPayload.metadata` (arbitrary key/value; available to tools, e.g. `userId` for audit hashing). |
+| `audience`              |          | not checked | Expected `aud` claim value (resource binding, RFC 8707). **Best-effort, not fail-closed**: RFC 7662 §2.2 makes `aud` an optional introspection response member, so if configured but the AS's response omits `aud`, the token is still accepted. When both `audience` is configured and the response includes `aud`, a mismatch is rejected. |
 
 ### `static-token` (local dev / POC only)
 
@@ -266,7 +267,7 @@ Verifies JWTs locally against a JWKS endpoint. No round-trip to the AS per token
 | `type` | ✅ | — | Must be `"jwt-validation"`. |
 | `jwksUri` | ✅ | — | JWKS endpoint URL. |
 | `issuer` | ✅ | — | Expected `iss` claim value. |
-| `audience` | | not checked | Expected `aud` claim value. |
+| `audience` | ✅ | — | Expected `aud` claim value (resource binding, RFC 8707). Required and fail-closed — Harbor rejects tokens not bound to this resource. |
 | `clockToleranceSec` | | `30` | Seconds of clock skew to allow. |
 | `scopeClaim` | | `"scope"` | JWT claim name holding the scope string or array. |
 | `metadataMapping` | | `{}` | Dot-path map from JWT payload claims into `TokenPayload.metadata`. |
@@ -295,7 +296,7 @@ Simpler than `jwt-validation` when your AS follows RFC 8414 or OIDC Discovery: H
 | ----- | -------- | ------- | ---- |
 | `type` | ✅ | — | Must be `"oauth-2.1"`. |
 | `authorizationServer` | ✅ | — | Base URL of the AS (no trailing slash). Harbor tries `/.well-known/openid-configuration` then `/.well-known/oauth-authorization-server`. |
-| `audience` | | not checked | Expected `aud` claim value. |
+| `audience` | ✅ | — | Expected `aud` claim value (resource binding, RFC 8707). Required and fail-closed — Harbor rejects tokens not bound to this resource. |
 | `clockToleranceSec` | | `30` | Seconds of clock skew to allow. |
 | `scopeClaim` | | `"scope"` | JWT claim name for the scope. |
 | `metadataMapping` | | `{}` | Map JWT payload claims into `TokenPayload.metadata`. |
