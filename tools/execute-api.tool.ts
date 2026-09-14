@@ -161,9 +161,12 @@ async () => {
     async ({ service, code }, ctx): Promise<ToolResponse | InputRequiredResult> => {
       const correlationId = extractCorrelationId(ctx)
       const sessionId = extractSessionId(ctx)
+      // Advisory-only (never auth) request metadata, logged here as its first
+      // real production consumer — see AdvisoryRequestMeta's invariant note.
+      const requestMeta = readRequestMeta(ctx)
 
       logger.info(
-        { correlationId, tool: TOOL.API_EXECUTE, service },
+        { correlationId, tool: TOOL.API_EXECUTE, service, ...requestMeta },
         `${LOG_PREFIX.MCP_IN} ${TOOL.API_EXECUTE} — request received from AI client`
       )
 

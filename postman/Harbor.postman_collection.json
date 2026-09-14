@@ -1,0 +1,1606 @@
+{
+  "info": {
+    "name": "Harbor MCP Gateway",
+    "description": "Exercises Harbor's MCP endpoint across all 4 pluggable auth strategies (static-token, oauth-2.1, jwt-validation, oauth-introspection), including negative/rejection cases for each. Each request folder documents its own startup prerequisites in its description \u2014 Harbor only runs one auth mode at a time per the demo service configs, so folders are meant to be run against the matching server state (see tests/demo_e2e.py for the exact automated sequence this collection mirrors).\n\nRun order for the OAuth-mode folders: the two 'Setup' requests in each folder MUST run first (they populate {{jwtCorrect}}/{{jwtWrongAud}} collection variables consumed by the requests below them) \u2014 running the whole folder top-to-bottom via the Postman Runner (or newman) does this automatically.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:3333",
+      "type": "string"
+    },
+    {
+      "key": "oauthAsBase",
+      "value": "http://localhost:8080/default",
+      "type": "string"
+    },
+    {
+      "key": "oauthClientId",
+      "value": "harbor-test-client",
+      "type": "string"
+    },
+    {
+      "key": "oauthClientSecret",
+      "value": "test-secret",
+      "type": "string"
+    },
+    {
+      "key": "staticBearerToken",
+      "value": "TestBearerTokenForE2ETestingOnly",
+      "type": "string"
+    },
+    {
+      "key": "jwtCorrect",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "jwtWrongAud",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "introspectValidToken",
+      "value": "introspection-valid-token-abc123",
+      "type": "string"
+    },
+    {
+      "key": "introspectWrongAudToken",
+      "value": "introspection-wrong-aud-token-xyz789",
+      "type": "string"
+    },
+    {
+      "key": "introspectRevokedToken",
+      "value": "introspection-revoked-token-00000000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Discovery",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Basic liveness check \u2014 no auth required.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('status field is ok', () => pm.expect(json.status).to.eql('ok'));",
+                  "pm.test('protocolVersion is 2026-07-28', () => pm.expect(json.protocolVersion).to.eql('2026-07-28'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /mcp \u2014 server/discover (static-token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staticBearerToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "server/discover"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "description": "Connection probe. Uses the static-token bearer \u2014 server/discover doesn't route through per-service auth, any accepted bearer works here.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"server/discover\",\n  \"params\": {\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('result present', () => pm.expect(json).to.have.property('result'));",
+                  "pm.test('serverInfo.name is harbor (spec: result._meta, not result body)', () => {",
+                  "  pm.expect(json.result._meta['io.modelcontextprotocol/serverInfo'].name).to.eql('harbor');",
+                  "});",
+                  "pm.test('capabilities.tools present', () => pm.expect(json.result.capabilities).to.have.property('tools'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /mcp \u2014 tools/list",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staticBearerToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/list"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/list\",\n  \"params\": {\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const names = (json.result.tools || []).map(t => t.name);",
+                  "for (const n of ['discover_services','discover_skills','search_code','api_execute']) {",
+                  "  pm.test(`tool '${n}' present`, () => pm.expect(names).to.include(n));",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ],
+      "description": "No auth-strategy-specific setup needed \u2014 works against Harbor started any way (static-token demo or OAuth mode).",
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "Auth \u2014 static-token (product/order/tasks)",
+      "item": [
+        {
+          "name": "api_execute(product) \u2014 valid static token \u2192 success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staticBearerToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "description": "Requires: bash examples/demo/start.sh (product/order/tasks enabled, default mode).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"product\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/products\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is falsy', () => pm.expect(json.result.isError).to.not.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('products array returned', () => pm.expect(parsed.products).to.be.an('array').that.is.not.empty);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "api_execute(product) \u2014 second call, same token \u2192 success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staticBearerToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "description": "A second, distinct authenticated tool call with the same token \u2014 confirms the auth pass isn't a one-off fluke.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"product\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/products/p001\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is falsy', () => pm.expect(json.result.isError).to.not.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('correct product returned', () => pm.expect(parsed.id).to.eql('p001'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /mcp \u2014 no Authorization header \u2192 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"server/discover\",\n  \"params\": {\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /mcp \u2014 malformed/weak token \u2192 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer not-a-real-token"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "server/discover"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "description": "A short, non-JWT-shaped bearer fails Harbor's own bearer-format pre-check (must be JWT-shaped or >=32 base64url chars) before any auth strategy runs.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"server/discover\",\n  \"params\": {\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "const json = pm.response.json();",
+                  "pm.test('reason is weak_credentials', () => pm.expect(json.reason).to.eql('weak_credentials'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Prerequisite: `bash examples/demo/start.sh` \u2014 starts Harbor with product/order/tasks enabled (default demo mode).",
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "Auth \u2014 oauth-2.1 (billing)",
+      "item": [
+        {
+          "name": "Setup \u2014 get correct-audience JWT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{oauthAsBase}}/token",
+              "host": [
+                "{{oauthAsBase}}"
+              ],
+              "path": [
+                "token"
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{oauthClientId}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{oauthClientSecret}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                }
+              ]
+            },
+            "description": "Mints a JWT bound to aud=http://localhost:3333 (Harbor's own resource identifier) \u2014 the correct audience for both the oauth-2.1 and jwt-validation demo services."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('access_token present', () => pm.expect(json.access_token).to.be.a('string'));",
+                  "pm.test('token has 3 segments', () => pm.expect(json.access_token.split('.').length).to.eql(3));",
+                  "pm.collectionVariables.set('jwtCorrect', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Setup \u2014 get wrong-audience JWT (confused-deputy)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{oauthAsBase}}/token",
+              "host": [
+                "{{oauthAsBase}}"
+              ],
+              "path": [
+                "token"
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{oauthClientId}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{oauthClientSecret}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "scope",
+                  "value": "confused-deputy"
+                }
+              ]
+            },
+            "description": "Same signing key and issuer, but the mock AS's confused-deputy request-mapping stamps aud=https://not-harbor.example.com \u2014 a same-issuer token minted for a DIFFERENT resource. This must be rejected by resource binding (RFC 8707 / MCP 2026-07-28 \u00a717)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('access_token present', () => pm.expect(json.access_token).to.be.a('string'));",
+                  "pm.collectionVariables.set('jwtWrongAud', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "api_execute(billing) \u2014 correct-aud JWT \u2192 success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtCorrect}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"billing\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/invoices\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is falsy', () => pm.expect(json.result.isError).to.not.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('invoices returned from live backend', () => pm.expect(parsed.invoices).to.be.an('array').that.is.not.empty);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "api_execute(billing) \u2014 second call, same token \u2192 success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtCorrect}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "description": "A second, distinct authenticated tool call with the same token \u2014 confirms the auth pass isn't a one-off fluke.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"billing\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/invoices/inv-001\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is falsy', () => pm.expect(json.result.isError).to.not.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('correct invoice returned', () => pm.expect(parsed.id).to.eql('inv-001'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "api_execute(billing) \u2014 wrong-aud JWT \u2192 rejected (confused-deputy)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtWrongAud}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"billing\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/invoices\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200 (tool-level error, not transport error)', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is true', () => pm.expect(json.result.isError).to.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('no invoice data leaked', () => pm.expect(parsed).to.not.have.property('invoices'));",
+                  "pm.test(\"error code is TOKEN_INVALID\", () => pm.expect(parsed.code).to.eql('TOKEN_INVALID'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /mcp (billing) \u2014 no token \u2192 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"server/discover\",\n  \"params\": {\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('WWW-Authenticate header present', () => pm.expect(pm.response.headers.has('WWW-Authenticate')).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Prerequisites: docker compose -f examples/07-oauth/docker-compose.yml up -d; enable services/billing (enabled:true) and disable product/order/tasks; run node examples/demo/billing-service.js; start Harbor with HARBOR_RESOURCE_URI=http://127.0.0.1:3333 and HARBOR_AUTH_SERVERS=http://localhost:8080/default. See tests/demo_e2e.py's _switch_to_oauth_mode()/_start_harbor_oauth() for the exact automated sequence.",
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "Auth \u2014 jwt-validation (billing-jwt)",
+      "item": [
+        {
+          "name": "Setup \u2014 get correct-audience JWT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{oauthAsBase}}/token",
+              "host": [
+                "{{oauthAsBase}}"
+              ],
+              "path": [
+                "token"
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{oauthClientId}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{oauthClientSecret}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                }
+              ]
+            },
+            "description": "Mints a JWT bound to aud=http://localhost:3333 (Harbor's own resource identifier) \u2014 the correct audience for both the oauth-2.1 and jwt-validation demo services."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('access_token present', () => pm.expect(json.access_token).to.be.a('string'));",
+                  "pm.test('token has 3 segments', () => pm.expect(json.access_token.split('.').length).to.eql(3));",
+                  "pm.collectionVariables.set('jwtCorrect', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Setup \u2014 get wrong-audience JWT (confused-deputy)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{oauthAsBase}}/token",
+              "host": [
+                "{{oauthAsBase}}"
+              ],
+              "path": [
+                "token"
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{oauthClientId}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{oauthClientSecret}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "scope",
+                  "value": "confused-deputy"
+                }
+              ]
+            },
+            "description": "Same signing key and issuer, but the mock AS's confused-deputy request-mapping stamps aud=https://not-harbor.example.com \u2014 a same-issuer token minted for a DIFFERENT resource. This must be rejected by resource binding (RFC 8707 / MCP 2026-07-28 \u00a717)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('access_token present', () => pm.expect(json.access_token).to.be.a('string'));",
+                  "pm.collectionVariables.set('jwtWrongAud', json.access_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "api_execute(billing-jwt) \u2014 correct-aud JWT \u2192 success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtCorrect}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"billing-jwt\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/invoices\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is falsy', () => pm.expect(json.result.isError).to.not.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('invoices returned from live backend', () => pm.expect(parsed.invoices).to.be.an('array').that.is.not.empty);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "api_execute(billing-jwt) \u2014 second call, same token \u2192 success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtCorrect}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "description": "A second, distinct authenticated tool call with the same token \u2014 confirms the auth pass isn't a one-off fluke.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"billing-jwt\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/invoices/inv-001\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is falsy', () => pm.expect(json.result.isError).to.not.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('correct invoice returned', () => pm.expect(parsed.id).to.eql('inv-001'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "api_execute(billing-jwt) \u2014 wrong-aud JWT \u2192 rejected (confused-deputy)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtWrongAud}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"billing-jwt\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/invoices\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200 (tool-level error, not transport error)', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is true', () => pm.expect(json.result.isError).to.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('no invoice data leaked', () => pm.expect(parsed).to.not.have.property('invoices'));",
+                  "pm.test(\"error code is TOKEN_INVALID\", () => pm.expect(parsed.code).to.eql('TOKEN_INVALID'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /mcp (billing-jwt) \u2014 no token \u2192 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"server/discover\",\n  \"params\": {\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('WWW-Authenticate header present', () => pm.expect(pm.response.headers.has('WWW-Authenticate')).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Same prerequisites as the oauth-2.1 folder, plus services/billing-jwt enabled:true. This strategy verifies the JWT locally against the same mock AS's JWKS directly (jwksUri configured explicitly, no RFC 8414 discovery) \u2014 same confused-deputy protection, different code path.",
+      "auth": {
+        "type": "noauth"
+      }
+    },
+    {
+      "name": "Auth \u2014 oauth-introspection (billing-introspection)",
+      "item": [
+        {
+          "name": "api_execute(billing-introspection) \u2014 valid token \u2192 success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{introspectValidToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"billing-introspection\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/invoices\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is falsy', () => pm.expect(json.result.isError).to.not.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('invoices returned from live backend', () => pm.expect(parsed.invoices).to.be.an('array').that.is.not.empty);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "api_execute(billing-introspection) \u2014 second call, same token \u2192 success",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{introspectValidToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "description": "A second, distinct authenticated tool call with the same token \u2014 confirms the auth pass isn't a one-off fluke.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"billing-introspection\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/invoices/inv-001\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is falsy', () => pm.expect(json.result.isError).to.not.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('correct invoice returned', () => pm.expect(parsed.id).to.eql('inv-001'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "api_execute(billing-introspection) \u2014 wrong-aud token \u2192 rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{introspectWrongAudToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"billing-introspection\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/invoices\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200 (tool-level error, not transport error)', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is true', () => pm.expect(json.result.isError).to.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('no invoice data leaked', () => pm.expect(parsed).to.not.have.property('invoices'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "api_execute(billing-introspection) \u2014 revoked token \u2192 rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{introspectRevokedToken}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"billing-introspection\",\n      \"code\": \"async () => { const r = await api.request({ method: \\\"GET\\\", path: \\\"/invoices\\\" }); return r.data; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 200 (tool-level error, not transport error)', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('isError is true', () => pm.expect(json.result.isError).to.be.true);",
+                  "const parsed = JSON.parse(json.result.content[0].text);",
+                  "pm.test('no invoice data leaked', () => pm.expect(parsed).to.not.have.property('invoices'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /mcp (billing-introspection) \u2014 no token \u2192 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"server/discover\",\n  \"params\": {\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {}\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('introspection server never called for a request rejected at the bearer pre-check', () => true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Prerequisites: services/billing-introspection enabled:true; run node examples/demo/mock-introspection-server.js (port 3008); billing-service.js running (port 3004). Uses fixed test-fixture bearer tokens (not real JWTs) \u2014 see examples/demo/mock-introspection-server.js for the token \u2192 introspection-response mapping.",
+      "auth": {
+        "type": "noauth"
+      }
+    }
+  ],
+  "auth": {
+    "type": "noauth"
+  }
+}

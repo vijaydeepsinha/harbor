@@ -1,0 +1,39 @@
+{
+  "description": "Billing service (oauth-introspection variant) — same backend as `billing`, protected by Harbor's oauth-introspection auth strategy. Enable to test oauth-introspection end-to-end against the mock introspection server; disable to use the static-token demo services.",
+  "api": {
+    "protocol": "http",
+    "host": "localhost",
+    "port": 3004,
+    "basePath": "",
+    "requestTimeoutMs": 10000,
+    "maxRetries": 1
+  },
+  "enabled": false,
+  "auth": {
+    "type": "oauth-introspection",
+    "protocol": "http",
+    "host": "localhost",
+    "port": 3008,
+    "introspectionPath": "/introspect",
+    "authTimeoutMs": 5000,
+    "audience": "http://localhost:3333",
+    "metadataMapping": {
+      "userId": "sub"
+    }
+  },
+  "spec": {
+    "source": "file"
+  },
+  "serviceRefreshIntervalMs": 0,
+  "circuitBreaker": {
+    "type": "noop"
+  },
+  "idempotency": {
+    "type": "noop"
+  },
+  "sandbox": {
+    "executeTimeoutMs": 10000,
+    "maxApiCalls": 20,
+    "maxConcurrentCalls": 3
+  }
+}

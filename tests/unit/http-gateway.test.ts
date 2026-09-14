@@ -6,16 +6,26 @@ import type { AddressInfo } from 'node:net'
 import type { AuthInfo } from '@modelcontextprotocol/server'
 import { ERR, MCP_PROTOCOL_VERSION } from '../../core/constants.js'
 
-const { mockNodeMcpHandler } = vi.hoisted(() => ({
-  mockNodeMcpHandler: vi.fn()
-}))
+const { mockNodeMcpHandler, mockCreateMcpHandler, mockToNodeHandler } = vi.hoisted(() => {
+  const nodeHandler = vi.fn()
+  return {
+    mockNodeMcpHandler: nodeHandler,
+    mockCreateMcpHandler: vi.fn(() => ({ fetch: vi.fn() })),
+    mockToNodeHandler: vi.fn(() => nodeHandler)
+  }
+})
 
-vi.mock('@modelcontextprotocol/server', () => ({
-  createMcpHandler: vi.fn(() => ({ fetch: vi.fn() }))
-}))
+vi.mock('@modelcontextprotocol/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@modelcontextprotocol/server')>()
+  return {
+    ...actual,
+    createMcpHandler: mockCreateMcpHandler,
+    UnsupportedProtocolVersionError: class UnsupportedProtocolVersionError extends Error {}
+  }
+})
 
 vi.mock('@modelcontextprotocol/node', () => ({
-  toNodeHandler: vi.fn(() => mockNodeMcpHandler)
+  toNodeHandler: mockToNodeHandler
 }))
 
 import { startHttpGateway, type HttpGatewayHandle } from '../../runtime/http/http-gateway.js'
@@ -69,10 +79,21 @@ describe('startHttpGateway', () => {
 
   afterEach(async () => {
     mockNodeMcpHandler.mockReset()
+    mockCreateMcpHandler.mockClear()
+    mockToNodeHandler.mockClear()
     if (cleanup) {
       await cleanup()
       cleanup = null
     }
+  })
+
+  it('constructs the MCP handler with { legacy: "reject" } — the PR\'s headline breaking change (C-1)', async () => {
+    const { close } = await startForTest()
+    cleanup = close
+
+    expect(mockCreateMcpHandler).toHaveBeenCalledTimes(1)
+    const [, options] = mockCreateMcpHandler.mock.calls[0] as [unknown, { legacy?: string }]
+    expect(options).toMatchObject({ legacy: 'reject' })
   })
 
   it('GET /health returns 200 with service registry snapshot', async () => {
@@ -182,5 +203,48 @@ describe('startHttpGateway', () => {
     // Factory is invoked by createMcpHandler at handler construction time in
     // production; here we only assert auth passthrough on the Node request.
     expect(factoryCalled).toBe(false)
+  })
+
+  it('wires onerror into createMcpHandler and logs a distinguishing event for legacy client rejection (H-11)', async () => {
+    // `createMcpHandler`/`toNodeHandler` catch every internal failure
+    // themselves and never throw back to the caller (confirmed against the
+    // installed SDK source) — so the only way to observe a legacy-rejected
+    // request is the `onerror` hook passed at construction time. This test
+    // invokes that real callback directly rather than mocking a throw the
+    // SDK never actually produces.
+    const warnSpy = vi.fn()
+    const logger = { ...makeLogger(), warn: warnSpy } as unknown as Logger
+    const { close } = await startForTest({ logger })
+    cleanup = close
+
+    expect(mockCreateMcpHandler).toHaveBeenCalledTimes(1)
+    const [, options] = mockCreateMcpHandler.mock.calls[0] as [unknown, { onerror?: (error: Error) => void }]
+    expect(options.onerror).toBeInstanceOf(Function)
+
+    const { UnsupportedProtocolVersionError } = await import('@modelcontextprotocol/server')
+    options.onerror?.(new UnsupportedProtocolVersionError({} as never))
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'legacy_client_rejected' }),
+      'MCP handler dispatch failed'
+    )
+  })
+
+  it('wires onerror into toNodeHandler for adapter-level errors (request conversion / fetch throw)', async () => {
+    const errorSpy = vi.fn()
+    const logger = { ...makeLogger(), error: errorSpy } as unknown as Logger
+    const { close } = await startForTest({ logger })
+    cleanup = close
+
+    expect(mockToNodeHandler).toHaveBeenCalledTimes(1)
+    const [, options] = mockToNodeHandler.mock.calls[0] as [unknown, { onerror?: (error: Error) => void }]
+    expect(options.onerror).toBeInstanceOf(Function)
+
+    options.onerror?.(new Error('adapter boom'))
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.stringContaining('adapter boom') }),
+      'MCP node adapter error before response written'
+    )
   })
 })

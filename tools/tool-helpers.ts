@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
+import { z } from 'zod'
 import type { TokenPayload, AuthResult } from '../core/types/auth.types.js'
 import { SessionExpiredError } from '../core/types/auth.types.js'
 import type { ServiceRegistry, ServiceResources } from '../runtime/registry/service-registry.js'
@@ -21,7 +22,7 @@ import {
 } from '../core/constants.js'
 import { ensureError, errorCode, errorRetryable } from '../core/utils/errors.js'
 
-/** Server identity emitted in every response `_meta` (spec §10, MANDATORY). */
+/** Server identity emitted in every response `_meta` (spec §10, recommended). */
 const SERVER_INFO = Object.freeze({ name: GATEWAY_NAME, version: GATEWAY_VERSION })
 
 /**
@@ -60,7 +61,7 @@ import type { ServerContext } from '@modelcontextprotocol/server'
  * Reserved keys (`error`, `code`, `retryable`) cannot be overridden by `extra`.
  *
  * `appMeta` is carried on the response `_meta` channel (spec §11), alongside
- * mandatory serverInfo — never mixed into the model-visible error `content`.
+ * serverInfo — never mixed into the model-visible error `content`.
  */
 export function mcpError(
   message: string,
@@ -91,50 +92,56 @@ export function mcpSuccess(data: unknown, appMeta?: AppMeta): ToolResponse {
 }
 
 /** Reads correlation id from the MCP handler context, falling back to a fresh UUID. */
-export function extractCorrelationId(ctx: unknown): string {
-  const serverCtx = ctx as ServerContext | undefined
-  const id = serverCtx?.mcpReq?.id
+export function extractCorrelationId(ctx: ServerContext | undefined): string {
+  const id = ctx?.mcpReq?.id
   if (id !== undefined && id !== null) return String(id)
   return crypto.randomUUID()
 }
 
 /** Reads session id from the MCP handler context, falling back to a fresh UUID. */
-export function extractSessionId(ctx: unknown): string {
-  return (ctx as ServerContext | undefined)?.sessionId ?? crypto.randomUUID()
+export function extractSessionId(ctx: ServerContext | undefined): string {
+  return ctx?.sessionId ?? crypto.randomUUID()
 }
 
 /**
- * Advisory view of per-request MCP metadata (spec §9): the negotiated protocol
- * version, client implementation info, and client capabilities. The SDK lifts
- * the reserved `io.modelcontextprotocol/*` envelope keys out of the params
- * `_meta` the handler sees and onto `ctx.mcpReq.envelope`; this reads both,
- * envelope-first.
+ * Advisory-only view of per-request MCP metadata (spec §9): the negotiated
+ * protocol version, client implementation info, and client capabilities. The
+ * SDK lifts the reserved `io.modelcontextprotocol/*` envelope keys out of the
+ * params `_meta` the handler sees and onto `ctx.mcpReq.envelope`; this reads
+ * both, envelope-first.
  *
- * SECURITY: this is untrusted, client-supplied context for logging/telemetry
- * and content shaping ONLY. Never use it for authorization or any security
- * decision — auth flows exclusively through the validated bearer token.
+ * Untrusted, client-supplied — for logging/telemetry only. MUST NOT be used
+ * for authentication or authorization; auth flows through the validated
+ * bearer token (see {@link validateAuth}).
  */
-export interface RequestMetaView {
+export interface AdvisoryRequestMeta {
   protocolVersion?: string
   clientInfo?: { name?: string; version?: string } & Record<string, unknown>
   clientCapabilities?: Record<string, unknown>
 }
 
-export function readRequestMeta(ctx: unknown): RequestMetaView {
-  const mcpReq = (ctx as ServerContext | undefined)?.mcpReq
+export function readRequestMeta(ctx: ServerContext | undefined): AdvisoryRequestMeta {
+  const mcpReq = ctx?.mcpReq
   const src: Record<string, unknown> = {
     ...((mcpReq?._meta as Record<string, unknown> | undefined) ?? {}),
     ...((mcpReq?.envelope as Record<string, unknown> | undefined) ?? {})
   }
-  const view: RequestMetaView = {}
+  const view: AdvisoryRequestMeta = {}
   const pv = src[PROTOCOL_VERSION_META_KEY]
   if (typeof pv === 'string') view.protocolVersion = pv
   const ci = src[CLIENT_INFO_META_KEY]
-  if (ci !== null && typeof ci === 'object') view.clientInfo = ci as RequestMetaView['clientInfo']
+  if (ci !== null && typeof ci === 'object') view.clientInfo = ci as AdvisoryRequestMeta['clientInfo']
   const cc = src[CLIENT_CAPABILITIES_META_KEY]
   if (cc !== null && typeof cc === 'object') view.clientCapabilities = cc as Record<string, unknown>
   return view
 }
+
+/**
+ * Shared `{ service, code }` input schema for the sandboxed-code tools
+ * (`discover_skills`, `search_code`, `api_execute`). Kept in one place so the
+ * contract only needs to change in a single spot.
+ */
+export const serviceCodeSchema = z.object({ service: z.string(), code: z.string() })
 
 export function resolveService(
   registry: ServiceRegistry,

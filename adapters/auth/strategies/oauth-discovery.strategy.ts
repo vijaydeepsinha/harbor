@@ -6,6 +6,7 @@ import { TokenIntrospectionError } from '../../../core/types/auth.types.js'
 import type { Logger } from '../../../core/types/logger.types.js'
 import { AUTH_TYPE } from '../../../core/constants.js'
 import { JwtValidationStrategy } from './jwt-validation.strategy.js'
+import { requireResourceBindingAudience } from './resource-binding.js'
 
 export interface OAuthDiscoveryConfig {
   authorizationServer: string
@@ -38,9 +39,10 @@ export class OAuthDiscoveryStrategy implements AuthStrategy {
     // Fail closed on missing resource binding (spec §17, RFC 8707). Without an
     // audience the inner JWT verification would accept any `aud`, defeating
     // resource-binding — so this is a misconfiguration, not a soft default.
-    if (!config.audience || config.audience.trim() === '') {
-      throw new Error('OAuth 2.1 auth requires `audience` (resource binding) under MCP 2026-07-28')
-    }
+    requireResourceBindingAudience(
+      config.audience,
+      'OAuth 2.1 auth requires `audience` (resource binding) under MCP 2026-07-28'
+    )
     this.config = config
     this.logger = config.logger
   }

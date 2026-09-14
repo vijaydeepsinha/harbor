@@ -42,3 +42,5 @@ coverage/
 .internal/
 reviews/
 __pycache__/
+pr_reviews/
+postman/
