@@ -1,0 +1,12 @@
+# Rule set for the fail-closed instance (GOVERNANCE_DEFAULT_DECISION=DENY):
+# everything not listed here is denied.
+rules:
+  - name: strict-allow-ping
+    version: 1
+    match: { operation: ping }
+    action: { type: ALLOW }
+
+  - name: strict-payment-requires-approval
+    version: 1
+    match: { service: commerce, operation: createPayment }
+    action: { type: REQUIRE_APPROVAL, reason: Payments are reviewed on the strict instance }

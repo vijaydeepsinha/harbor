@@ -1,0 +1,21 @@
+# Customer reads: allowed in general, one restricted resource, one sensitive sub-resource.
+rules:
+  - name: allow-read-customer
+    version: 1
+    description: Reading a customer record is allowed
+    match: { service: commerce, operation: getCustomer }
+    action: { type: ALLOW }
+
+  - name: deny-restricted-customer
+    version: 2
+    description: customer-002 is a restricted record (resource-based rule; wins over allow-read-customer by precedence)
+    match: { service: commerce, operation: getCustomer }
+    conditions:
+      path.customerId: { equals: customer-002 }
+    action: { type: DENY, reason: customer-002 is a restricted record }
+
+  - name: payment-details-require-approval
+    version: 1
+    description: Stored payment details are sensitive
+    match: { service: commerce, operation: getPaymentDetails }
+    action: { type: REQUIRE_APPROVAL, reason: Payment details are sensitive data }

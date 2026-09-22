@@ -43,4 +43,15 @@ coverage/
 reviews/
 __pycache__/
 pr_reviews/
-postman/
+
+# Postman: local exports are ignored; the committed collections + environment are not
+postman/*
+!postman/README.md
+!postman/Harbor.postman_collection.json
+!postman/mcp-governance.postman_collection.json
+!postman/environments/
+postman/environments/*
+!postman/environments/local.postman_environment.json
+
+# Governance E2E run output (JUnit, JSON, container logs, failure dumps, store bind mount)
+artifacts/
