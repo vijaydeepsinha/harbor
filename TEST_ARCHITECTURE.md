@@ -10,6 +10,7 @@ Requirements source of truth: [`docs/poc/requirements-aug28.md`](docs/poc/requir
 [`docs/code-mode-governance.md`](docs/code-mode-governance.md).
 Requirement → test mapping: [`tests/REQUIREMENT_COVERAGE.md`](tests/REQUIREMENT_COVERAGE.md).
 How to run: [`TESTING.md`](TESTING.md).
+Implementation report: [`docs/governance-e2e-report.md`](docs/governance-e2e-report.md).
 
 ---
 

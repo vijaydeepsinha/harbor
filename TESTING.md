@@ -2,6 +2,7 @@
 
 How to run every layer of the test suite, what each one proves, and how to
 debug a failure. Architecture and rationale: [`TEST_ARCHITECTURE.md`](TEST_ARCHITECTURE.md).
+Hand-over report (findings, validation, gaps): [`docs/governance-e2e-report.md`](docs/governance-e2e-report.md).
 Requirement → test mapping: [`tests/REQUIREMENT_COVERAGE.md`](tests/REQUIREMENT_COVERAGE.md).
 
 ## Layers
