@@ -40,6 +40,8 @@ governance/    Governance Rule files (rules/*.yaml active; rules/examples/ docum
 services/      demo services (product, order, tasks, irctc, billing)
 examples/demo/ mock backends + start.sh
 tests/unit, tests/integration (vitest) · tests/demo_e2e.py (Python, live gateway)
+tests/e2e/      governance E2E (real MCP client, mock backend, fixtures, orchestrator) · tests/postman/ (collection generator + runner)
+docker/governance-e2e/  Compose topology for the governance E2E · postman/ (collections)
 docs/          architecture, request-lifecycle, tool-layer, configuration, code-mode-governance, poc/
 ```
 
@@ -52,11 +54,16 @@ npm run lint                   # eslint — unused imports fail the build
 npm test                       # vitest: tests/**/*.test.ts (isolated-vm sandbox tests included)
 npx vitest run tests/unit/x.test.ts   # targeted
 python3 tests/demo_e2e.py --start-services   # boots mock backends + gateway on :3333, 61 assertions
+npm run test:governance        # governance E2E: Docker Compose (production image) + real MCP calls + Postman; add -- --local for host processes
+npm run governance:up / down   # keep the E2E environment running; then npm run test:e2e / npm run test:postman
 npm run dev                    # tsx watch index.ts (env from .env; see .env.example)
 ```
 
 The verification gate before any commit: **typecheck + lint + full `npm test`
-green**, plus the Python E2E when the gateway boot or tool behaviour changed.
+green**, plus the Python E2E when the gateway boot or tool behaviour changed,
+plus `npm run test:governance` when anything on the governance path changed
+(the CI workflow `governance-e2e.yml` runs it on every such push/PR). See
+`TESTING.md`; requirement → test mapping in `tests/REQUIREMENT_COVERAGE.md`.
 
 ## 4. Conventions (match them exactly)
 
