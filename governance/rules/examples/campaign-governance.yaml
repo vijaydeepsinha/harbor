@@ -25,3 +25,25 @@ rules:
   - name: never-delete-campaigns
     match: { service: trafficking, method: DELETE, path: '/campaigns/{id}' }
     action: { type: DENY, reason: Campaign deletion is not permitted through agents }
+
+  # Condition trees: allOf (AND), anyOf (OR), not (NOT), and computed operands.
+  - name: large-share-or-long-flight
+    description: A campaign taking more than 20% of the total budget, or flighting longer than 30 days, is reviewed — unless it is a dry run
+    match: { service: trafficking, operation: createCampaign }
+    conditions:
+      allOf:
+        - anyOf:
+            - percent_of: { part: body.budget, whole: body.totalBudget }
+              greater_than: 20
+            - days_between: { from: body.startDate, to: body.endDate }
+              greater_than: 30
+        - not: { field: query.dryRun, equals: true }
+    action: { type: REQUIRE_APPROVAL, reason: Large share of the total budget or a long flight }
+
+  - name: bid-jump
+    description: Raising a bid by more than 30% at once is reviewed
+    match: { service: trafficking, operation: updateCampaign }
+    conditions:
+      ratio: { numerator: body.bid, denominator: body.currentBid }
+      greater_than: 1.3
+    action: { type: REQUIRE_APPROVAL, reason: Bid raised by more than 30% }

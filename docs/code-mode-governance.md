@@ -130,9 +130,16 @@ format and operators in [`governance/rules/README.md`](../governance/rules/READM
   path template `/campaigns/{id}/activate`, `pathParams.id = "C1"`
   (`runtime/governance/operation-resolver.ts`). Rules match on `service`,
   `operation`, `method`, `path` (template) — `*` matches anything.
-- **Conditions** read actual request values: bare names from the body,
-  `query.*`, `path.*`, `body.a.b`. A condition on a missing field holds only
-  for `exists: false`; comparisons across types are false.
+- **Conditions** are a bounded boolean tree — `allOf` (AND), `anyOf` (OR),
+  `not` (NOT) — over actual request values. A leaf compares one operand: a
+  field (bare names from the body, `query.*`, `path.*`, `body.a.b`) or a
+  number computed from two fields (`ratio`, `percent_of`, `days_between` with
+  strict ISO 8601 dates). A leaf on a missing field — or on an operand that
+  cannot be computed, e.g. a zero denominator — holds only for `exists:
+  false`; comparisons across types are false. The earlier flat map is still
+  accepted as shorthand for `allOf`. At most 8 levels and 64 nodes.
+- **Actions are advisory**: `ALLOW`, `DENY` or `REQUIRE_APPROVAL` plus a
+  reason. A rule never rewrites the request and has no side effects.
 - **Precedence** among matched rules: `DENY > REQUIRE_APPROVAL > ALLOW`; the
   first rule (file order) carrying the winning action is the deciding rule.
   No match ⇒ `GOVERNANCE_DEFAULT_DECISION` (default `ALLOW`, which preserves
