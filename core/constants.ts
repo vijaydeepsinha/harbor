@@ -310,11 +310,31 @@ export const GOVERNANCE_DECISION = {
 } as const
 export type GovernanceDecisionType = (typeof GOVERNANCE_DECISION)[keyof typeof GOVERNANCE_DECISION]
 
-/** Precedence among matched rules (higher wins). Documented in docs/code-mode-governance.md. */
+/** Precedence among matched rules of the deciding level (higher wins). Documented in docs/code-mode-governance.md. */
 export const GOVERNANCE_PRECEDENCE: Record<GovernanceDecisionType, number> = {
   [GOVERNANCE_DECISION.DENY]: 3,
   [GOVERNANCE_DECISION.REQUIRE_APPROVAL]: 2,
   [GOVERNANCE_DECISION.ALLOW]: 1,
+}
+
+/**
+ * How broadly a Governance Rule applies, derived from what its `match` names:
+ * an operation or path ⇒ endpoint; a service only ⇒ service; neither ⇒
+ * gateway. The most specific level with a matching rule decides, unless a
+ * broader matching rule is `final`.
+ */
+export const RULE_LEVEL = {
+  GATEWAY: 'gateway',
+  SERVICE: 'service',
+  ENDPOINT: 'endpoint',
+} as const
+export type RuleLevel = (typeof RULE_LEVEL)[keyof typeof RULE_LEVEL]
+
+/** Specificity of each level (higher is more specific). */
+export const RULE_LEVEL_SPECIFICITY: Record<RuleLevel, number> = {
+  [RULE_LEVEL.GATEWAY]: 1,
+  [RULE_LEVEL.SERVICE]: 2,
+  [RULE_LEVEL.ENDPOINT]: 3,
 }
 
 export const APPROVAL_STATUS = {

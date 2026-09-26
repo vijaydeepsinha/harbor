@@ -8,8 +8,8 @@ import { join } from 'node:path'
 import { governanceRuleSchema, MAX_CONDITION_DEPTH, MAX_CONDITION_NODES } from '../../runtime/governance/rule-schema.js'
 import { loadGovernanceRules, ruleVersionTag, GovernanceRuleLoadError, type LoadedRule } from '../../runtime/governance/rule-loader.js'
 import { GovernanceRuleStore } from '../../runtime/governance/rule-store.js'
-import { evaluateGovernance, readField, type GovernanceRequest } from '../../runtime/governance/rule-evaluator.js'
-import { GOVERNANCE_DECISION, GOVERNANCE_REASON } from '../../core/constants.js'
+import { evaluateGovernance, readField, ruleLevel, type GovernanceRequest } from '../../runtime/governance/rule-evaluator.js'
+import { GOVERNANCE_DECISION, GOVERNANCE_REASON, RULE_LEVEL } from '../../core/constants.js'
 import { campaignSpec } from './code-mode-harness.js'
 
 function rule(partial: Record<string, unknown>, source = 'r.yaml'): LoadedRule {
@@ -395,6 +395,86 @@ describe('governance evaluator', () => {
     // two rules with the same winning action: the first in file order decides
     const twoDeny = [rule({ name: 'd-later', action: { type: 'DENY' } }, 'z.yaml'), rule({ name: 'd-first', action: { type: 'DENY' } }, 'a.yaml')]
     expect(evaluateGovernance(twoDeny, req, GOVERNANCE_DECISION.ALLOW).decidingRule).toBe('d-later')
+  })
+
+  describe('three rule levels: gateway < service < endpoint; final pins a broader level', () => {
+    const G_NO_DELETES = { name: 'no-deletes', match: { method: 'DELETE' }, action: { type: 'DENY', reason: 'no deletes' } }
+    const S_TRAFFICKING = { name: 'trafficking-ok', match: { service: 'trafficking' }, action: { type: 'ALLOW' } }
+    const E_BIG_BUDGET = {
+      name: 'big-budget', match: { service: 'trafficking', operation: 'createCampaign' },
+      conditions: { budget: { greater_than: 1_000_000 } }, action: { type: 'REQUIRE_APPROVAL', reason: 'big' }
+    }
+    const create = (budget: number): GovernanceRequest => ({ ...req, body: { budget } })
+    const del: GovernanceRequest = { ...req, method: 'DELETE', specPath: '/campaigns/{id}', operationId: 'deleteCampaign', body: undefined }
+    const onBilling = (r: GovernanceRequest): GovernanceRequest => ({ ...r, service: 'billing' })
+    const outcome = (rules: Array<Record<string, unknown>>, request: GovernanceRequest) =>
+      evaluateGovernance(rules.map((r, i) => rule(r, `${i}.yaml`)), request, GOVERNANCE_DECISION.ALLOW)
+
+    it('derives the level from match; wildcards and method lists do not raise it', () => {
+      const level = (match: Record<string, unknown>) => ruleLevel(governanceRuleSchema.parse({ name: 'x', match, action: { type: 'ALLOW' } }))
+      expect(level({ method: 'DELETE' })).toBe(RULE_LEVEL.GATEWAY)
+      expect(level({ method: ['GET', 'PUT'] })).toBe(RULE_LEVEL.GATEWAY)
+      expect(level({ service: '*', operation: '*', path: '/**' })).toBe(RULE_LEVEL.GATEWAY)
+      expect(level({ service: 'trafficking' })).toBe(RULE_LEVEL.SERVICE)
+      expect(level({ service: 'trafficking', method: 'POST', path: '*' })).toBe(RULE_LEVEL.SERVICE)
+      expect(level({ service: 'trafficking', operation: 'createCampaign' })).toBe(RULE_LEVEL.ENDPOINT)
+      expect(level({ path: '/campaigns/**' })).toBe(RULE_LEVEL.ENDPOINT)
+      expect(level({ operation: 'createCampaign' })).toBe(RULE_LEVEL.ENDPOINT)
+    })
+
+    it('the most specific matching level decides', () => {
+      const rules = [G_NO_DELETES, S_TRAFFICKING, E_BIG_BUDGET]
+      expect(outcome(rules, create(2_000_000))).toMatchObject({ decision: 'REQUIRE_APPROVAL', decidingRule: 'big-budget', matchedRules: ['trafficking-ok', 'big-budget'] })
+      // the endpoint rule's condition is false ⇒ the service level decides
+      expect(outcome(rules, create(500))).toMatchObject({ decision: 'ALLOW', decidingRule: 'trafficking-ok' })
+      // service overrides gateway: the gateway DENY is not final
+      expect(outcome(rules, del)).toMatchObject({ decision: 'ALLOW', decidingRule: 'trafficking-ok', matchedRules: ['no-deletes', 'trafficking-ok'] })
+      // no service rule for billing ⇒ the gateway decides
+      expect(outcome(rules, onBilling(del))).toMatchObject({ decision: 'DENY', decidingRule: 'no-deletes' })
+      // each level alone
+      expect(outcome([E_BIG_BUDGET], create(2_000_000)).decision).toBe('REQUIRE_APPROVAL')
+      expect(outcome([S_TRAFFICKING], del).decision).toBe('ALLOW')
+      expect(outcome([G_NO_DELETES], del).decision).toBe('DENY')
+    })
+
+    it('final pins the decision to its level — a gateway guardrail no service or endpoint rule can override', () => {
+      const guardrail = { ...G_NO_DELETES, final: true }
+      const endpointAllow = { name: 'delete-ok', match: { service: 'trafficking', path: '/campaigns/{id}' }, action: { type: 'ALLOW' } }
+      expect(outcome([guardrail, S_TRAFFICKING, endpointAllow], del)).toMatchObject({ decision: 'DENY', decidingRule: 'no-deletes' })
+      // final only matters when it matches: a POST is decided as before
+      expect(outcome([guardrail, S_TRAFFICKING, E_BIG_BUDGET], create(2_000_000)).decision).toBe('REQUIRE_APPROVAL')
+      // a final service rule beats an endpoint rule
+      const serviceFreeze = { name: 'billing-frozen', match: { service: 'billing' }, final: true, action: { type: 'DENY', reason: 'frozen' } }
+      const billingEndpointOk = { name: 'billing-create-ok', match: { service: 'billing', operation: 'createCampaign' }, action: { type: 'ALLOW' } }
+      expect(outcome([serviceFreeze, billingEndpointOk], onBilling(create(1))).decidingRule).toBe('billing-frozen')
+      // two finals ⇒ the broadest one's level decides
+      const finalServiceAllow = { ...S_TRAFFICKING, final: true }
+      expect(outcome([guardrail, finalServiceAllow], del).decidingRule).toBe('no-deletes')
+    })
+
+    it('final pins the level, not the action: within that level the strongest action still wins', () => {
+      const finalAllow = { name: 'gateway-ok', match: { service: '*' }, final: true, action: { type: 'ALLOW' } }
+      const gatewayDeny = { name: 'no-deletes', match: { method: 'DELETE' }, action: { type: 'DENY' } }
+      const endpointAllow = { name: 'delete-ok', match: { path: '/campaigns/{id}' }, action: { type: 'ALLOW' } }
+      expect(outcome([finalAllow, gatewayDeny, endpointAllow], del)).toMatchObject({ decision: 'DENY', decidingRule: 'no-deletes' })
+    })
+
+    it('same-level conflicts keep DENY > REQUIRE_APPROVAL > ALLOW', () => {
+      const approve = { name: 'service-approve', match: { service: 'trafficking', method: 'POST' }, action: { type: 'REQUIRE_APPROVAL' } }
+      expect(outcome([S_TRAFFICKING, approve], create(1))).toMatchObject({ decision: 'REQUIRE_APPROVAL', decidingRule: 'service-approve' })
+    })
+
+    it('method lists restrict a rule to those kinds of request, at any level', () => {
+      const reads = { name: 'reads-ok', match: { service: 'trafficking', method: ['GET'] }, action: { type: 'ALLOW' } }
+      const writes = { name: 'writes-need-approval', match: { service: 'trafficking', method: ['POST', 'PUT', 'PATCH'] }, action: { type: 'REQUIRE_APPROVAL' } }
+      const get: GovernanceRequest = { ...req, method: 'GET' }
+      const put: GovernanceRequest = { ...req, method: 'PUT' }
+      expect(outcome([reads, writes], get)).toMatchObject({ decision: 'ALLOW', decidingRule: 'reads-ok' })
+      expect(outcome([reads, writes], put)).toMatchObject({ decision: 'REQUIRE_APPROVAL', decidingRule: 'writes-need-approval' })
+      expect(outcome([reads, writes], del).matchedRules).toEqual([])
+      expect(governanceRuleSchema.safeParse({ name: 'x', match: { method: [] }, action: { type: 'ALLOW' } }).success).toBe(false)
+      expect(governanceRuleSchema.safeParse({ name: 'x', match: { method: ['GET', 'FETCH'] }, action: { type: 'ALLOW' } }).success).toBe(false)
+    })
   })
 
   it('fails closed to DENY when evaluation itself throws', () => {

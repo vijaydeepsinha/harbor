@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { AllowedHttpMethod, GovernanceDecisionType } from '../../core/constants.js'
-import { GOVERNANCE_DECISION, GOVERNANCE_PRECEDENCE, GOVERNANCE_REASON } from '../../core/constants.js'
+import type { AllowedHttpMethod, GovernanceDecisionType, RuleLevel } from '../../core/constants.js'
+import { GOVERNANCE_DECISION, GOVERNANCE_PRECEDENCE, GOVERNANCE_REASON, RULE_LEVEL, RULE_LEVEL_SPECIFICITY } from '../../core/constants.js'
 import type { LoadedRule } from './rule-loader.js'
 import { ruleVersionTag } from './rule-loader.js'
 import { CONDITION_OPERATORS, PATH_SUBTREE_SUFFIX, type Condition, type ConditionLeaf, type ConditionNode, type GovernanceRule } from './rule-schema.js'
@@ -36,11 +36,17 @@ export interface GovernanceOutcome {
  *    NOT). A leaf on a missing field — or on a computed operand that cannot be
  *    computed — holds only for `exists: false`; comparisons between
  *    mismatched types are false.
- * 2. Among matched rules the strongest action wins:
+ * 2. One level decides. Each rule's level follows from its `match`
+ *    (see {@link ruleLevel}): the most specific level with a matched rule
+ *    decides — endpoint overrides service, service overrides gateway — unless
+ *    a matched rule is `final`, which pins the decision to the broadest level
+ *    holding a matched `final` rule.
+ * 3. Within the deciding level the strongest action wins:
  *    DENY > REQUIRE_APPROVAL > ALLOW. The deciding rule is the first (file
- *    order) rule carrying the winning action.
- * 3. No rule matches ⇒ `defaultDecision` (`NO_MATCHING_RULE`).
- * 4. Any internal error ⇒ DENY (`GOVERNANCE_EVALUATION_FAILED`). Fail closed.
+ *    order) rule of that level carrying the winning action. `matchedRules`
+ *    still lists every matched rule, at every level, for audit.
+ * 4. No rule matches ⇒ `defaultDecision` (`NO_MATCHING_RULE`).
+ * 5. Any internal error ⇒ DENY (`GOVERNANCE_EVALUATION_FAILED`). Fail closed.
  */
 export function evaluateGovernance(
   rules: readonly LoadedRule[],
@@ -52,8 +58,9 @@ export function evaluateGovernance(
     if (matched.length === 0) {
       return { decision: defaultDecision, reason: GOVERNANCE_REASON.NO_MATCHING_RULE, matchedRules: [], ruleVersions: [] }
     }
-    let winner = matched[0] as LoadedRule
-    for (const r of matched) {
+    const deciding = decidingLevelRules(matched)
+    let winner = deciding[0] as LoadedRule
+    for (const r of deciding) {
       if (GOVERNANCE_PRECEDENCE[r.rule.action.type] > GOVERNANCE_PRECEDENCE[winner.rule.action.type]) winner = r
     }
     return {
@@ -73,11 +80,35 @@ export function evaluateGovernance(
   }
 }
 
+/**
+ * A rule's level follows from what its `match` names: an operation or a path
+ * ⇒ endpoint; a service only ⇒ service; neither ⇒ gateway. A clause that
+ * matches anything (`*`, or the path `/**`) names nothing. `method` restricts
+ * a rule at any level and does not change it.
+ */
+export function ruleLevel(rule: GovernanceRule): RuleLevel {
+  const m = rule.match
+  const names = (value: string | undefined, ...anything: string[]) => value !== undefined && !anything.includes(value)
+  if (names(m.operation, '*') || names(m.path, '*', PATH_SUBTREE_SUFFIX)) return RULE_LEVEL.ENDPOINT
+  if (names(m.service, '*')) return RULE_LEVEL.SERVICE
+  return RULE_LEVEL.GATEWAY
+}
+
+/** The matched rules of the level that decides (see evaluateGovernance, step 2). */
+function decidingLevelRules(matched: readonly LoadedRule[]): LoadedRule[] {
+  const specificity = (r: LoadedRule) => RULE_LEVEL_SPECIFICITY[ruleLevel(r.rule)]
+  const finals = matched.filter(r => r.rule.final === true)
+  const level = finals.length > 0
+    ? Math.min(...finals.map(specificity))
+    : Math.max(...matched.map(specificity))
+  return matched.filter(r => specificity(r) === level)
+}
+
 function ruleMatches(rule: GovernanceRule, req: GovernanceRequest): boolean {
   const m = rule.match
   if (m.service !== undefined && !clause(m.service, req.service)) return false
   if (m.operation !== undefined && !clause(m.operation, req.operationId)) return false
-  if (m.method !== undefined && m.method !== req.method) return false
+  if (m.method !== undefined && !m.method.includes(req.method)) return false
   if (m.path !== undefined && !pathClause(m.path, req.specPath)) return false
   return rule.conditions === undefined || conditionsHold(rule.conditions, req)
 }

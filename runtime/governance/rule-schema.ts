@@ -7,8 +7,11 @@ import { ALLOWED_HTTP_METHODS, GOVERNANCE_DECISION } from '../../core/constants.
 /**
  * Governance Rule — Harbor-facing policy over external operations (§20).
  *
- * - `match` routes a rule to operations: exact service / operation / method /
- *   path (`*` matches anything).
+ * - `match` routes a rule to operations: exact service / operation / path
+ *   (`*` matches anything; `/prefix/**` a whole subtree) and one or more
+ *   methods. What it names sets the rule's level — gateway, service or
+ *   endpoint — and the most specific matching level decides (`final: true`
+ *   pins a broader one).
  * - `conditions` is a bounded boolean tree over request values: `allOf`
  *   (AND), `anyOf` (OR), `not` (NOT), and leaves that compare one value — a
  *   request field, or a number computed from two fields (`ratio`,
@@ -229,12 +232,20 @@ export const governanceRuleSchema = z.object({
     service: matchValue.optional(),
     /** OpenAPI operationId. */
     operation: matchValue.optional(),
-    method: z.enum(ALLOWED_HTTP_METHODS).optional(),
+    /** One HTTP method or a list (`[GET, PUT]`) — restricts the rule to those kinds of request at any level. */
+    method: z.union([z.enum(ALLOWED_HTTP_METHODS), z.array(z.enum(ALLOWED_HTTP_METHODS)).min(1)]).optional()
+      .transform(m => (m === undefined ? undefined : Array.isArray(m) ? m : [m])),
     /** OpenAPI path template exactly as in the spec (e.g. `/campaigns/{id}/activate`), or a subtree (`/campaigns/**`). */
     path: pathPattern.optional()
   }).strict().refine(m => Object.keys(m).length > 0, { message: 'match needs at least one of service, operation, method, path' }),
   /** Boolean tree over request values; bare field names read the body, `body.` / `query.` / `path.` select explicitly. */
   conditions: conditionsSchema.optional(),
+  /**
+   * `true` pins the decision to this rule's level: when it matches, more
+   * specific levels are not consulted (e.g. a gateway-wide "never DELETE"
+   * that no service or endpoint rule can override).
+   */
+  final: z.boolean().optional(),
   /** Advisory outcome only — never a request mutation or a side effect. */
   action: z.object({
     type: z.enum([GOVERNANCE_DECISION.ALLOW, GOVERNANCE_DECISION.DENY, GOVERNANCE_DECISION.REQUIRE_APPROVAL]),
