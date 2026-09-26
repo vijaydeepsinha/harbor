@@ -182,6 +182,45 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
   })
 
+  it('nested request DTOs (body and query) reach the rules, the journal and the backend with their full shape', async () => {
+    const NESTED_RULE = {
+      name: 'nested-budget', match: { service: 'trafficking', operation: 'createCampaign' },
+      conditions: {
+        'body.campaign.budget.amount': { greater_than: 1_000_000 },
+        'body.campaign.flights.0.start': { starts_with: '2026-' },
+        'query.filter.status': { equals: 'draft' }
+      },
+      action: { type: 'REQUIRE_APPROVAL', reason: 'Large nested budget' }
+    }
+    const body = (amount: number) => ({ campaign: { name: 'Q4', budget: { amount, currency: 'USD' }, flights: [{ start: '2026-10-01', end: '2026-12-31' }] } })
+    const params = { filter: { status: 'draft', owner: { team: 'growth' } }, ids: ['a', 'b'] }
+    const program = (amount: number) => `async () => {
+      const r = await api.request({ method: 'POST', path: '/campaigns', params: ${JSON.stringify(params)}, body: ${JSON.stringify(body(amount))} })
+      return r.data.did
+    }`
+    const rt = makeRuntime([NESTED_RULE])
+    const { connector, calls, count } = makeConnector()
+    const handler = registerGoverned(rt, makeResources('trafficking', connector))
+
+    // A deep field over the threshold triggers the rule …
+    const paused = await handler({ service: 'trafficking', code: program(2_000_000) }, makeCtx())
+    expect(paused['resultType']).toBe('input_required')
+    expect(count('POST', '/campaigns')).toBe(0)
+    const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+    const activity = await rt.store.getActivity(executionId, 1)
+    expect(activity?.request.body).toEqual(body(2_000_000))
+    expect(activity?.request.query).toEqual(params)
+    expect(activity?.request.pathParams).toBeUndefined()
+    const approvalId = (paused['_meta'] as Record<string, unknown>)[APPROVAL_ID_META_KEY] as string
+    expect((await rt.approvals.get(approvalId)).summary.body).toEqual(body(2_000_000))
+
+    // … and below it the same nested DTOs pass through to the backend unchanged.
+    const done = await handler({ service: 'trafficking', code: program(500) }, makeCtx())
+    expect(done['isError']).toBeUndefined()
+    expect(calls.at(-1)?.req.body).toEqual(body(500))
+    expect(calls.at(-1)?.req.params).toEqual(params)
+  })
+
   it('a DENY rule stops the execution before the call and records the decision', async () => {
     const rt = makeRuntime([{ name: 'no-finalize', match: { operation: 'finalizeCampaign' }, action: { type: 'DENY', reason: 'frozen' } }])
     const { connector, count } = makeConnector()

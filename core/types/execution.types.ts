@@ -52,8 +52,11 @@ export interface ActivityRequestRecord {
   specPath: string
   /** OpenAPI `operationId` when the spec declares one. */
   operationId?: string
+  /** `{param}` path segments — always strings (see ResolvedOperation.pathParams). */
   pathParams?: Record<string, string>
+  /** Query parameters as the program passed them; values may be nested objects/arrays. */
   query?: Record<string, unknown>
+  /** Request body as the program passed it — any JSON shape, including nested DTOs. */
   body?: unknown
 }
 
