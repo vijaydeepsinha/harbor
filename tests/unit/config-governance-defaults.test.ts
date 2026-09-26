@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { validateGlobalConfig } from '../../core/config/config.js'
 import { GOVERNANCE_DECISION } from '../../core/constants.js'
 
 describe('governance configuration defaults', () => {
-  const KEYS = ['GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC'] as const
+  const KEYS = ['GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
+    'EXECUTION_STORE_TYPE', 'EXECUTION_STORE_MEMCACHE_HOST', 'EXECUTION_STORE_MEMCACHE_PORT', 'EXECUTION_STORE_MEMCACHE_TIMEOUT_MS',
+    'EXECUTION_STORE_MEMCACHE_KEY_PREFIX', 'EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC'] as const
   let saved: Record<string, string | undefined> = {}
   beforeEach(() => {
     saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]]))
@@ -49,6 +51,32 @@ describe('governance configuration defaults', () => {
     expect(validateGlobalConfig().codeMode.retention).toMatchObject({ executionSec: 86_400 })
     process.env['EXECUTION_RETENTION_SEC'] = '0'
     expect(validateGlobalConfig().codeMode.retention).toMatchObject({ executionSec: 0 })
+  })
+
+  it('EXECUTION_STORE_TYPE=memcache reads its connection like the token cache, plus key prefix and lock TTL', () => {
+    process.env['EXECUTION_STORE_TYPE'] = 'memcache'
+    process.env['EXECUTION_STORE_MEMCACHE_HOST'] = 'memcache.internal'
+    process.env['EXECUTION_STORE_MEMCACHE_PORT'] = '11211'
+    expect(validateGlobalConfig().codeMode.store).toEqual({ type: 'memcache', host: 'memcache.internal', port: 11211, kvTimeoutMs: 2000 })
+    process.env['EXECUTION_STORE_MEMCACHE_TIMEOUT_MS'] = '500'
+    process.env['EXECUTION_STORE_MEMCACHE_KEY_PREFIX'] = 'prod:harbor:'
+    process.env['EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC'] = '900'
+    expect(validateGlobalConfig().codeMode.store).toEqual({
+      type: 'memcache', host: 'memcache.internal', port: 11211, kvTimeoutMs: 500, keyPrefix: 'prod:harbor:', lockTtlSec: 900
+    })
+  })
+
+  it('EXECUTION_STORE_TYPE=memcache without its host and port stops the gateway', () => {
+    process.env['EXECUTION_STORE_TYPE'] = 'memcache'
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => { throw new Error(`exit ${code}`) }) as never)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(() => validateGlobalConfig()).toThrow('exit 1')
+      expect(String(error.mock.calls[0]?.[0])).toContain('EXECUTION_STORE_MEMCACHE_HOST')
+    } finally {
+      exit.mockRestore()
+      error.mockRestore()
+    }
   })
 
   it('honours an explicit value', () => {

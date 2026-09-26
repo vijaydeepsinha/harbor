@@ -8,6 +8,8 @@ import { join } from 'node:path'
 import type { CodeModeStore } from '../../spi/execution/execution-store.js'
 import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
 import { FileCodeModeStore } from '../../adapters/execution/file-execution-store.js'
+import { MemcacheCodeModeStore } from '../../adapters/execution/memcache-execution-store.js'
+import { FakeMemcache } from './fake-memcache.js'
 import { buildExecutionStore, registerExecutionStoreBackend } from '../../wiring/strategy-builders.js'
 import { EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS, GOVERNANCE_DECISION } from '../../core/constants.js'
 import type { ExecutionRecord, ActivityRecord } from '../../core/types/execution.types.js'
@@ -30,7 +32,8 @@ function activity(executionId: string, sequence: number, method: 'GET' | 'POST' 
   }
 }
 
-function contractSuite(name: string, make: () => CodeModeStore, cleanup?: () => void) {
+/** `nativeExpiry`: the store expires records itself (item TTLs), so it never lists expired executions. */
+function contractSuite(name: string, make: () => CodeModeStore, cleanup?: () => void, opts: { nativeExpiry?: boolean } = {}) {
   describe(`${name} store contract`, () => {
     let store: CodeModeStore
     beforeEach(() => { store = make() })
@@ -120,7 +123,7 @@ function contractSuite(name: string, make: () => CodeModeStore, cleanup?: () => 
       await store.deleteExecution('never-existed')
     })
 
-    it('listExpiredExecutions returns only executions past their expiresAt, oldest first, up to the limit', async () => {
+    it.skipIf(opts.nativeExpiry)('listExpiredExecutions returns only executions past their expiresAt, oldest first, up to the limit', async () => {
       const at = (iso: string) => ({ expiresAt: iso })
       await store.createExecution({ ...execution('late'), ...at('2026-01-03T00:00:00.000Z') })
       await store.createExecution({ ...execution('early'), ...at('2026-01-01T00:00:00.000Z') })
@@ -149,6 +152,8 @@ contractSuite(
   () => { fileDir = mkdtempSync(join(tmpdir(), 'harbor-exec-')); return new FileCodeModeStore(fileDir) },
   () => { if (fileDir) rmSync(fileDir, { recursive: true, force: true }) }
 )
+
+contractSuite('memcache', () => new MemcacheCodeModeStore(new FakeMemcache()), undefined, { nativeExpiry: true })
 
 describe('file store durability', () => {
   it('reloads executions, activities, approvals and decisions from disk in a new instance', async () => {

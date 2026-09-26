@@ -348,6 +348,8 @@ export type ApprovalStatus = (typeof APPROVAL_STATUS)[keyof typeof APPROVAL_STAT
 export const EXECUTION_STORE_TYPE = {
   IN_MEMORY: 'in-memory',
   FILE: 'file',
+  /** Shared across pods: executions, journal, approvals and the run lock live in memcache. */
+  MEMCACHE: 'memcache',
 } as const
 
 /**

@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import type {
   GlobalConfig,
+  ExecutionStoreBackendConfig,
   IdempotencyBackendConfig,
   TokenCacheBackendConfig,
   MemcacheConnectionConfig,
@@ -182,7 +183,11 @@ const GlobalConfigSchema = z.object({
   HARBOR_AUTH_SERVERS: z.string().optional(),
   HARBOR_SCOPES_SUPPORTED: z.string().optional(),
   // ── Code Mode governance layer ──
-  EXECUTION_STORE_TYPE: z.enum([EXECUTION_STORE_TYPE.IN_MEMORY, EXECUTION_STORE_TYPE.FILE]).default(EXECUTION_STORE_TYPE.IN_MEMORY),
+  EXECUTION_STORE_TYPE: z.enum([EXECUTION_STORE_TYPE.IN_MEMORY, EXECUTION_STORE_TYPE.FILE, EXECUTION_STORE_TYPE.MEMCACHE]).default(EXECUTION_STORE_TYPE.IN_MEMORY),
+  // memcache store only (EXECUTION_STORE_MEMCACHE_HOST / _PORT are required with it, _TIMEOUT_MS optional — same shape as TOKEN_CACHE_MEMCACHE_*).
+  EXECUTION_STORE_MEMCACHE_KEY_PREFIX: z.string().min(1).optional(),
+  // Must exceed the longest sandbox run: a crashed pod's run lock is released only when this expires.
+  EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC: z.coerce.number().int().positive().optional(),
   EXECUTION_STORE_DIR: z.string().default('./var/executions'),
   // DROP (default): a terminal execution's program text is removed; KEEP: it stays stored against the executionId.
   EXECUTION_CODE_RETENTION: z.enum([EXECUTION_CODE_RETENTION.DROP, EXECUTION_CODE_RETENTION.KEEP]).default(EXECUTION_CODE_RETENTION.DROP),
@@ -202,6 +207,28 @@ const GlobalConfigSchema = z.object({
   GOVERNANCE_REQUEST_STATE_KEY: z.string().min(32).optional(),
   GOVERNANCE_APPROVAL_TTL_SEC: z.coerce.number().int().positive().default(600),
 })
+
+/** EXECUTION_STORE_TYPE → the store config; memcache connection vars are required like the token cache's. */
+function resolveExecutionStoreConfig(env: z.infer<typeof GlobalConfigSchema>): ExecutionStoreBackendConfig {
+  switch (env.EXECUTION_STORE_TYPE) {
+    case EXECUTION_STORE_TYPE.FILE:
+      return { type: EXECUTION_STORE_TYPE.FILE, dir: env.EXECUTION_STORE_DIR }
+    case EXECUTION_STORE_TYPE.MEMCACHE:
+      requireEnvVars(
+        process.env,
+        prefixedSpecs('EXECUTION_STORE_MEMCACHE_', MEMCACHE_ENV_SUFFIXES),
+        `EXECUTION_STORE_TYPE=${EXECUTION_STORE_TYPE.MEMCACHE}`
+      )
+      return {
+        type: EXECUTION_STORE_TYPE.MEMCACHE,
+        ...parseMemcacheEnv(process.env, 'EXECUTION_STORE_MEMCACHE_'),
+        ...(env.EXECUTION_STORE_MEMCACHE_KEY_PREFIX ? { keyPrefix: env.EXECUTION_STORE_MEMCACHE_KEY_PREFIX } : {}),
+        ...(env.EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC ? { lockTtlSec: env.EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC } : {})
+      }
+    default:
+      return { type: EXECUTION_STORE_TYPE.IN_MEMORY }
+  }
+}
 
 export function validateGlobalConfig(): GlobalConfig {
   const result = GlobalConfigSchema.safeParse(process.env)
@@ -252,9 +279,7 @@ export function validateGlobalConfig(): GlobalConfig {
       couchbasePrefix: 'IDEMPOTENCY_CB_',
     }) as IdempotencyBackendConfig,
     codeMode: {
-      store: env.EXECUTION_STORE_TYPE === EXECUTION_STORE_TYPE.FILE
-        ? { type: EXECUTION_STORE_TYPE.FILE, dir: env.EXECUTION_STORE_DIR }
-        : { type: EXECUTION_STORE_TYPE.IN_MEMORY },
+      store: resolveExecutionStoreConfig(env),
       retention: { code: env.EXECUTION_CODE_RETENTION, executionSec: env.EXECUTION_RETENTION_SEC },
       governance: {
         rulesDir: env.GOVERNANCE_RULES_DIR,

@@ -5,6 +5,8 @@ import { describe, it, expect } from 'vitest'
 import {
   makeConnector, makeResources, makeRuntime, registerGoverned, makeCtx, retryCtx, parseContent
 } from './code-mode-harness.js'
+import { MemcacheCodeModeStore } from '../../adapters/execution/memcache-execution-store.js'
+import { FakeMemcache } from './fake-memcache.js'
 import {
   ERR, EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS, GOVERNANCE_DECISION, GOVERNANCE_REASON,
   EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY, APPROVAL_ID_META_KEY, APPROVAL_INPUT_KEY
@@ -253,6 +255,26 @@ describe('api_execute under the Code Mode governance layer', () => {
       ['DENY', GOVERNANCE_REASON.NO_MATCHING_RULE]
     ])
     expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.DENIED)
+  })
+
+  it('multi-pod on the memcache store: paused on pod A, approved and resumed on pod B, every call made once', async () => {
+    const memcache = new FakeMemcache()
+    const podA = makeRuntime([FINALIZE_RULE], GOVERNANCE_DECISION.ALLOW, new MemcacheCodeModeStore(memcache))
+    const podB = makeRuntime([FINALIZE_RULE], GOVERNANCE_DECISION.ALLOW, new MemcacheCodeModeStore(memcache))
+    const { connector, count } = makeConnector()
+    const onA = registerGoverned(podA, makeResources('trafficking', connector))
+    const onB = registerGoverned(podB, makeResources('trafficking', connector))
+
+    const paused = await onA({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+    expect(paused['resultType']).toBe('input_required')
+    // the client's retry lands on another pod (same GOVERNANCE_REQUEST_STATE_KEY)
+    const done = await onB({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(podB, paused, { action: 'accept', approve: true }))
+    expect(done['isError']).toBeUndefined()
+    expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' })
+    expect(count('GET', '/campaigns')).toBe(1)                // replayed on pod B from the shared journal
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(1)   // executed exactly once
+    const executionId = (done['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+    expect((await podA.manager.load(executionId)).status).toBe(EXECUTION_STATUS.COMPLETED) // pod A sees pod B's outcome
   })
 
   it('a DENY rule stops the execution before the call and records the decision', async () => {

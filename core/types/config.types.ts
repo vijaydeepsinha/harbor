@@ -42,6 +42,7 @@ export type IdempotencyBackendConfig =
 export type ExecutionStoreBackendConfig =
   | { type: 'in-memory' }
   | { type: 'file'; dir: string }
+  | ({ type: 'memcache'; keyPrefix?: string; lockTtlSec?: number } & MemcacheConnectionConfig)
 
 /** Code Mode governance layer settings (see docs/code-mode-governance.md). */
 export interface CodeModeConfig {

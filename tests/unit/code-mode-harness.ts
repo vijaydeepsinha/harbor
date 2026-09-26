@@ -17,6 +17,7 @@ import { createResumeStateCodec, type ResumeState } from '../../runtime/executio
 import { GovernanceRuleStore } from '../../runtime/governance/rule-store.js'
 import { governanceRuleSchema } from '../../runtime/governance/rule-schema.js'
 import type { CodeModeRuntime } from '../../runtime/execution/code-mode-runtime.js'
+import type { CodeModeStore } from '../../spi/execution/execution-store.js'
 import type { LoadedRule } from '../../runtime/governance/rule-loader.js'
 import { noopCircuitBreaker } from '../../spi/resilience/strategies/noop-circuit-breaker.strategy.js'
 import { forwardTokenPermissionGuard } from '../../spi/permissions/strategies/forward-token-permission-guard.strategy.js'
@@ -101,8 +102,12 @@ export const globalConfig: GlobalConfig = {
 
 export const REQUEST_STATE_KEY = 'test-key-'.repeat(4)
 
-export function makeRuntime(rules: Array<Record<string, unknown>> = [], defaultDecision: GovernanceDecisionType = GOVERNANCE_DECISION.ALLOW): CodeModeRuntime {
-  const store = new InMemoryCodeModeStore()
+/** `store` lets several runtimes share one store — several gateway pods on one shared backend. */
+export function makeRuntime(
+  rules: Array<Record<string, unknown>> = [],
+  defaultDecision: GovernanceDecisionType = GOVERNANCE_DECISION.ALLOW,
+  store: CodeModeStore = new InMemoryCodeModeStore()
+): CodeModeRuntime {
   const manager = new ExecutionManager(store)
   const approvals = new ApprovalService(store, manager)
   const ruleStore = new GovernanceRuleStore()

@@ -8,6 +8,7 @@ import type { IdempotencyBackendConfig, TokenCacheBackendConfig, ExecutionStoreB
 import type { CodeModeStore } from '../spi/execution/execution-store.js'
 import { inMemoryCodeModeStore } from '../adapters/execution/in-memory-execution-store.js'
 import { fileCodeModeStore } from '../adapters/execution/file-execution-store.js'
+import { memcacheCodeModeStore } from '../adapters/execution/memcache-execution-store.js'
 import type { Logger } from '../core/types/logger.types.js'
 import { inMemoryTokenCache } from '../adapters/auth/strategies/in-memory-token-cache.strategy.js'
 import { memcacheTokenCache } from '../adapters/auth/strategies/memcache-token-cache.strategy.js'
@@ -128,6 +129,7 @@ export function buildExecutionStore(
   switch (config.type) {
     case EXECUTION_STORE_TYPE.IN_MEMORY: return inMemoryCodeModeStore()
     case EXECUTION_STORE_TYPE.FILE:      return fileCodeModeStore(config.dir, logger)
+    case EXECUTION_STORE_TYPE.MEMCACHE:  return memcacheCodeModeStore(config)
     default: throw new Error(`Unknown execution store type: "${(config as { type: string }).type}"`)
   }
 }
