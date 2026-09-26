@@ -15,7 +15,7 @@ These apply to the **whole gateway process**: bind address, shared token cache, 
 Read at process entry (`index.ts`): `SERVICES_DIR`.
 
 Parsed on every startup (`GlobalConfigSchema` in `config.ts`):  
-`MCP_HOST`, `MCP_PORT`, `MCP_TRANSPORT`, `MCP_TOKEN` (optional unless `MCP_TRANSPORT=stdio`), `AUTH_TOKEN_CACHE_TTL_MS`, `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE`, `SANDBOX_MEMORY_MB`, `SANDBOX_EXECUTE_TIMEOUT_MS`, `SANDBOX_SEARCH_TIMEOUT_MS`, `SANDBOX_MAX_API_CALLS`, `SANDBOX_MAX_CONCURRENT_CALLS`, `LOG_LEVEL`, `SERVICE_NAME`, `MCP_AGENT_NAME`, `ENVIRONMENT`, `ENABLE_AUDIT`, `AUDIT_SINKS`, `HARBOR_RESOURCE_URI`, `HARBOR_AUTH_SERVERS`, `HARBOR_SCOPES_SUPPORTED`.
+`MCP_HOST`, `MCP_PORT`, `MCP_TRANSPORT`, `MCP_TOKEN` (optional unless `MCP_TRANSPORT=stdio`), `AUTH_TOKEN_CACHE_TTL_MS`, `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE`, `SANDBOX_MEMORY_MB`, `SANDBOX_EXECUTE_TIMEOUT_MS`, `SANDBOX_SEARCH_TIMEOUT_MS`, `SANDBOX_MAX_API_CALLS`, `SANDBOX_MAX_CONCURRENT_CALLS`, `LOG_LEVEL`, `SERVICE_NAME`, `MCP_AGENT_NAME`, `HARBOR_SERVER_ID`, `ENVIRONMENT`, `ENABLE_AUDIT`, `AUDIT_SINKS`, `HARBOR_RESOURCE_URI`, `HARBOR_AUTH_SERVERS`, `HARBOR_SCOPES_SUPPORTED`.
 
 Read only when the matching backend is active:
 
@@ -127,6 +127,7 @@ One backend for the entire gateway. Token entries are keyed per-service internal
 | `LOG_LEVEL`      | `info`          | `fatal` … `trace`.                                                                                       |
 | `SERVICE_NAME`   | `harbor-gateway` | Service label in logs.                                                                                   |
 | `MCP_AGENT_NAME` | `mcp-agent`     | Sent as `X-Request-Source` header to backends.                                                           |
+| `HARBOR_SERVER_ID` | `HARBOR_GATEWAY` | Harbor's stamp on every backend call, sent as `X-Harbor-Server-ID`. Printable ASCII, ≤128 characters; anything else fails boot. |
 | `ENVIRONMENT`    | `dev`           | `dev`, `staging`, `staging-secondary`, `canary`, `prod`. Non-prod includes caller file:line in logs. |
 | `ENABLE_AUDIT`   | `true`          | Audit records for `api_execute`. Set `false` in dev to reduce noise.                                     |
 | `AUDIT_SINKS`    | `console`       | Comma list of audit sinks every record and execution-state event goes to: `console` (built in) or types registered with `registerAuditSinkBackend`. An unknown name fails boot. |

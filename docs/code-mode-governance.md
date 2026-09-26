@@ -228,6 +228,16 @@ placeholder until the project's public name is settled):
 Reserved `io.modelcontextprotocol/*` keys are never written by Harbor except
 `serverInfo`.
 
+**Outbound headers.** Every backend call carries three headers Harbor owns —
+the sandboxed program cannot set or override them (its copies are dropped,
+whatever their letter case):
+
+| Header | Value | Purpose |
+|---|---|---|
+| `X-Correlation-ID` | the `executionId` | ties together every call of one script — across the fresh isolate and the new MCP request of each approval resume |
+| `X-Harbor-Server-ID` | `HARBOR_SERVER_ID` (default `HARBOR_GATEWAY`) | Harbor's stamp: this gateway made the call |
+| `X-Harbor-Client-ID` | the caller's `X-Harbor-Client-ID` request header | optional: lets the caller identify itself to the backend; omitted when not sent (and on stdio) |
+
 ## 9. Sequence
 
 ```

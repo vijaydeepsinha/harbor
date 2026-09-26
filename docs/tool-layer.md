@@ -81,7 +81,8 @@ All structured logs go to **stderr**. Stdout is reserved for the MCP protocol st
 
 Each HTTP request creates a fresh `McpServer` with the client's bearer token bound into the tool handlers. Request-scoped state includes:
 - The raw bearer token from the `Authorization` header (via `ctx.authInfo` in the SDK v2 factory)
-- A `correlationId` for request tracing (from the MCP request id in `ServerContext`)
+- A `correlationId` for request tracing in Harbor's logs (from the MCP request id in `ServerContext`); backend calls carry the execution id as `X-Correlation-ID` instead, so every call of one script correlates across approval resumes
+- The caller's optional `X-Harbor-Client-ID` request header, forwarded to backend calls
 - Active sandbox isolates for concurrent calls within that request
 
 When the HTTP response closes, the transport and `McpServer` are torn down.

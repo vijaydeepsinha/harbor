@@ -313,7 +313,10 @@ async handle(apiRequestJson: string): Promise<string> {
 
 **File: `api-client/api-client.ts` — `executeRequest()`**
 
-- Sets headers: `Authorization`, `X-Correlation-ID`, `X-Request-Source: mcp-agent`, `X-MCP-Session-ID`, `X-Idempotency-Key`
+- Sets headers: `Authorization`, `X-Request-Source: mcp-agent`, `X-MCP-Session-ID`, `X-Idempotency-Key`, then Harbor's own, which the sandboxed program cannot set or override (its copies, in any letter case, are dropped):
+  - `X-Correlation-ID` — the execution id under Code Mode governance (the same on every call of one script, across approval resumes), otherwise the MCP request id
+  - `X-Harbor-Server-ID` — the gateway's stamp (`HARBOR_SERVER_ID`, default `HARBOR_GATEWAY`)
+  - `X-Harbor-Client-ID` — the caller's own id, forwarded when the `/mcp` HTTP request carried one
 - Retries on 5xx with fixed 500ms backoff
 - Returns `{ data, status, ok: true }` for 2xx/3xx
 - Returns `{ data, status, ok: false }` for 4xx — never retries, never records circuit failure
