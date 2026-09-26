@@ -179,6 +179,8 @@ const GlobalConfigSchema = z.object({
   MCP_AGENT_NAME: z.string().default(REQUEST_SOURCE_VALUE),
   ENVIRONMENT: z.enum([ENV.DEV, ENV.STAGING, ENV.STAGING_SECONDARY, ENV.CANARY, ENV.PROD]).default(ENV.DEV),
   ENABLE_AUDIT: z.coerce.boolean().default(true),
+  // Where audit records and execution-state events go: comma list of `console` (built in) or registered sink types.
+  AUDIT_SINKS: z.string().default('console'),
   HARBOR_RESOURCE_URI: z.string().optional(),
   HARBOR_AUTH_SERVERS: z.string().optional(),
   HARBOR_SCOPES_SUPPORTED: z.string().optional(),
@@ -269,7 +271,8 @@ export function validateGlobalConfig(): GlobalConfig {
       serviceName: env.SERVICE_NAME,
       agentName: env.MCP_AGENT_NAME,
       environment: env.ENVIRONMENT,
-      enableAudit: env.ENABLE_AUDIT
+      enableAudit: env.ENABLE_AUDIT,
+      auditSinks: env.AUDIT_SINKS.split(',').map(s => s.trim()).filter(Boolean)
     },
     defaultIdempotency: resolveStoreTypeConfig(process.env, {
       storeTypeEnvKey: 'IDEMPOTENCY_TYPE',

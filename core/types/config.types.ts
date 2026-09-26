@@ -122,6 +122,8 @@ export interface GlobalConfig {
     agentName: string
     environment: Environment
     enableAudit: boolean
+    /** Audit sinks every event goes to (AUDIT_SINKS): `console` (built in) or registered types. Absent ⇒ `['console']`. */
+    auditSinks?: string[]
   }
   defaultIdempotency: IdempotencyBackendConfig
   oauth?: OAuthResourceConfig

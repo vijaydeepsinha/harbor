@@ -21,6 +21,8 @@ import { fileSpec } from '../spi/spec/strategies/file-spec-loader.strategy.js'
 import { urlSpec } from '../spi/spec/strategies/url-spec-loader.strategy.js'
 import { urlWithFallback } from '../spi/spec/strategies/url-with-fallback-spec-loader.strategy.js'
 import type { GovernanceRuleSource } from '../spi/governance/rule-source.js'
+import type { AuditSink } from '../spi/observability/audit-sink.js'
+import { ConsoleAuditSink, CONSOLE_AUDIT_SINK } from '../adapters/observability/console-audit-sink.js'
 import { DirectoryRuleSourceStrategy } from '../spi/governance/strategies/directory-rule-source.strategy.js'
 import { UrlRuleSourceStrategy } from '../spi/governance/strategies/url-rule-source.strategy.js'
 import { STORE_TYPE, EXECUTION_STORE_TYPE, GOVERNANCE_RULE_SOURCE_TYPE } from '../core/constants.js'
@@ -61,6 +63,13 @@ const _executionStoreRegistry = new Map<string, ExecutionStoreFactory>()
 const _idempotencyRegistry = new Map<string, IdempotencyFactory>()
 const _ruleSourceRegistry = new Map<string, GovernanceRuleSourceFactory>()
 
+/** What an audit sink factory may use: the logger of the service an event belongs to. */
+export interface AuditSinkDeps {
+  loggerFor: (service: string) => Logger
+}
+export type AuditSinkFactory = (deps: AuditSinkDeps) => AuditSink
+const _auditSinkRegistry = new Map<string, AuditSinkFactory>()
+
 export function registerTokenCacheBackend(type: string, factory: TokenCacheFactory): void {
   _tokenCacheRegistry.set(type, factory)
 }
@@ -72,6 +81,11 @@ export function registerIdempotencyBackend(type: string, factory: IdempotencyFac
 /** Register a custom Code Mode execution store (e.g. Postgres, Redis) keyed by the EXECUTION_STORE_TYPE value. */
 export function registerExecutionStoreBackend(type: string, factory: ExecutionStoreFactory): void {
   _executionStoreRegistry.set(type, factory)
+}
+
+/** Register a custom audit sink (e.g. object storage, a log pipeline) keyed by its name in AUDIT_SINKS. */
+export function registerAuditSinkBackend(type: string, factory: AuditSinkFactory): void {
+  _auditSinkRegistry.set(type, factory)
 }
 
 /** Register a custom Governance Rule source (e.g. object storage, a config service) keyed by the GOVERNANCE_RULES_SOURCE value. */
@@ -132,6 +146,16 @@ export function buildExecutionStore(
     case EXECUTION_STORE_TYPE.MEMCACHE:  return memcacheCodeModeStore(config)
     default: throw new Error(`Unknown execution store type: "${(config as { type: string }).type}"`)
   }
+}
+
+/** One sink per AUDIT_SINKS entry, in order; an unknown name stops boot rather than silently dropping the trail. */
+export function buildAuditSinks(types: readonly string[], deps: AuditSinkDeps): AuditSink[] {
+  return types.map(type => {
+    const custom = _auditSinkRegistry.get(type)
+    if (custom) return custom(deps)
+    if (type === CONSOLE_AUDIT_SINK) return new ConsoleAuditSink(deps.loggerFor)
+    throw new Error(`Unknown audit sink: "${type}"`)
+  })
 }
 
 export function buildGovernanceRuleSource(

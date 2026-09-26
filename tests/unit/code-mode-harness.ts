@@ -11,7 +11,7 @@ import pino from 'pino'
 import type { McpServer, ServerContext } from '@modelcontextprotocol/server'
 import { registerExecuteApiTool } from '../../tools/execute-api.tool.js'
 import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
-import { ExecutionManager } from '../../runtime/execution/execution-manager.js'
+import { ExecutionManager, type ExecutionManagerOptions } from '../../runtime/execution/execution-manager.js'
 import { ApprovalService } from '../../runtime/execution/approval-service.js'
 import { createResumeStateCodec, type ResumeState } from '../../runtime/execution/request-state.js'
 import { GovernanceRuleStore } from '../../runtime/governance/rule-store.js'
@@ -106,9 +106,10 @@ export const REQUEST_STATE_KEY = 'test-key-'.repeat(4)
 export function makeRuntime(
   rules: Array<Record<string, unknown>> = [],
   defaultDecision: GovernanceDecisionType = GOVERNANCE_DECISION.ALLOW,
-  store: CodeModeStore = new InMemoryCodeModeStore()
+  store: CodeModeStore = new InMemoryCodeModeStore(),
+  managerOptions: ExecutionManagerOptions = {}
 ): CodeModeRuntime {
-  const manager = new ExecutionManager(store)
+  const manager = new ExecutionManager(store, undefined, undefined, managerOptions)
   const approvals = new ApprovalService(store, manager)
   const ruleStore = new GovernanceRuleStore()
   ruleStore.swap(rules.map((r, i): LoadedRule => ({ rule: governanceRuleSchema.parse(r), source: `rule-${i}.yaml`, contentHash: 'deadbeefcafe0000' })))

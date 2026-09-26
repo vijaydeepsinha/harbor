@@ -12,6 +12,7 @@ import type { GlobalConfig } from '../core/types/config.types.js'
 import type { Logger } from '../runtime/observability/logger.js'
 import type { MetricsCollector } from '../core/types/metrics.types.js'
 import { AuditCollector, writeAuditRecord } from '../runtime/observability/audit.js'
+import type { AuditPipeline } from '../runtime/observability/audit-pipeline.js'
 import { ProgressCollector } from '../runtime/observability/progress.js'
 import {
   runApiInSandbox,
@@ -58,7 +59,9 @@ export function registerExecuteApiTool(
   metrics: MetricsCollector,
   clientToken?: string,
   /** Absent ⇒ legacy behaviour: no durable execution, no governance. */
-  codeMode?: CodeModeRuntime
+  codeMode?: CodeModeRuntime,
+  /** Where audit records go (AUDIT_SINKS). Absent ⇒ written to the service logger, as before. */
+  auditPipeline?: AuditPipeline
 ): void {
   const serviceNames = registry.serviceNames()
 
@@ -215,7 +218,8 @@ async () => {
             ...extra
           },
           svcResources.logger,
-          globalConfig
+          globalConfig,
+          auditPipeline
         )
       }
 

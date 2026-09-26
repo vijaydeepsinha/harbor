@@ -30,6 +30,12 @@ export interface ExecutionManagerOptions {
   codeRetention?: ExecutionCodeRetention
   /** Seconds a terminal execution is kept before the retention sweep may delete it; 0 / absent ⇒ kept. */
   retentionSec?: number
+  /**
+   * Called after the execution's state was persisted at the end of a run or
+   * after a human decision (e.g. to publish it to the audit trail). Must not
+   * throw into the caller; errors are its own to handle.
+   */
+  onStateChange?: (executionId: string) => void
 }
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
@@ -157,6 +163,7 @@ export class ExecutionManager {
       }
       this.settle(record)
       await this.store.updateExecution(record)
+      this.options.onStateChange?.(executionId)
       return record
     } finally {
       await this.store.releaseLock(executionId)
@@ -181,6 +188,7 @@ export class ExecutionManager {
     if (reason) record.terminalReason = reason
     this.settle(record)
     await this.store.updateExecution(record)
+    this.options.onStateChange?.(executionId)
   }
 
   async inspect(executionId: string): Promise<ExecutionInspection> {

@@ -12,6 +12,8 @@ import { createResumeStateCodec, type ResumeStateCodec } from './request-state.j
 import { GovernanceRuleStore } from '../governance/rule-store.js'
 import { parseRuleDocuments } from '../governance/rule-loader.js'
 import { GovernanceRuleRefresher } from '../governance/rule-refresher.js'
+import { AuditPipeline, executionStateOf } from '../observability/audit-pipeline.js'
+import { errorMessage } from '../../core/utils/errors.js'
 
 /**
  * Everything the Code Mode governance layer needs at runtime, built once per
@@ -28,11 +30,19 @@ export interface CodeModeRuntime {
   shutdown(): Promise<void>
 }
 
-export async function buildCodeModeRuntime(config: CodeModeConfig, logger: Logger): Promise<CodeModeRuntime> {
+export async function buildCodeModeRuntime(config: CodeModeConfig, logger: Logger, audit?: AuditPipeline): Promise<CodeModeRuntime> {
   const store = buildExecutionStore(config.store, logger)
-  const manager = new ExecutionManager(store, undefined, undefined, {
+  const manager: ExecutionManager = new ExecutionManager(store, undefined, undefined, {
     ...(config.retention?.code !== undefined ? { codeRetention: config.retention.code } : {}),
-    retentionSec: config.retention?.executionSec ?? 0
+    retentionSec: config.retention?.executionSec ?? 0,
+    // Every persisted state change of an execution goes to the audit trail (statuses, approvals, decisions — no payloads).
+    ...(audit ? {
+      onStateChange: (executionId: string) => {
+        void manager.inspect(executionId)
+          .then(inspection => audit.publish({ kind: 'execution', state: executionStateOf(inspection) }))
+          .catch(err => logger.warn({ executionId, error: errorMessage(err) }, 'Could not publish execution state to the audit trail'))
+      }
+    } : {})
   })
   const retention = new ExecutionRetentionSweeper(store, config.retention?.executionSec ?? 0, logger)
   retention.start()

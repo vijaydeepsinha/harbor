@@ -3,32 +3,11 @@
 
 import type { Logger } from './logger.js'
 import type { GlobalConfig } from '../../core/types/config.types.js'
-import { TOOL } from '../../core/constants.js'
-import type { AuditOutcome } from '../../core/constants.js'
+import type { AuditRecord } from '../../core/types/audit.types.js'
 import type { CallLogSource, JournalEntry } from '../execution/activity-journal.js'
+import type { AuditPipeline } from './audit-pipeline.js'
 
-export interface AuditRecord {
-  auditId: string
-  timestamp: string
-  service: string
-  environment: string
-  userIdHash: string
-  sessionId: string
-  correlationId: string
-  tool: typeof TOOL.API_EXECUTE
-  authStrategy: string
-  idempotencyStrategy: string
-  circuitBreakerStrategy: string
-  codeSubmitted: string
-  endpointsAccessed: string[]
-  apiCallCount: number
-  durationMs: number
-  outcome: AuditOutcome
-  errorType?: string
-  errorCode?: string
-  /** Durable Code Mode execution this call belonged to (absent on the legacy, store-less path). */
-  executionId?: string
-}
+export type { AuditRecord } from '../../core/types/audit.types.js'
 
 /**
  * The endpoints one execute() call actually called — a read-only projection
@@ -53,11 +32,20 @@ export class AuditCollector {
   }
 }
 
+/**
+ * Writes one `api_execute` audit record — to the audit pipeline's sinks when
+ * one is wired (AUDIT_SINKS), or straight to `logger` otherwise.
+ */
 export function writeAuditRecord(
   record: AuditRecord,
   logger: Logger,
-  globalConfig: GlobalConfig
+  globalConfig: GlobalConfig,
+  pipeline?: AuditPipeline
 ): void {
   if (!globalConfig.observability.enableAudit) return
+  if (pipeline) {
+    void pipeline.publish({ kind: 'audit', record })
+    return
+  }
   logger.info(record, 'audit')
 }
