@@ -119,7 +119,8 @@ These work in v0.1.0 but may change in a MINOR release. Third parties should not
 | File | Status | Risk |
 |------|--------|------|
 | `sandbox-core.ts` | 🟡 Experimental | Depends on `isolated-vm` native addon. If `isolated-vm` changes its API or is replaced, the bridge changes. |
-| `execute-api-in-sandbox.ts` | 🟡 Experimental | Internal bridge between sandbox and ConnectorAPI — may change shape if sandbox model changes. |
+| `execute-api-in-sandbox.ts` | 🟡 Experimental | Runs one program: wires the bridge into the isolate and promotes recorded violations — may change shape if the sandbox model changes. |
+| `bridge-request-handler.ts` | 🟡 Experimental | Internal bridge between sandbox and ConnectorAPI (the per-run `api.request()` pipeline) — may change shape if the sandbox or execution model changes. |
 | `skills-search-in-sandbox.ts` | 🟡 Experimental | Relevance filter algorithm may improve — output shape stable, implementation may change. |
 | `spec-search-in-sandbox.ts` | 🟡 Experimental | Same as above. |
 

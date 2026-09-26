@@ -61,6 +61,12 @@ holds the request (`method`, raw path, resolved OpenAPI path template,
 `operationId`, path params, query, body — never headers) and, once the call
 returns, the response (`status`, `ok`, `data`).
 
+The journal is also the run's single record of what happened to each call —
+replayed, executed (with the response) or failed. Nothing else keeps call
+state: the audit line's `endpointsAccessed` / `apiCallCount` (calls made in
+this run) and the `progress` returned on failure (replayed + executed +
+failed calls) are projections of it (`AuditCollector`, `ProgressCollector`).
+
 Activity states:
 
 | State | Meaning |
@@ -73,7 +79,8 @@ Activity states:
 ## 4. Replay
 
 On every run the program starts from the top. At activity `#N` the bridge
-(`runtime/sandbox/execute-api-in-sandbox.ts`) looks the sequence up:
+(`runtime/sandbox/bridge-request-handler.ts`) asks the activity gate
+(`runtime/execution/activity-gate.ts`), which looks the sequence up:
 
 | Journaled record at `#N` | Bridge action |
 |---|---|
