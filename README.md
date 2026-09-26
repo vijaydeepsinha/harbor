@@ -44,7 +44,7 @@ AI client  →  Harbor  →  Your backend APIs
 - **Zero API changes** — your backend never changes; Harbor is a pure adapter
 - **Service skills** — Markdown SOP files the AI reads before making API calls
 - **Circuit breaker** — count-based, per endpoint, per service
-- **Structured audit logging** — every `api_execute` call logged with code, endpoints, duration, outcome
+- **Structured audit logging** — every `api_execute` call recorded with code, endpoints, duration, outcome, and sent to pluggable sinks (`AUDIT_SINKS`, console by default)
 - **Streamable HTTP + stdio** — both MCP transports supported
 
 ---

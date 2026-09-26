@@ -453,7 +453,7 @@ Every `api_execute` call produces a structured audit record at `info` level:
 
 Disable in development: `ENABLE_AUDIT=false`
 
-Audit records are written to stderr as structured JSON and can be forwarded to any log aggregator (ELK, Splunk, CloudWatch, etc.).
+Records go to every sink listed in `AUDIT_SINKS` (default `console`: the line above, written to stderr as structured JSON for any log aggregator — ELK, Splunk, CloudWatch, etc.). Under Code Mode governance each execution state change is published too (`execution-state`: statuses, approvals, decisions; no request or response bodies). Other destinations — S3, a SIEM — plug in with `registerAuditSinkBackend` (see `spi/observability/audit-sink.ts`).
 
 ---
 

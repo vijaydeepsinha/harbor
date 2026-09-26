@@ -288,6 +288,14 @@ ACTIVITY:COMPLETED#3
 EXECUTION:COMPLETED
 ```
 
+**Audit trail.** Every persisted state change of an execution — the end of
+each run (paused, interrupted, terminal) and each human decision — is
+published to the audit sinks (`AUDIT_SINKS`, default `console`) as an
+`execution-state` event: statuses, activities with HTTP status, approvals and
+governance decisions with rule versions. Request and response bodies and the
+program are never included. Destinations beyond the console plug in with
+`registerAuditSinkBackend` (`spi/observability/audit-sink.ts`).
+
 ## 12. Storage
 
 `EXECUTION_STORE_TYPE=in-memory` (default) keeps executions in the process;

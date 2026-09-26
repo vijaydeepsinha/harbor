@@ -136,7 +136,7 @@ In-memory counters only. No push endpoint, no Prometheus format yet. Counter nam
 
 ### `AuditRecord` shape
 
-Audit records are logged via pino. The JSON field names are not yet frozen — Prometheus/SIEM integrations built on these field names may break in v0.2.0 when the StorageProvider SPI is added.
+Audit records go to every `AUDIT_SINKS` sink (`spi/observability/audit-sink.ts`; the built-in `console` sink logs them via pino). The JSON field names are not yet frozen — Prometheus/SIEM integrations built on these field names may break in a MINOR release.
 
 ---
 
@@ -164,9 +164,9 @@ These are planned interfaces, not yet shipped. Do not build against them.
 | `ProtocolAdapter` | v1.1 | Pluggable MCP transport — HTTP, stdio, WebSocket |
 | `SkillProvider` | v1.1 | Load skills from database or remote CMS |
 | `ToolResolver` | v1.x | Dynamic tool registration beyond the five defaults |
-| `StorageProvider` | v1.x | Structured audit export to S3, GCS, SIEM |
 
-See `docs/architecture.md` section 5 for proposed interface shapes.
+See `docs/architecture.md` section 5 for proposed interface shapes. (The
+planned `StorageProvider` shipped as `AuditSink`, `spi/observability/audit-sink.ts`.)
 
 ---
 

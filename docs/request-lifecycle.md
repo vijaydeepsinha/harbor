@@ -39,7 +39,7 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 | `ApiClient.executeRequest` | `api-client/api-client.ts` | Makes the actual HTTP call to the backend API |
 | `CircuitBreakerStrategy` | `resilience/strategies/*.ts` | Tracks failures and opens/closes the circuit |
 | `IdempotencyStrategy` | `idempotency/strategies/*.ts` | Caches results to prevent duplicate writes |
-| `writeAuditRecord` | `observability/audit.ts` | Writes the final audit log entry |
+| `writeAuditRecord` | `observability/audit.ts` | Writes the final audit record to the audit pipeline (`AUDIT_SINKS`) |
 | `MetricsRegistry` | `observability/metrics.ts` | Increments counters |
 
 ---
@@ -366,10 +366,12 @@ writeAuditRecord({
   apiCallCount: 1,
   durationMs: 312,
   outcome: 'success'
-}, logger, globalConfig)
+}, logger, globalConfig, auditPipeline)
 ```
 
-Logged as structured JSON at `info` level. Skipped if `ENABLE_AUDIT=false`.
+Delivered to every `AUDIT_SINKS` sink — by default `console`, which logs it as
+structured JSON at `info` level on the service's logger. Skipped if
+`ENABLE_AUDIT=false`.
 
 ---
 
