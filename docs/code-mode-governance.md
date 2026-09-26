@@ -49,7 +49,8 @@ CREATED ──► RUNNING ──► COMPLETED
 | One logical program = one `executionId` (UUID minted by Harbor) | `runtime/execution/execution-manager.ts` |
 | The code first submitted is persisted and is authoritative for every resume; replacement code is ignored (logged) | `ExecutionRecord.originalCode` |
 | Every run takes a per-execution lock; a concurrent run gets `EXECUTION_LOCKED` (retryable). A `RUNNING` record whose lock is free is a crashed run and may resume | `ExecutionManager.beginRun` |
-| Terminal states and pending approvals are not resumable (`EXECUTION_NOT_RESUMABLE`) | same |
+| Terminal states are not resumable (`EXECUTION_NOT_RESUMABLE`) | same |
+| A resume that arrives while the approval is still undecided is not a failure: the run does not start, the execution stays `WAITING_APPROVAL`, and the caller gets the pause again (`ApprovalPendingError` → `input_required`, or `APPROVAL_REQUIRED` for clients without elicitation) | same, and `tools/execute-api.tool.ts` |
 
 ## 3. Activity journal
 
@@ -220,6 +221,7 @@ Agent                Harbor (api_execute)          V8 #1              Backend   
 | Circuit open / other retryable error | execution `INTERRUPTED` (resumable via `_meta["harbor/execution-id"]`); no activity recorded for the unmade call |
 | Governance evaluation error | `DENY` with `GOVERNANCE_EVALUATION_FAILED` |
 | Approval decided twice | second decision refused (`APPROVAL_ALREADY_DECIDED`); a duplicate MRTR retry after the decision simply resumes |
+| Resume before the approval is decided | the pause is returned again with the same approval id and `_meta["harbor/execution-status"] = WAITING_APPROVAL`; nothing runs, the execution is untouched |
 | Store write failure | the tool call fails; nothing is executed without its journal entry |
 | Replay mismatch | `REPLAY_DIVERGED`, execution `FAILED` |
 | Two resumes at once | second gets `EXECUTION_LOCKED` (retryable) |
