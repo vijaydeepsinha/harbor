@@ -221,6 +221,18 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(calls.at(-1)?.req.params).toEqual(params)
   })
 
+  it('a /campaigns/** rule governs endpoints it never names (resolved OpenAPI template → subtree match)', async () => {
+    const rt = makeRuntime([{ name: 'campaign-writes', match: { method: 'POST', path: '/campaigns/**' }, action: { type: 'REQUIRE_APPROVAL', reason: 'writes under /campaigns' } }])
+    const { connector, count } = makeConnector()
+    const handler = registerGoverned(rt, makeResources('trafficking', connector))
+    const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+    expect(paused['resultType']).toBe('input_required')
+    expect(count('GET', '/campaigns')).toBe(1)                // GET is not a POST: allowed
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)   // /campaigns/{id}/finalize is under /campaigns/**
+    const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+    expect((await rt.store.listDecisions(executionId)).map(d => [d.decision, d.decidingRule])).toEqual([['ALLOW', undefined], ['REQUIRE_APPROVAL', 'campaign-writes']])
+  })
+
   it('a DENY rule stops the execution before the call and records the decision', async () => {
     const rt = makeRuntime([{ name: 'no-finalize', match: { operation: 'finalizeCampaign' }, action: { type: 'DENY', reason: 'frozen' } }])
     const { connector, count } = makeConnector()

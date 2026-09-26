@@ -10,6 +10,7 @@ import { loadGovernanceRules, ruleVersionTag, GovernanceRuleLoadError, type Load
 import { GovernanceRuleStore } from '../../runtime/governance/rule-store.js'
 import { evaluateGovernance, readField, type GovernanceRequest } from '../../runtime/governance/rule-evaluator.js'
 import { GOVERNANCE_DECISION, GOVERNANCE_REASON } from '../../core/constants.js'
+import { campaignSpec } from './code-mode-harness.js'
 
 function rule(partial: Record<string, unknown>, source = 'r.yaml'): LoadedRule {
   const parsed = governanceRuleSchema.parse({ name: 'r', match: { service: 'trafficking' }, action: { type: 'ALLOW' }, ...partial })
@@ -234,6 +235,32 @@ describe('governance evaluator', () => {
     // an operation wildcard needs an operationId to exist
     expect(evaluateGovernance([rule({ match: { operation: '*' }, action: { type: 'DENY' } })],
       { ...req, operationId: undefined }, GOVERNANCE_DECISION.ALLOW).decision).toBe('ALLOW')
+  })
+
+  it('a subtree path pattern /campaigns/** targets every endpoint under /campaigns, segment-wise', () => {
+    const targets = (path: string, specPath: string) =>
+      evaluateGovernance([rule({ match: { path }, action: { type: 'DENY' } })], { ...req, specPath }, GOVERNANCE_DECISION.ALLOW).decision === 'DENY'
+    const endpoints = Object.keys(campaignSpec.paths ?? {})
+    expect(endpoints).toEqual(['/campaigns', '/campaigns/{id}', '/campaigns/{id}/creatives', '/campaigns/{id}/creative', '/campaigns/{id}/finalize'])
+    for (const endpoint of endpoints) {
+      expect(targets('/campaigns/**', endpoint)).toBe(true)
+      expect(targets('/**', endpoint)).toBe(true)
+      expect(targets('/campaigns/{id}/**', endpoint)).toBe(endpoint !== '/campaigns')
+      expect(targets('/campaigns', endpoint)).toBe(endpoint === '/campaigns') // a plain path stays exact
+    }
+    expect(targets('/campaigns/**', '/campaigns-archive')).toBe(false)
+    expect(targets('/campaigns/**', '/campaign')).toBe(false)
+    expect(targets('/campaigns/**', '/orders/{id}')).toBe(false)
+  })
+
+  it('rejects a misplaced ** at load', () => {
+    const base = { name: 'ok', action: { type: 'DENY' } }
+    for (const path of ['/campaigns/**/finalize', '/campaigns**', '**', '/campaigns/*/**']) {
+      const r = governanceRuleSchema.safeParse({ ...base, match: { path } })
+      expect(r.success).toBe(false)
+      expect(r.error?.issues[0]?.message).toContain('"**" is only allowed as the whole last segment')
+    }
+    expect(governanceRuleSchema.safeParse({ ...base, match: { path: '/campaigns/{id}/**' } }).success).toBe(true)
   })
 
   it('reads bare fields from the body and explicit body./query./path. prefixes', () => {

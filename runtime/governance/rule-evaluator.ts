@@ -5,7 +5,7 @@ import type { AllowedHttpMethod, GovernanceDecisionType } from '../../core/const
 import { GOVERNANCE_DECISION, GOVERNANCE_PRECEDENCE, GOVERNANCE_REASON } from '../../core/constants.js'
 import type { LoadedRule } from './rule-loader.js'
 import { ruleVersionTag } from './rule-loader.js'
-import { CONDITION_OPERATORS, type Condition, type ConditionLeaf, type ConditionNode, type GovernanceRule } from './rule-schema.js'
+import { CONDITION_OPERATORS, PATH_SUBTREE_SUFFIX, type Condition, type ConditionLeaf, type ConditionNode, type GovernanceRule } from './rule-schema.js'
 
 /** Everything the evaluator may look at (§17). Plain data — no I/O, no clock, no model. */
 export interface GovernanceRequest {
@@ -78,7 +78,7 @@ function ruleMatches(rule: GovernanceRule, req: GovernanceRequest): boolean {
   if (m.service !== undefined && !clause(m.service, req.service)) return false
   if (m.operation !== undefined && !clause(m.operation, req.operationId)) return false
   if (m.method !== undefined && m.method !== req.method) return false
-  if (m.path !== undefined && !clause(m.path, req.specPath)) return false
+  if (m.path !== undefined && !pathClause(m.path, req.specPath)) return false
   return rule.conditions === undefined || conditionsHold(rule.conditions, req)
 }
 
@@ -143,6 +143,13 @@ function isoInstant(value: unknown): number | undefined {
   if (calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day) return undefined
   const ms = Date.parse(value)
   return Number.isNaN(ms) ? undefined : ms
+}
+
+/** `/campaigns/**` targets `/campaigns` and every template beneath it — segment-wise, so not `/campaigns-archive`. */
+function pathClause(pattern: string, specPath: string): boolean {
+  if (!pattern.endsWith(PATH_SUBTREE_SUFFIX)) return clause(pattern, specPath)
+  const prefix = pattern.slice(0, -PATH_SUBTREE_SUFFIX.length)
+  return specPath === prefix || specPath.startsWith(`${prefix}/`)
 }
 
 function clause(expected: string, actual: string | undefined): boolean {

@@ -206,6 +206,20 @@ const conditionsSchema = z.unknown().transform((raw, ctx): ConditionNode | undef
 /** `*` matches anything; otherwise exact, case-sensitive. */
 const matchValue = z.string().min(1)
 
+/** Suffix that turns a path template into a subtree pattern: `/campaigns/**`. */
+export const PATH_SUBTREE_SUFFIX = '/**'
+
+/**
+ * An OpenAPI path template, `*`, or a subtree pattern `/prefix/**` that
+ * targets the template and every template beneath it. `**` may only be the
+ * last segment; `**` with more segments after it, or glued to a name (`/a**`),
+ * would be ambiguous and fails at load.
+ */
+const pathPattern = matchValue.refine(
+  p => !p.includes('**') || (p.endsWith(PATH_SUBTREE_SUFFIX) && !p.slice(0, -PATH_SUBTREE_SUFFIX.length).includes('*')),
+  { message: '"**" is only allowed as the whole last segment, e.g. /campaigns/**' }
+)
+
 export const governanceRuleSchema = z.object({
   name: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'kebab-case, e.g. high-budget-campaign'),
   description: z.string().optional(),
@@ -216,8 +230,8 @@ export const governanceRuleSchema = z.object({
     /** OpenAPI operationId. */
     operation: matchValue.optional(),
     method: z.enum(ALLOWED_HTTP_METHODS).optional(),
-    /** OpenAPI path template exactly as in the spec (e.g. `/campaigns/{id}/activate`). */
-    path: matchValue.optional()
+    /** OpenAPI path template exactly as in the spec (e.g. `/campaigns/{id}/activate`), or a subtree (`/campaigns/**`). */
+    path: pathPattern.optional()
   }).strict().refine(m => Object.keys(m).length > 0, { message: 'match needs at least one of service, operation, method, path' }),
   /** Boolean tree over request values; bare field names read the body, `body.` / `query.` / `path.` select explicitly. */
   conditions: conditionsSchema.optional(),
