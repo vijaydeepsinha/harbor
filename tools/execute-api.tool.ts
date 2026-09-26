@@ -61,7 +61,9 @@ export function registerExecuteApiTool(
   /** Absent ⇒ legacy behaviour: no durable execution, no governance. */
   codeMode?: CodeModeRuntime,
   /** Where audit records go (AUDIT_SINKS). Absent ⇒ written to the service logger, as before. */
-  auditPipeline?: AuditPipeline
+  auditPipeline?: AuditPipeline,
+  /** The caller's X-Harbor-Client-ID from the inbound request, forwarded on every backend call. */
+  callerClientId?: string
 ): void {
   const serviceNames = registry.serviceNames()
 
@@ -262,8 +264,12 @@ async () => {
 
         const sandboxCtx: SandboxExecutionContext = {
           tokenPayload, invalidate, apiClient, circuitBreaker, permissionGuard,
-          idempotencyKey, idempotencyKeyTtlMs, correlationId,
+          idempotencyKey, idempotencyKeyTtlMs,
+          // Backends correlate every call of one script by its execution id — it
+          // survives the new isolate (and new MCP request) of each approval resume.
+          correlationId: executionId ?? correlationId,
           sessionId,
+          ...(callerClientId !== undefined ? { clientId: callerClientId } : {}),
           limits: sandboxLimits,
           ...(bridge ? { executionBridge: bridge } : { callLog })
         }

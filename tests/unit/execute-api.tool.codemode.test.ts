@@ -3,12 +3,15 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  makeConnector, makeResources, makeRuntime, registerGoverned, makeCtx, retryCtx, parseContent
+  makeConnector, makeResources, makeRuntime, registerGoverned, makeCtx, retryCtx, parseContent,
+  makeFakeServer, makeRegistry, globalConfig, silentLogger
 } from './code-mode-harness.js'
+import { registerExecuteApiTool } from '../../tools/execute-api.tool.js'
+import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
 import { MemcacheCodeModeStore } from '../../adapters/execution/memcache-execution-store.js'
 import { FakeMemcache } from './fake-memcache.js'
 import {
-  ERR, EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS, GOVERNANCE_DECISION, GOVERNANCE_REASON,
+  ERR, EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS, GOVERNANCE_DECISION, GOVERNANCE_REASON, TOOL,
   EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY, APPROVAL_ID_META_KEY, APPROVAL_INPUT_KEY
 } from '../../core/constants.js'
 
@@ -275,6 +278,21 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(count('POST', '/campaigns/C1/finalize')).toBe(1)   // executed exactly once
     const executionId = (done['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
     expect((await podA.manager.load(executionId)).status).toBe(EXECUTION_STATUS.COMPLETED) // pod A sees pod B's outcome
+  })
+
+  it('X-Correlation-ID is the execution id on every call of one script, across approval resumes; the client id is forwarded', async () => {
+    const rt = makeRuntime([FINALIZE_RULE])
+    const { connector, calls } = makeConnector()
+    const { handlers, server } = makeFakeServer()
+    registerExecuteApiTool(server, makeRegistry({ trafficking: makeResources('trafficking', connector) }), globalConfig, silentLogger,
+      { increment() {}, stop() {} } as unknown as MetricsRegistry, 'tok', rt, undefined, 'agent-7')
+    const handler = handlers[TOOL.API_EXECUTE]!
+    const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ requestId: 'rpc-1' }))
+    await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'accept', approve: true }, 'rpc-2'))
+    const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+    expect(calls.map(c => `${c.req.method} ${c.req.path}`)).toEqual(['GET /campaigns', 'POST /campaigns/C1/finalize']) // two runs, two MCP requests
+    expect(calls.map(c => c.ctx.correlationId)).toEqual([executionId, executionId])
+    expect(calls.map(c => c.ctx.clientId)).toEqual(['agent-7', 'agent-7'])
   })
 
   it('a DENY rule stops the execution before the call and records the decision', async () => {

@@ -41,10 +41,17 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
     const reply = parse(await handler.handle(call({ method: 'POST', path: '/campaigns/42', body: { a: 1 } })))
     expect(reply).toMatchObject({ status: 201, ok: true })
     expect(calls[0]?.ctx.idempotencyKey).toBe('idem') // no sequence suffix outside an execution
+    expect(calls[0]?.ctx).not.toHaveProperty('clientId')
     expect(ctx.callLog?.entries()).toHaveLength(1)
     expect(new AuditCollector(ctx.callLog!).getEndpoints()).toEqual(['POST /campaigns/{id}'])
     expect(new ProgressCollector(ctx.callLog!, 10).summary().calls[0]).toMatchObject({ method: 'POST', endpoint: '/campaigns/{id}', status: 201 })
     expect(() => handler.throwIfViolated()).not.toThrow()
+  })
+
+  it('passes the caller\'s client id through to the connector', async () => {
+    const { ctx, calls } = makeCtx({ clientId: 'agent-7', correlationId: 'exec-1' })
+    await new BridgeRequestHandler(ctx, new AbortController().signal).handle(call({ method: 'GET', path: '/campaigns' }))
+    expect(calls[0]?.ctx).toMatchObject({ clientId: 'agent-7', correlationId: 'exec-1' })
   })
 
   it('refuses over-budget and malformed calls and promotes them afterwards', async () => {

@@ -12,7 +12,8 @@ import type {
   CouchbaseConnectionConfig
 } from '../types/config.types.js'
 import { LOG_LEVELS } from '../types/config.types.js'
-import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, EXECUTION_STORE_TYPE, EXECUTION_CODE_RETENTION, GOVERNANCE_DECISION, GOVERNANCE_RULE_SOURCE_TYPE } from '../constants.js'
+import { SAFE_HEADER_VALUE } from '../utils/header-value.js'
+import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, DEFAULT_HARBOR_SERVER_ID, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, EXECUTION_STORE_TYPE, EXECUTION_CODE_RETENTION, GOVERNANCE_DECISION, GOVERNANCE_RULE_SOURCE_TYPE } from '../constants.js'
 
 // ── Config-file loader ───────────────────────────────────────────────────────
 //
@@ -177,6 +178,8 @@ const GlobalConfigSchema = z.object({
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
   SERVICE_NAME: z.string().default('harbor-gateway'),
   MCP_AGENT_NAME: z.string().default(REQUEST_SOURCE_VALUE),
+  // Harbor's stamp on every backend call (X-Harbor-Server-ID): printable ASCII, ≤128 characters.
+  HARBOR_SERVER_ID: z.string().regex(SAFE_HEADER_VALUE, 'printable ASCII, 1–128 characters, no leading/trailing space').default(DEFAULT_HARBOR_SERVER_ID),
   ENVIRONMENT: z.enum([ENV.DEV, ENV.STAGING, ENV.STAGING_SECONDARY, ENV.CANARY, ENV.PROD]).default(ENV.DEV),
   ENABLE_AUDIT: z.coerce.boolean().default(true),
   // Where audit records and execution-state events go: comma list of `console` (built in) or registered sink types.
@@ -272,7 +275,8 @@ export function validateGlobalConfig(): GlobalConfig {
       agentName: env.MCP_AGENT_NAME,
       environment: env.ENVIRONMENT,
       enableAudit: env.ENABLE_AUDIT,
-      auditSinks: env.AUDIT_SINKS.split(',').map(s => s.trim()).filter(Boolean)
+      auditSinks: env.AUDIT_SINKS.split(',').map(s => s.trim()).filter(Boolean),
+      serverId: env.HARBOR_SERVER_ID
     },
     defaultIdempotency: resolveStoreTypeConfig(process.env, {
       storeTypeEnvKey: 'IDEMPOTENCY_TYPE',

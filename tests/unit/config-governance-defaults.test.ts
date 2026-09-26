@@ -8,7 +8,7 @@ import { GOVERNANCE_DECISION } from '../../core/constants.js'
 describe('governance configuration defaults', () => {
   const KEYS = ['GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
     'EXECUTION_STORE_TYPE', 'EXECUTION_STORE_MEMCACHE_HOST', 'EXECUTION_STORE_MEMCACHE_PORT', 'EXECUTION_STORE_MEMCACHE_TIMEOUT_MS',
-    'EXECUTION_STORE_MEMCACHE_KEY_PREFIX', 'EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC'] as const
+    'EXECUTION_STORE_MEMCACHE_KEY_PREFIX', 'EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC', 'HARBOR_SERVER_ID'] as const
   let saved: Record<string, string | undefined> = {}
   beforeEach(() => {
     saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]]))
@@ -73,6 +73,22 @@ describe('governance configuration defaults', () => {
     try {
       expect(() => validateGlobalConfig()).toThrow('exit 1')
       expect(String(error.mock.calls[0]?.[0])).toContain('EXECUTION_STORE_MEMCACHE_HOST')
+    } finally {
+      exit.mockRestore()
+      error.mockRestore()
+    }
+  })
+
+  it('HARBOR_SERVER_ID stamps outbound calls — HARBOR_GATEWAY by default; a value unsafe in a header stops the gateway', () => {
+    expect(validateGlobalConfig().observability.serverId).toBe('HARBOR_GATEWAY')
+    process.env['HARBOR_SERVER_ID'] = 'harbor-eu-1'
+    expect(validateGlobalConfig().observability.serverId).toBe('harbor-eu-1')
+    process.env['HARBOR_SERVER_ID'] = 'bad\r\nvalue'
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => { throw new Error(`exit ${code}`) }) as never)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(() => validateGlobalConfig()).toThrow('exit 1')
+      expect(String(error.mock.calls[0]?.[0])).toContain('HARBOR_SERVER_ID')
     } finally {
       exit.mockRestore()
       error.mockRestore()

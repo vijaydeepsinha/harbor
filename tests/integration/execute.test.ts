@@ -105,6 +105,39 @@ describe('execute integration', () => {
     expect(requestCall?.headers?.['X-Correlation-ID']).toBe('my-correlation-id')
   })
 
+  describe('Harbor-owned headers', () => {
+    async function sentHeaders(ctx: Partial<ExecuteRequestContext> = {}, programHeaders?: Record<string, string>, serverId?: string) {
+      vi.mocked(axios.create).mockReturnValue({ request: vi.fn().mockResolvedValue({ status: 200, data: {} }) } as never)
+      const client = new ApiClient('http://test-api.internal:8090/api/v1', apiConfig,
+        new CountBasedCircuitBreakerStrategy({ failureThreshold: 5, recoveryTimeMs: 30_000 }), new InMemoryIdempotencyStrategy(), silentLogger,
+        { serviceName: 'test-service', agentName: 'mcp-agent', ...(serverId ? { serverId } : {}) })
+      await client.executeRequest({ method: 'GET', path: '/campaigns', ...(programHeaders ? { headers: programHeaders } : {}) }, { ...baseCtx, ...ctx })
+      const instance = vi.mocked(axios.create).mock.results.at(-1)?.value
+      return instance?.request.mock.calls[0]?.[0]?.headers as Record<string, string>
+    }
+
+    it('stamps every call with X-Harbor-Server-ID — HARBOR_GATEWAY unless configured', async () => {
+      expect((await sentHeaders())['X-Harbor-Server-ID']).toBe('HARBOR_GATEWAY')
+      expect((await sentHeaders({}, undefined, 'harbor-eu-1'))['X-Harbor-Server-ID']).toBe('harbor-eu-1')
+    })
+
+    it('forwards X-Harbor-Client-ID only when the caller sent one', async () => {
+      expect((await sentHeaders({ clientId: 'agent-7' }))['X-Harbor-Client-ID']).toBe('agent-7')
+      expect(await sentHeaders()).not.toHaveProperty('X-Harbor-Client-ID')
+    })
+
+    it('the sandboxed program cannot set or forge them (any letter case); its other headers pass through', async () => {
+      const headers = await sentHeaders({ correlationId: 'exec-1', clientId: 'agent-7' }, {
+        'x-correlation-id': 'forged', 'X-HARBOR-SERVER-ID': 'forged', 'x-harbor-client-id': 'forged', 'X-Custom': 'kept'
+      })
+      expect(headers['X-Correlation-ID']).toBe('exec-1')
+      expect(headers['X-Harbor-Server-ID']).toBe('HARBOR_GATEWAY')
+      expect(headers['X-Harbor-Client-ID']).toBe('agent-7')
+      expect(headers['X-Custom']).toBe('kept')
+      expect(Object.values(headers)).not.toContain('forged')
+    })
+  })
+
   it('outbound request includes X-Idempotency-Key', async () => {
     vi.mocked(axios.create).mockReturnValue({
       request: vi.fn().mockResolvedValue({ status: 200, data: {} })

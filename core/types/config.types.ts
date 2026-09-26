@@ -124,6 +124,8 @@ export interface GlobalConfig {
     enableAudit: boolean
     /** Audit sinks every event goes to (AUDIT_SINKS): `console` (built in) or registered types. Absent ⇒ `['console']`. */
     auditSinks?: string[]
+    /** Sent as X-Harbor-Server-ID on every backend call (HARBOR_SERVER_ID). Absent ⇒ `HARBOR_GATEWAY`. */
+    serverId?: string
   }
   defaultIdempotency: IdempotencyBackendConfig
   oauth?: OAuthResourceConfig

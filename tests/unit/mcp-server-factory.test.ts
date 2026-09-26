@@ -134,6 +134,20 @@ describe('buildMcpServerFactory', () => {
     expect(registerExecuteApiToolMock.mock.calls[0]?.[5]).toBe('stdio-fallback-token')
   })
 
+  it('passes the caller\'s X-Harbor-Client-ID (HTTP) to api_execute when it is a safe header value', () => {
+    const factory = buildMcpServerFactory({ registry: new ServiceRegistry(), globalConfig, logger: makeLogger(), metrics })
+    const withHeader = (value: string) => ({
+      era: 'modern', authInfo: { token: 't' },
+      requestInfo: new Request('http://harbor/mcp', { method: 'POST', headers: { 'x-harbor-client-id': value } })
+    }) as McpRequestContext
+    factory(withHeader('agent-7'))
+    expect(registerExecuteApiToolMock.mock.calls[0]?.[8]).toBe('agent-7')
+    factory(withHeader('x'.repeat(200)))
+    expect(registerExecuteApiToolMock.mock.calls[1]?.[8]).toBeUndefined()
+    factory({ era: 'modern' }) // stdio: no HTTP request, no client id
+    expect(registerExecuteApiToolMock.mock.calls[2]?.[8]).toBeUndefined()
+  })
+
   it('isolates a single tool registration failure — the other 4 still register (H-9)', () => {
     registerSearchCodeToolMock.mockImplementationOnce(() => {
       throw new Error('boom: search_code registration failed')

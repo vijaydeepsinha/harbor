@@ -105,6 +105,9 @@ export const ERR = {
  *  type something as `code: string`. */
 export type ErrCode = (typeof ERR)[keyof typeof ERR]
 
+/** `X-Harbor-Server-ID` when HARBOR_SERVER_ID is not configured. */
+export const DEFAULT_HARBOR_SERVER_ID = 'HARBOR_GATEWAY'
+
 /** HTTP methods accepted by `api.request` from sandboxed user code. */
 export const ALLOWED_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 export type AllowedHttpMethod = (typeof ALLOWED_HTTP_METHODS)[number]
@@ -121,6 +124,10 @@ export const HTTP_HEADER = {
   MCP_SERVICE: 'X-MCP-Service',
   MCP_VERSION: 'X-MCP-Version',
   IDEMPOTENCY_KEY: 'X-Idempotency-Key',
+  /** Harbor's stamp on every backend call: which gateway made it (HARBOR_SERVER_ID). */
+  HARBOR_SERVER_ID: 'X-Harbor-Server-ID',
+  /** The external caller's own id, forwarded from the inbound `/mcp` request when it sent one. */
+  HARBOR_CLIENT_ID: 'X-Harbor-Client-ID',
   /** MCP 2026-07-28 protocol headers (spec §13/§14). Validated by the SDK;
    *  Harbor only reads them for routing/authorization/observability. */
   MCP_PROTOCOL_VERSION: 'MCP-Protocol-Version',

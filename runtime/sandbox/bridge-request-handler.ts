@@ -247,6 +247,7 @@ export class BridgeRequestHandler {
         idempotencyKeyTtlMs: ctx.idempotencyKeyTtlMs,
         correlationId: ctx.correlationId,
         sessionId: ctx.sessionId,
+        ...(ctx.clientId !== undefined ? { clientId: ctx.clientId } : {}),
         signal: this.signal
       }
     )
