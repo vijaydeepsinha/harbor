@@ -9,6 +9,21 @@ Every `*.yaml` / `*.yml` / `*.json` file **directly in this directory** is
 loaded at boot (`GOVERNANCE_RULES_DIR`, default `./governance/rules`). Files in
 sub-directories are not — `examples/` is documentation.
 
+Rules do not have to ship with the deployment:
+
+| `GOVERNANCE_RULES_SOURCE` | Rules come from |
+|---|---|
+| `dir` (default) | the files in `GOVERNANCE_RULES_DIR` (a mounted volume or ConfigMap works) |
+| `url` | one document at `GOVERNANCE_RULES_URL` (`{ rules: [...] }`, a list, or one rule; JSON if served as JSON, YAML otherwise), fetched with GET within `GOVERNANCE_RULES_URL_TIMEOUT_MS` |
+| anything else | a source registered with `registerGovernanceRuleSourceBackend(type, factory)` (`wiring/strategy-builders.ts`) — object storage, a config service, a database |
+
+`GOVERNANCE_RULES_REFRESH_SEC` (default `0` = load once) re-reads the source on
+that interval. A changed set is swapped in whole; a refresh that cannot reach
+the source or reads an invalid set changes nothing — the last valid set stays
+in force and the failure is logged on every attempt. At boot there is no
+previous set, so an unreadable source or an invalid first set stops the
+gateway.
+
 A file holds one rule, a list of rules, or `{ rules: [...] }`:
 
 ```yaml

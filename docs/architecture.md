@@ -191,7 +191,7 @@ The only layer that imports from both `adapters/` and `spi/`. Keeps the layer in
 
 | File | Responsibility |
 |------|----------------|
-| `strategy-builders.ts` | Factory registry for token-cache and idempotency backends; `buildTokenCacheStrategy`, `buildIdempotencyStrategy`, `buildSpecLoader`; external `registerTokenCacheBackend` / `registerIdempotencyBackend` registration points |
+| `strategy-builders.ts` | Factory registry for token-cache and idempotency backends; `buildTokenCacheStrategy`, `buildIdempotencyStrategy`, `buildSpecLoader`, `buildGovernanceRuleSource`; external `registerTokenCacheBackend` / `registerIdempotencyBackend` / `registerGovernanceRuleSourceBackend` registration points |
 | `service-wiring.ts` | `resolveAuth` — instantiates the correct `AuthStrategy` from a `ServiceAuthConfig` descriptor; `resolveCircuitBreaker` — instantiates `CircuitBreakerStrategy` from config |
 
 `runtime/gateway/strategy-builders.ts` is a thin re-export shell (`export * from '../../wiring/strategy-builders.js'`) so existing import paths stay valid.

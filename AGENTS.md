@@ -110,6 +110,9 @@ green**, plus the Python E2E when the gateway boot or tool behaviour changed.
 - **A Governance Rule:** drop a YAML file in `governance/rules/` (format in
   `governance/rules/README.md`); boot validates it. Test with the evaluator
   directly (`tests/unit/governance-rules.test.ts` shows the shape).
+- **A rule source:** implement `GovernanceRuleSource` (`spi/governance/rule-source.ts`;
+  `load()` throws rather than return part of a set) and register it with
+  `registerGovernanceRuleSourceBackend`; `GOVERNANCE_RULES_SOURCE=<type>` selects it.
 - **A store backend:** implement `CodeModeStore` (`spi/execution/execution-store.ts`),
   run the contract suite in `tests/unit/execution-store.test.ts` against it,
   register with `registerExecutionStoreBackend`.

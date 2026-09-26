@@ -122,8 +122,14 @@ rule set and the request — no I/O, no clock, no model.
 
 ## 6. Governance Rules
 
-Rules live in `governance/rules/*.yaml|yml|json` (`GOVERNANCE_RULES_DIR`);
-format and operators in [`governance/rules/README.md`](../governance/rules/README.md).
+Rules come from a **rule source** (`spi/governance/rule-source.ts`): by default
+the files in `governance/rules/*.yaml|yml|json` (`GOVERNANCE_RULES_DIR`), or one
+document at `GOVERNANCE_RULES_URL` (`GOVERNANCE_RULES_SOURCE=url`), or a source
+registered with `registerGovernanceRuleSourceBackend`. With
+`GOVERNANCE_RULES_REFRESH_SEC` > 0 the source is re-read on that interval
+(`runtime/governance/rule-refresher.ts`): a changed set is swapped in
+atomically; an unreachable source or an invalid set keeps the last valid set.
+Format and operators in [`governance/rules/README.md`](../governance/rules/README.md).
 
 - **Targeting** uses the service's own OpenAPI document: a call to
   `POST /campaigns/C1/activate` resolves to `operationId: activateCampaign`,
@@ -285,7 +291,11 @@ single gateway survives a restart. Both implement the same SPI
 |---|---|---|
 | `EXECUTION_STORE_TYPE` | `in-memory` | `in-memory` \| `file` |
 | `EXECUTION_STORE_DIR` | `./var/executions` | file store directory |
-| `GOVERNANCE_RULES_DIR` | `./governance/rules` | rule files (top level only) |
+| `GOVERNANCE_RULES_SOURCE` | `dir` | `dir` \| `url` \| a registered source type |
+| `GOVERNANCE_RULES_DIR` | `./governance/rules` | rule files for the `dir` source (top level only) |
+| `GOVERNANCE_RULES_URL` | — | rule document for the `url` source |
+| `GOVERNANCE_RULES_URL_TIMEOUT_MS` | `5000` | fetch timeout for the `url` source |
+| `GOVERNANCE_RULES_REFRESH_SEC` | `0` | re-read the source every N seconds (0 = once, at boot); a failed refresh keeps the last valid set |
 | `GOVERNANCE_DEFAULT_DECISION` | `DENY` | a call some rule targets but none matches; calls no rule targets are allowed (`NO_GOVERNANCE`) |
 | `GOVERNANCE_REQUEST_STATE_KEY` | *(random per process)* | ≥32-char HMAC key; required for multi-instance deployments |
 | `GOVERNANCE_APPROVAL_TTL_SEC` | `600` | how long a paused execution's `requestState` stays redeemable |

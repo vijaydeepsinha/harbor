@@ -148,7 +148,11 @@ When `HARBOR_RESOURCE_URI` is not set the gateway behaves identically to before 
 |---|---|---|
 | `EXECUTION_STORE_TYPE` | `in-memory` | Where executions, activities, approvals and decisions live: `in-memory` or `file` |
 | `EXECUTION_STORE_DIR` | `./var/executions` | Directory for the `file` store (one JSON document per execution) |
-| `GOVERNANCE_RULES_DIR` | `./governance/rules` | Governance Rule files (`*.yaml`/`*.yml`/`*.json`, top level only). Invalid files fail boot |
+| `GOVERNANCE_RULES_SOURCE` | `dir` | Where Governance Rules come from: `dir`, `url`, or a type registered with `registerGovernanceRuleSourceBackend` |
+| `GOVERNANCE_RULES_DIR` | `./governance/rules` | Governance Rule files for the `dir` source (`*.yaml`/`*.yml`/`*.json`, top level only). Invalid files fail boot |
+| `GOVERNANCE_RULES_URL` | — | Rule document for the `url` source (required with it) |
+| `GOVERNANCE_RULES_URL_TIMEOUT_MS` | `5000` | Fetch timeout for the `url` source |
+| `GOVERNANCE_RULES_REFRESH_SEC` | `0` | Re-read the rule source every N seconds (`0` = once, at boot). An unreachable source or an invalid set keeps the last valid set |
 | `GOVERNANCE_DEFAULT_DECISION` | `DENY` | Decision for a call that some rule targets but no rule matches: `ALLOW`, `DENY`, `REQUIRE_APPROVAL`. A call no rule targets is always allowed (`NO_GOVERNANCE`) |
 | `GOVERNANCE_REQUEST_STATE_KEY` | *(random per process)* | ≥32-character HMAC key sealing the MRTR `requestState`; set it for multi-instance deployments |
 | `GOVERNANCE_APPROVAL_TTL_SEC` | `600` | Seconds a paused execution's `requestState` stays redeemable |
