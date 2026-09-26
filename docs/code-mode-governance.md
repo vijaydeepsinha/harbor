@@ -293,9 +293,22 @@ EXECUTION:COMPLETED
 `EXECUTION_STORE_TYPE=in-memory` (default) keeps executions in the process;
 `file` writes one JSON document per execution under `EXECUTION_STORE_DIR`
 (temp file + rename) and reloads them at boot, so a single gateway survives a
-restart. Both implement the same SPI (`spi/execution/execution-store.ts`);
-register another backend with `registerExecutionStoreBackend('postgres',
-factory)` in `wiring/strategy-builders.ts`.
+restart. Both are bound to one pod.
+
+`memcache` shares executions across pods
+(`adapters/execution/memcache-execution-store.ts`): the execution, every
+activity, the approvals and the decisions live in memcache — read there on
+every access, never cached in a pod — and the run lock is an atomic `add` with
+a TTL, held across pods. A run paused on one pod can be approved and resumed
+on another (set the same `GOVERNANCE_REQUEST_STATE_KEY` on every pod).
+Connection settings follow the token cache (`EXECUTION_STORE_MEMCACHE_HOST`,
+`_PORT`, `_TIMEOUT_MS`); `_KEY_PREFIX` namespaces the keys and `_LOCK_TTL_SEC`
+(default 300) is how long a crashed pod's lock survives — it must exceed the
+longest run. Retention uses item TTLs.
+
+All stores implement the same SPI (`spi/execution/execution-store.ts`);
+register another backend (e.g. Redis) with
+`registerExecutionStoreBackend('redis', factory)` in `wiring/strategy-builders.ts`.
 
 **Retention.** A finished (terminal) execution and everything recorded for it
 — activities, approvals, decisions — is deleted `EXECUTION_RETENTION_SEC`
@@ -309,8 +322,11 @@ a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `EXECUTION_STORE_TYPE` | `in-memory` | `in-memory` \| `file` |
+| `EXECUTION_STORE_TYPE` | `in-memory` | `in-memory` \| `file` \| `memcache` (shared across pods) |
 | `EXECUTION_STORE_DIR` | `./var/executions` | file store directory |
+| `EXECUTION_STORE_MEMCACHE_HOST` / `_PORT` | — | memcache store connection (required with it); `_TIMEOUT_MS` default `2000` |
+| `EXECUTION_STORE_MEMCACHE_KEY_PREFIX` | `harbor:exec:` | key namespace |
+| `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC` | `300` | how long a crashed pod's run lock survives; must exceed the longest run |
 | `EXECUTION_CODE_RETENTION` | `DROP` | `DROP`: a terminal execution's program text is removed · `KEEP`: stored against the `executionId` |
 | `EXECUTION_RETENTION_SEC` | `86400` | seconds a finished execution and its records are kept before deletion; `0` = keep forever |
 | `GOVERNANCE_RULES_SOURCE` | `dir` | `dir` \| `url` \| a registered source type |
@@ -324,8 +340,16 @@ a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
 
 ## 14. Known limitations (POC)
 
-- The run lock is process-local; the file store persists records, not locks.
-  Multi-instance deployments need a shared store with a real lock.
+- With the `in-memory` and `file` stores the run lock is process-local and a
+  paused execution resumes only on its own pod; across pods use
+  `EXECUTION_STORE_TYPE=memcache` with one `GOVERNANCE_REQUEST_STATE_KEY`.
+- On memcache, items without a TTL (live executions, and finished ones when
+  `EXECUTION_RETENTION_SEC=0`) can be evicted under memory pressure — size it
+  for what you keep; the audit trail is the durable record. The run lock must
+  outlive the longest run (`EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC`).
+- Two humans deciding the same approval at the same moment through different
+  pods can both pass the "still pending" check: the decision is not yet an
+  atomic compare-and-set in the store.
 - `requestState` binds the principal via `userIdHash` inside the sealed
   payload and the JSON-RPC method via the codec; it is not bound to the
   transport bearer itself.

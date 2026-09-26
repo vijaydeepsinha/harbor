@@ -92,6 +92,8 @@ Because HTTP transport is stateless, **any pod can serve any request**. No stick
 
 The shared token cache (`TOKEN_CACHE_TYPE=memcache` or `couchbase`) still allows fast auth across pods — validated tokens are cached centrally so each request does not re-hit the auth backend unnecessarily.
 
+Code Mode executions are the exception: a paused `api_execute` run lives in the execution store. With `EXECUTION_STORE_TYPE=memcache` (and the same `GOVERNANCE_REQUEST_STATE_KEY` on every pod) any pod can resume it; with the default `in-memory` or `file` store only the pod that paused it can.
+
 ---
 
 ## The Five Tools

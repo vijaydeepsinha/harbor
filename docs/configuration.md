@@ -146,7 +146,10 @@ When `HARBOR_RESOURCE_URI` is not set the gateway behaves identically to before 
 
 | Variable | Default | Description |
 |---|---|---|
-| `EXECUTION_STORE_TYPE` | `in-memory` | Where executions, activities, approvals and decisions live: `in-memory` or `file` |
+| `EXECUTION_STORE_TYPE` | `in-memory` | Where executions, activities, approvals, decisions and the run lock live: `in-memory`, `file`, or `memcache` (shared across pods) |
+| `EXECUTION_STORE_MEMCACHE_HOST` / `EXECUTION_STORE_MEMCACHE_PORT` | — | Memcached for `EXECUTION_STORE_TYPE=memcache` (required with it); `EXECUTION_STORE_MEMCACHE_TIMEOUT_MS` optional, default `2000` |
+| `EXECUTION_STORE_MEMCACHE_KEY_PREFIX` | `harbor:exec:` | Key namespace, so several gateways or environments can share one memcache |
+| `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC` | `300` | How long the run lock of a pod that died mid-run survives; must exceed the longest `SANDBOX_EXECUTE_TIMEOUT_MS` |
 | `EXECUTION_STORE_DIR` | `./var/executions` | Directory for the `file` store (one JSON document per execution) |
 | `EXECUTION_CODE_RETENTION` | `DROP` | `DROP`: remove a terminal execution's program text · `KEEP`: keep it stored against the `executionId` |
 | `EXECUTION_RETENTION_SEC` | `86400` | Seconds a finished execution and all its records (activities, approvals, decisions) are kept before deletion; `0` = keep forever. Paused and interrupted executions are never deleted |
