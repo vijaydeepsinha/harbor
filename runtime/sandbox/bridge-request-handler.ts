@@ -4,7 +4,6 @@
 import { CircuitOpenError } from '../../core/types/circuit-breaker.types.js'
 import { PermissionDeniedError } from '../../core/types/permission.types.js'
 import type { ApiRequest, ApiResponse } from '../../spi/connector/connector-api.js'
-import { extractTopLevelIds } from '../observability/progress.js'
 import { ERR, ALLOWED_HTTP_METHODS, type AllowedHttpMethod } from '../../core/constants.js'
 import { errorMessage, errorCode } from '../../core/utils/errors.js'
 import { normalizeEndpointPath } from '../../core/utils/url.js'
@@ -23,6 +22,7 @@ import {
   ActivityOutcomeUnknownError
 } from '../../core/types/execution.types.js'
 import { ActivityGate, type ActivityAdmission, type ActivityStop } from '../execution/activity-gate.js'
+import { CallLog, type CallIdentity } from '../execution/activity-journal.js'
 import type { SandboxExecutionContext } from './execute-api-in-sandbox.js'
 
 /**
@@ -97,15 +97,19 @@ function validateApiRequest(raw: unknown): ApiRequestValidationResult {
  *   (permission guard, circuit breaker) → execute (ConnectorAPI) → record
  *
  * Replay and governance are not decided here: the {@link ActivityGate} owns
- * them. This class owns the run's bookkeeping — call counters and the
- * violation that `throwIfViolated` promotes once the isolate has settled.
- * One instance per run; nothing in it outlives the run.
+ * them. Call outcomes are recorded once, in the run's journal (CallLog /
+ * ActivityJournal); audit and progress are projections of it. This class
+ * owns only the run's bookkeeping — call counters and the violation that
+ * `throwIfViolated` promotes once the isolate has settled. One instance per
+ * run; nothing in it outlives the run.
  */
 export class BridgeRequestHandler {
   private violation: BridgeViolation | null = null
   private totalCalls = 0
   private inFlight = 0
   private readonly gate: ActivityGate | undefined
+  /** Where every call outcome is recorded, once: the execution's journal when governed. */
+  private readonly calls: CallLog
 
   constructor(
     private readonly ctx: SandboxExecutionContext,
@@ -113,6 +117,7 @@ export class BridgeRequestHandler {
     private readonly signal: AbortSignal
   ) {
     this.gate = ctx.executionBridge ? new ActivityGate(ctx.executionBridge) : undefined
+    this.calls = ctx.executionBridge?.journal ?? ctx.callLog ?? new CallLog()
   }
 
   /** One `api.request()` from the isolate → one JSON reply: the response, or a bridge error the isolate rethrows. */
@@ -121,9 +126,9 @@ export class BridgeRequestHandler {
     if (refusal !== undefined) return refusal
 
     this.inFlight++
-    // Hoisted so the failure path can record progress with the method/endpoint
-    // that was being attempted when the throw happened.
-    let attempted: { method: AllowedHttpMethod; endpoint: string } | undefined
+    // Hoisted so the failure path can record the method/endpoint that was
+    // being attempted when the throw happened.
+    let attempted: CallIdentity | undefined
     // Sequence of the activity journaled as EXECUTING (governed runs only).
     let executing: number | undefined
     try {
@@ -142,7 +147,7 @@ export class BridgeRequestHandler {
       let admission: Extract<ActivityAdmission, { kind: 'execute' }> | undefined
       if (this.gate && resolved) {
         const decision = await this.gate.admit(apiRequest, resolved)
-        if (decision.kind === 'replay') return this.replay(apiRequest.method, endpoint, decision.response)
+        if (decision.kind === 'replay') return this.replay(attempted, decision.sequence, decision.response)
         if (decision.kind === 'stop') {
           this.violation = decision.stop
           return bridgeError(decision.code, decision.message)
@@ -158,7 +163,7 @@ export class BridgeRequestHandler {
       }
 
       const response = await this.execute(apiRequest, admission?.sequence)
-      await this.record(apiRequest.method, endpoint, response, admission?.sequence)
+      await this.record(attempted, response, admission?.sequence)
       return JSON.stringify(response)
     } catch (err) {
       return this.fail(err, attempted, executing)
@@ -247,47 +252,27 @@ export class BridgeRequestHandler {
     )
   }
 
-  /** A response came back (any status): journal it, then circuit breaker, audit and progress. */
-  private async record(method: AllowedHttpMethod, endpoint: string, response: ApiResponse, sequence: number | undefined): Promise<void> {
-    if (this.gate && sequence !== undefined) {
-      await this.gate.complete(sequence, { status: response.status, ok: response.ok, data: response.data })
-    }
+  /**
+   * A response came back (any status). One record in the journal — the
+   * durable activity (governed) and the run's outcome that audit and progress
+   * are projected from — then the circuit breaker.
+   */
+  private async record(call: CallIdentity, response: ApiResponse, sequence: number | undefined): Promise<void> {
+    await this.calls.recordResponse(call, { status: response.status, ok: response.ok, data: response.data }, sequence)
 
     // recordSuccess is intentional even on 4xx: client errors (bad
     // input from user code) should not trip the breaker — only 5xx
     // upstream failures do, and those throw before reaching here.
-    this.ctx.circuitBreaker.recordSuccess(endpoint)
-    this.ctx.auditCollector.record(method, endpoint)
-
-    // Only extract ids for create-like calls (POST + ok). Avoids
-    // leaking arbitrary response fields and matches the v1 scope.
-    const ids =
-      method === 'POST' && response.ok
-        ? extractTopLevelIds(response.data)
-        : undefined
-    this.ctx.progressCollector?.recordSuccess(
-      method,
-      endpoint,
-      response.status,
-      response.ok,
-      ids
-    )
+    this.ctx.circuitBreaker.recordSuccess(call.endpoint)
   }
 
   /** A COMPLETED activity from an earlier run: the recorded response stands in for the call. */
-  private replay(method: AllowedHttpMethod, endpoint: string, stored: ActivityResponseRecord): string {
-    this.ctx.progressCollector?.recordSuccess(
-      method, endpoint, stored.status, stored.ok,
-      method === 'POST' && stored.ok ? extractTopLevelIds(stored.data) : undefined
-    )
+  private replay(call: CallIdentity, sequence: number, stored: ActivityResponseRecord): string {
+    this.calls.recordReplayed(call, sequence, stored)
     return JSON.stringify({ data: stored.data, status: stored.status, ok: stored.ok } satisfies ApiResponse)
   }
 
-  private async fail(
-    err: unknown,
-    attempted: { method: AllowedHttpMethod; endpoint: string } | undefined,
-    executing: number | undefined
-  ): Promise<string> {
+  private async fail(err: unknown, attempted: CallIdentity | undefined, executing: number | undefined): Promise<string> {
     // Replay divergence is terminal for the run: record it and stop.
     if (err instanceof ReplayDivergedError) {
       this.violation = { kind: 'replayDiverged', error: err }
@@ -302,21 +287,17 @@ export class BridgeRequestHandler {
     if (err instanceof CircuitOpenError) {
       this.violation = { kind: 'circuitOpen', endpoint: err.endpoint, retryAfterMs: err.retryAfterMs }
     }
-    if (this.gate && executing !== undefined) {
-      await this.gate.fail(executing, { code: errorCode(err, ERR.API_ERROR), message: errorMessage(err) }).catch(() => {})
-    }
-    // Record the attempt as a failure so the caller sees the last
-    // endpoint we tried before bubbling the error up. `aborted`
-    // distinguishes sandbox-dispose-driven cancellations from real
-    // network/backend failures. Skip when validation failed (we have
-    // no method/path to report and the bridgeError already conveys
-    // the user-input mistake).
+    // Record the attempt as a failure — the journal marks an EXECUTING
+    // activity FAILED (outcome unknown), and the caller's progress shows the
+    // last endpoint we tried. `aborted` distinguishes sandbox-dispose-driven
+    // cancellations from real network/backend failures. Skip when validation
+    // failed (we have no method/path to report and the bridgeError already
+    // conveys the user-input mistake).
     if (attempted) {
-      this.ctx.progressCollector?.recordFailure(
-        attempted.method,
-        attempted.endpoint,
-        errorMessage(err),
-        this.signal.aborted
+      await this.calls.recordFailure(
+        attempted,
+        { code: errorCode(err, ERR.API_ERROR), message: errorMessage(err), aborted: this.signal.aborted },
+        executing
       )
     }
     return bridgeError(errorCode(err, ERR.API_ERROR), errorMessage(err))

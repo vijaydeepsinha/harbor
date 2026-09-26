@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest'
 import { BridgeRequestHandler } from '../../runtime/sandbox/bridge-request-handler.js'
 import type { SandboxExecutionContext } from '../../runtime/sandbox/execute-api-in-sandbox.js'
-import { ActivityJournal } from '../../runtime/execution/activity-journal.js'
+import { ActivityJournal, CallLog } from '../../runtime/execution/activity-journal.js'
 import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
 import { resolveOperation } from '../../runtime/governance/operation-resolver.js'
 import { AuditCollector } from '../../runtime/observability/audit.js'
@@ -25,8 +25,7 @@ function makeCtx(overrides: Partial<SandboxExecutionContext> = {}) {
     circuitBreaker: noopCircuitBreaker(),
     permissionGuard: forwardTokenPermissionGuard(),
     idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c', sessionId: 's',
-    auditCollector: new AuditCollector(),
-    progressCollector: new ProgressCollector(10),
+    callLog: new CallLog(),
     limits: { memoryLimitMb: 64, executeTimeoutMs: 1000, searchTimeoutMs: 1000, maxApiCalls: 2, maxConcurrentCalls: 2 },
     ...overrides
   }
@@ -36,14 +35,15 @@ const call = (req: Record<string, unknown>) => JSON.stringify(req)
 const parse = (reply: string) => JSON.parse(reply) as Record<string, unknown>
 
 describe('BridgeRequestHandler — the per-run api.request pipeline, callable without an isolate', () => {
-  it('executes a call and records circuit breaker, audit and progress (legacy path)', async () => {
+  it('executes a call and records it once, in the call log that audit and progress project (legacy path)', async () => {
     const { ctx, calls } = makeCtx()
     const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
     const reply = parse(await handler.handle(call({ method: 'POST', path: '/campaigns/42', body: { a: 1 } })))
     expect(reply).toMatchObject({ status: 201, ok: true })
     expect(calls[0]?.ctx.idempotencyKey).toBe('idem') // no sequence suffix outside an execution
-    expect(ctx.auditCollector.getEndpoints()).toEqual(['POST /campaigns/{id}'])
-    expect(ctx.progressCollector?.summary().calls[0]).toMatchObject({ method: 'POST', endpoint: '/campaigns/{id}', status: 201 })
+    expect(ctx.callLog?.entries()).toHaveLength(1)
+    expect(new AuditCollector(ctx.callLog!).getEndpoints()).toEqual(['POST /campaigns/{id}'])
+    expect(new ProgressCollector(ctx.callLog!, 10).summary().calls[0]).toMatchObject({ method: 'POST', endpoint: '/campaigns/{id}', status: 201 })
     expect(() => handler.throwIfViolated()).not.toThrow()
   })
 

@@ -16,7 +16,6 @@ import type { SandboxLimits } from '../../core/types/config.types.js'
 import type { TokenPayload } from '../../core/types/auth.types.js'
 import type { ApiClient } from '../../runtime/api-client/api-client.js'
 import type { CircuitBreakerStrategy } from '../../core/types/circuit-breaker.types.js'
-import { AuditCollector } from '../../runtime/observability/audit.js'
 import type { SandboxExecutionContext } from '../../runtime/sandbox/execute-api-in-sandbox.js'
 import { forwardTokenPermissionGuard } from '../../spi/permissions/strategies/forward-token-permission-guard.strategy.js'
 
@@ -123,7 +122,6 @@ describe('execute sandbox', () => {
       request: vi.fn().mockResolvedValue({ data: { id: 1 }, status: 200, ok: true })
     } as unknown as ApiClient
 
-    const auditCollector = new AuditCollector()
 
     const ctx: SandboxExecutionContext = {
       tokenPayload: testToken,
@@ -135,7 +133,6 @@ describe('execute sandbox', () => {
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'test-correlation-id',
       sessionId: 'test-session-id',
-      auditCollector,
       limits: testSandboxLimits
     }
     const result = await runApiInSandbox(
@@ -224,7 +221,6 @@ describe('execute sandbox', () => {
             idempotencyKeyTtlMs: 600_000,
             correlationId: 'c',
             sessionId: 's',
-            auditCollector: new AuditCollector(),
             limits: testSandboxLimits
           }
 
@@ -270,7 +266,6 @@ describe('execute sandbox', () => {
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'c',
       sessionId: 's',
-      auditCollector: new AuditCollector(),
       limits: tight
     }
 
@@ -316,7 +311,6 @@ describe('execute sandbox — permissionGuard enforcement', () => {
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'c',
       sessionId: 's',
-      auditCollector: new AuditCollector(),
       limits: testSandboxLimits
     }
 
@@ -352,7 +346,6 @@ describe('execute sandbox — permissionGuard enforcement', () => {
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'c',
       sessionId: 's',
-      auditCollector: new AuditCollector(),
       limits: testSandboxLimits
     }
 
@@ -376,7 +369,6 @@ describe('execute sandbox — error sanitization', () => {
     idempotencyKeyTtlMs: 600_000,
     correlationId: 'c',
     sessionId: 's',
-    auditCollector: new AuditCollector(),
     limits: testSandboxLimits
   })
 
@@ -456,7 +448,6 @@ describe('execute sandbox — resource limits', () => {
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'c',
       sessionId: 's',
-      auditCollector: new AuditCollector(),
       limits: tight
     }
 
@@ -500,7 +491,6 @@ describe('execute sandbox — resource limits', () => {
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'c',
       sessionId: 's',
-      auditCollector: new AuditCollector(),
       limits: tight
     }
 

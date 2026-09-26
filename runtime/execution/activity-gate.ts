@@ -55,12 +55,12 @@ export type ActivityAdmission =
 const SAFE_METHODS: ReadonlySet<string> = new Set(['GET'])
 
 /**
- * The single owner of durable execution and replay for a governed run (§9–§15,
- * §29, §32): for each encountered call it consults the activity journal —
- * replay, execute, pause or stop — asks governance about brand-new
- * activities, and moves the journaled activity through EXECUTING →
- * COMPLETED / FAILED around the external call. The sandbox bridge only acts
- * on its answers; it never touches the journal itself.
+ * The single owner of durable-execution and replay *decisions* for a governed
+ * run (§9–§15, §29): for each encountered call it consults the activity
+ * journal — replay, execute, pause or stop — asks governance about brand-new
+ * activities, and journals an admitted call as EXECUTING before it goes out.
+ * The sandbox bridge only acts on its answers. Recording what then happened
+ * belongs to the journal (the single source of truth), not to the gate.
  *
  * `ReplayDivergedError` from the journal propagates to the caller unchanged.
  */
@@ -140,22 +140,13 @@ export class ActivityGate {
     return { kind: 'execute', sequence, request }
   }
 
-  /** Journals the call as EXECUTING — before it goes out (Invariant: journal before call). */
+  /**
+   * Journals the call as EXECUTING — before it goes out (Invariant: journal
+   * before call). How it ends (COMPLETED / FAILED) is recorded by the journal
+   * itself, together with the run's other call outcomes.
+   */
   async begin(admission: Extract<ActivityAdmission, { kind: 'execute' }>): Promise<void> {
     await this.bridge.journal.markExecuting(admission.sequence, admission.request, admission.approvalId)
-  }
-
-  async complete(sequence: number, response: ActivityResponseRecord): Promise<void> {
-    await this.bridge.journal.recordResponse(sequence, response)
-  }
-
-  /**
-   * The transport threw after the call was journaled as EXECUTING: Harbor
-   * does not know whether the API executed. Record that honestly; a later
-   * run must not silently repeat it (§32).
-   */
-  async fail(sequence: number, failure: { code: string; message: string }): Promise<void> {
-    await this.bridge.journal.recordFailure(sequence, { ...failure, outcomeKnown: false })
   }
 }
 

@@ -8,10 +8,9 @@ import type { CircuitBreakerStrategy } from '../../core/types/circuit-breaker.ty
 import type { PermissionGuard } from '../../core/types/permission.types.js'
 import type { ConnectorAPI } from '../../spi/connector/connector-api.js'
 import type { SandboxLimits } from '../../core/types/config.types.js'
-import type { AuditCollector } from '../observability/audit.js'
-import type { ProgressCollector } from '../observability/progress.js'
 import { SandboxError, SandboxExecutionError } from '../../core/types/sandbox-error.types.js'
 import type { ExecutionBridge } from '../execution/activity-gate.js'
+import type { CallLog } from '../execution/activity-journal.js'
 import { BridgeRequestHandler } from './bridge-request-handler.js'
 
 export type { ExecutionBridge, GovernanceVerdict } from '../execution/activity-gate.js'
@@ -32,15 +31,14 @@ export interface SandboxExecutionContext {
   idempotencyKeyTtlMs: number
   correlationId: string
   sessionId: string
-  auditCollector: AuditCollector
   /**
-   * Optional. When supplied, the bridge records per-call progress (method,
-   * normalized endpoint, status/ok, and id-like fields extracted from
-   * successful create responses) so the tool layer can surface it to the
-   * caller on failure. Lives on the host so progress is preserved even if
-   * the isolate is disposed.
+   * Where the bridge records each call's outcome when the run is not a
+   * governed execution (legacy path); a governed run records into
+   * `executionBridge.journal`. Audit and progress are projections of that
+   * record (`AuditCollector`, `ProgressCollector`), so the tool passes the
+   * same log it reads them from. Absent ⇒ the run keeps a private one.
    */
-  progressCollector?: ProgressCollector
+  callLog?: CallLog
   limits: SandboxLimits
   /** Optional. Durable execution: activity journal, replay, governance (see docs/code-mode-governance.md). */
   executionBridge?: ExecutionBridge

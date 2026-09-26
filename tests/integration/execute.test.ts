@@ -8,6 +8,7 @@ import { CountBasedCircuitBreakerStrategy } from '../../adapters/resilience/stra
 import { InMemoryIdempotencyStrategy } from '../../adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
 import { runApiInSandbox, type SandboxExecutionContext } from '../../runtime/sandbox/execute-api-in-sandbox.js'
 import { AuditCollector } from '../../runtime/observability/audit.js'
+import { CallLog } from '../../runtime/execution/activity-journal.js'
 import { forwardTokenPermissionGuard } from '../../spi/permissions/strategies/forward-token-permission-guard.strategy.js'
 import type { TokenPayload } from '../../core/types/auth.types.js'
 import pino from 'pino'
@@ -176,7 +177,7 @@ describe('execute integration', () => {
       request: vi.fn().mockResolvedValue({ data: {}, status: 200, ok: true })
     } as unknown as ApiClient
 
-    const auditCollector = new AuditCollector()
+    const callLog = new CallLog()
 
     const ctx: SandboxExecutionContext = {
       tokenPayload,
@@ -188,7 +189,7 @@ describe('execute integration', () => {
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'corr-id',
       sessionId: 'sess-id',
-      auditCollector,
+      callLog,
       limits: {
         memoryLimitMb: 64,
         executeTimeoutMs: 8000,
@@ -206,6 +207,8 @@ describe('execute integration', () => {
       ctx
     )
 
+    // Audit is a projection of the run's call log.
+    const auditCollector = new AuditCollector(callLog)
     const endpoints = auditCollector.getEndpoints()
     expect(endpoints).toContain('GET /campaigns')
     expect(endpoints).toContain('GET /orders')

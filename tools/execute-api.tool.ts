@@ -32,7 +32,7 @@ import {
 } from '../core/types/execution.types.js'
 import type { CodeModeRuntime } from '../runtime/execution/code-mode-runtime.js'
 import type { ResumeState } from '../runtime/execution/request-state.js'
-import { ActivityJournal } from '../runtime/execution/activity-journal.js'
+import { ActivityJournal, CallLog, type CallLogSource } from '../runtime/execution/activity-journal.js'
 import { resolveOperation } from '../runtime/governance/operation-resolver.js'
 import { evaluateGovernance } from '../runtime/governance/rule-evaluator.js'
 import {
@@ -181,8 +181,13 @@ async () => {
       let outcome: AuditOutcome = OUTCOME.SUCCESS
       let errorType: string | undefined
       let errorCode: string | undefined
-      const auditCollector = new AuditCollector()
-      const progressCollector = new ProgressCollector(sandboxLimits.maxApiCalls)
+      // Every call's outcome is recorded once, in the run's CallLog — the
+      // execution's durable activity journal once a governed run starts.
+      // Audit and progress are read-only projections of it.
+      let callLog: CallLog = new CallLog()
+      const runCalls: CallLogSource = { entries: () => callLog.entries() }
+      const auditCollector = new AuditCollector(runCalls)
+      const progressCollector = new ProgressCollector(runCalls, sandboxLimits.maxApiCalls)
       // Set once the execution is known so every audit line and error carries it.
       let executionId: string | undefined
       // True once beginRun took the run lock — only then is there a run to end.
@@ -243,6 +248,7 @@ async () => {
           execution = await codeMode.manager.beginRun(execution.executionId)
           runStarted = true
           bridge = makeBridge(codeMode, execution, svcResources, userIdHash)
+          callLog = bridge.journal
         }
         const program = execution?.originalCode ?? code
 
@@ -253,9 +259,9 @@ async () => {
         const sandboxCtx: SandboxExecutionContext = {
           tokenPayload, invalidate, apiClient, circuitBreaker, permissionGuard,
           idempotencyKey, idempotencyKeyTtlMs, correlationId,
-          sessionId, auditCollector, progressCollector,
+          sessionId,
           limits: sandboxLimits,
-          ...(bridge ? { executionBridge: bridge } : {})
+          ...(bridge ? { executionBridge: bridge } : { callLog })
         }
         const result = await runApiInSandbox(program, sandboxCtx)
 

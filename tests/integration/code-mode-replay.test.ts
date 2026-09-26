@@ -4,9 +4,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { runApiInSandbox, type SandboxExecutionContext, type GovernanceVerdict } from '../../runtime/sandbox/execute-api-in-sandbox.js'
 import { ActivityJournal } from '../../runtime/execution/activity-journal.js'
+import { AuditCollector } from '../../runtime/observability/audit.js'
+import { ProgressCollector } from '../../runtime/observability/progress.js'
 import { resolveOperation } from '../../runtime/governance/operation-resolver.js'
 import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
-import { AuditCollector } from '../../runtime/observability/audit.js'
 import { noopCircuitBreaker } from '../../spi/resilience/strategies/noop-circuit-breaker.strategy.js'
 import { forwardTokenPermissionGuard } from '../../spi/permissions/strategies/forward-token-permission-guard.strategy.js'
 import type { ConnectorAPI, ApiRequest, ExecuteRequestContext } from '../../spi/connector/connector-api.js'
@@ -64,7 +65,6 @@ function makeCtx(
     tokenPayload, invalidate: async () => {}, apiClient: connector,
     circuitBreaker: noopCircuitBreaker(), permissionGuard: forwardTokenPermissionGuard(),
     idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c', sessionId: 's',
-    auditCollector: new AuditCollector(),
     limits: { memoryLimitMb: 64, executeTimeoutMs: 5000, searchTimeoutMs: 1000, maxApiCalls: 20, maxConcurrentCalls: 3 },
     executionBridge: {
       journal: new ActivityJournal(store, executionId, 'trafficking', runIndex),
@@ -113,6 +113,31 @@ describe('durable execution at the bridge: journal + replay', () => {
     expect(second).toEqual(first)
     expect(calls.length).toBe(3)
     expect((await store.listActivities('exec-1')).length).toBe(3)
+  })
+
+  it('the journal is the one record: a resumed run audits only the call it made, its progress also shows the replayed one', async () => {
+    const { connector, calls } = makeConnector()
+    await runApiInSandbox(`async () => { await api.request({ method: 'POST', path: '/campaigns/C1', body: {} }); return 1 }`, makeCtx(store, connector, 1))
+    const resumed = makeCtx(store, connector, 2)
+    await runApiInSandbox(`async () => {
+      await api.request({ method: 'POST', path: '/campaigns/C1', body: {} })
+      await api.request({ method: 'POST', path: '/campaigns/C1/finalize' })
+      return 2
+    }`, resumed)
+    expect(calls).toHaveLength(2)
+
+    const journal = resumed.executionBridge!.journal
+    expect(journal.entries().map(e => `${e.outcome} ${e.method} ${e.endpoint}`)).toEqual([
+      'REPLAYED POST /campaigns/{id}', 'EXECUTED POST /campaigns/{id}/finalize'
+    ])
+    expect(new AuditCollector(journal).getEndpoints()).toEqual(['POST /campaigns/{id}/finalize'])
+    expect(new ProgressCollector(journal, 10).summary()).toEqual({
+      completedCalls: 2,
+      calls: [
+        { i: 1, method: 'POST', endpoint: '/campaigns/{id}', status: 201, ok: true, ids: { id: 'res-1' } },
+        { i: 2, method: 'POST', endpoint: '/campaigns/{id}/finalize', status: 201, ok: true, ids: { id: 'res-2' } }
+      ]
+    })
   })
 
   it('pauses at a WAITING_APPROVAL activity after replaying earlier ones; later calls in the program are refused', async () => {

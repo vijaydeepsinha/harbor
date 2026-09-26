@@ -98,19 +98,19 @@ describe('ActivityGate — the single owner of replay and governance for a gover
     await expect(admit(gate(), FINALIZE)).rejects.toBeInstanceOf(ReplayDivergedError)
   })
 
-  it('moves an executed activity EXECUTING → COMPLETED, or EXECUTING → FAILED with an unknown outcome', async () => {
+  it('begin journals an admitted call as EXECUTING; the journal then records how it ended', async () => {
     const g = gate()
     const first = await admit(g, FINALIZE)
     if (first.kind !== 'execute') throw new Error('expected execute')
     await g.begin(first)
     expect((await store.getActivity('exec-1', 1))?.status).toBe(ACTIVITY_STATUS.EXECUTING)
-    await g.complete(1, { status: 201, ok: true, data: { id: 'x' } })
+    await journal.recordResponse({ method: 'POST', endpoint: '/campaigns/{id}/finalize' }, { status: 201, ok: true, data: { id: 'x' } }, 1)
     expect(await store.getActivity('exec-1', 1)).toMatchObject({ status: ACTIVITY_STATUS.COMPLETED, response: { status: 201 } })
 
     const second = await admit(g, LIST)
     if (second.kind !== 'execute') throw new Error('expected execute')
     await g.begin(second)
-    await g.fail(2, { code: ERR.API_ERROR, message: 'socket hang up' })
+    await journal.recordFailure({ method: 'GET', endpoint: '/campaigns' }, { code: ERR.API_ERROR, message: 'socket hang up', aborted: false }, 2)
     expect(await store.getActivity('exec-1', 2)).toMatchObject({ status: ACTIVITY_STATUS.FAILED, failure: { code: ERR.API_ERROR, outcomeKnown: false } })
   })
 })
