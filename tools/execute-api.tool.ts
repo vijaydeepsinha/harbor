@@ -253,7 +253,7 @@ async () => {
           idempotencyKey, idempotencyKeyTtlMs, correlationId,
           sessionId, auditCollector, progressCollector,
           limits: sandboxLimits,
-          ...(bridge ? { execution: bridge } : {})
+          ...(bridge ? { executionBridge: bridge } : {})
         }
         const result = await runApiInSandbox(program, sandboxCtx)
 

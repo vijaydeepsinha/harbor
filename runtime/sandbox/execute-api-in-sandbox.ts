@@ -86,7 +86,7 @@ export interface SandboxExecutionContext {
   progressCollector?: ProgressCollector
   limits: SandboxLimits
   /** Optional. Durable execution: activity journal, replay, governance (see docs/code-mode-governance.md). */
-  execution?: ExecutionBridge
+  executionBridge?: ExecutionBridge
 }
 
 /**
@@ -195,8 +195,8 @@ export async function runApiInSandbox(
   // runInSandbox settles so the promotion is tamper-proof against user code.
   let violation: BridgeViolation | null = null
   const abortController = new AbortController()
-  const execution = ctx.execution
-  const executionId = execution?.journal.executionId
+  const executionBridge = ctx.executionBridge
+  const executionId = executionBridge?.journal.executionId
 
   const result = await runInSandbox(
     userCode,
@@ -251,15 +251,15 @@ export async function runApiInSandbox(
             const { apiRequest } = validation
             // Endpoint identity: the OpenAPI template when an execution bridge
             // is present, the digit heuristic otherwise (legacy path).
-            const resolved = execution?.resolve(apiRequest.method, apiRequest.path)
+            const resolved = executionBridge?.resolve(apiRequest.method, apiRequest.path)
             const normalizedPath = resolved ? resolved.specPath : normalizeEndpointPath(apiRequest.path)
             attemptedMethod = apiRequest.method
             attemptedPath = normalizedPath
 
             let approvalId: string | undefined
-            if (execution && resolved) {
+            if (executionBridge && resolved) {
               const requestRecord = toRequestRecord(apiRequest, resolved)
-              const { sequence: seq, existing } = await execution.journal.next(requestRecord)
+              const { sequence: seq, existing } = await executionBridge.journal.next(requestRecord)
               sequence = seq
               const label = `${requestRecord.method} ${requestRecord.specPath}`
 
@@ -278,7 +278,7 @@ export async function runApiInSandbox(
                     approvalId = existing.approvalId
                     break // execute below
                   case ACTIVITY_STATUS.WAITING_APPROVAL: {
-                    violation = { kind: 'approvalRequired', sequence: seq, approvalId: existing.approvalId ?? '', summary: summaryOf(requestRecord, execution.journal.service) }
+                    violation = { kind: 'approvalRequired', sequence: seq, approvalId: existing.approvalId ?? '', summary: summaryOf(requestRecord, executionBridge.journal.service) }
                     return bridgeError(ERR.APPROVAL_REQUIRED, `Activity #${seq} is waiting for approval`)
                   }
                   case ACTIVITY_STATUS.DENIED:
@@ -297,15 +297,15 @@ export async function runApiInSandbox(
                     }
                     break // safe method: re-execute
                 }
-              } else if (execution.decide) {
-                const verdict = await execution.decide(seq, requestRecord)
+              } else if (executionBridge.decide) {
+                const verdict = await executionBridge.decide(seq, requestRecord)
                 if (verdict.decision === 'DENY') {
-                  await execution.journal.recordDenied(seq, requestRecord)
+                  await executionBridge.journal.recordDenied(seq, requestRecord)
                   violation = { kind: 'governanceDenied', sequence: seq, reason: verdict.reason, matchedRules: verdict.matchedRules }
                   return bridgeError(ERR.GOVERNANCE_DENIED, `Governance denied ${label}: ${verdict.reason}`)
                 }
                 if (verdict.decision === 'REQUIRE_APPROVAL') {
-                  await execution.journal.recordWaitingApproval(seq, requestRecord, verdict.approvalId)
+                  await executionBridge.journal.recordWaitingApproval(seq, requestRecord, verdict.approvalId)
                   violation = { kind: 'approvalRequired', sequence: seq, approvalId: verdict.approvalId, summary: verdict.summary }
                   return bridgeError(ERR.APPROVAL_REQUIRED, `Approval required for ${label}`)
                 }
@@ -317,7 +317,7 @@ export async function runApiInSandbox(
                 return bridgeError(denied.code, denied.message)
               }
               ctx.circuitBreaker.check(normalizedPath)
-              await execution.journal.markExecuting(seq, requestRecord, approvalId)
+              await executionBridge.journal.markExecuting(seq, requestRecord, approvalId)
               executing = true
             } else {
               if (!ctx.permissionGuard.canExecute(normalizedPath, apiRequest.method, ctx.tokenPayload)) {
@@ -347,8 +347,8 @@ export async function runApiInSandbox(
               }
             )
 
-            if (execution && sequence !== undefined) {
-              await execution.journal.recordResponse(sequence, { status: response.status, ok: response.ok, data: response.data })
+            if (executionBridge && sequence !== undefined) {
+              await executionBridge.journal.recordResponse(sequence, { status: response.status, ok: response.ok, data: response.data })
             }
 
             // recordSuccess is intentional even on 4xx: client errors (bad
@@ -390,8 +390,8 @@ export async function runApiInSandbox(
             // The transport threw after the call was journaled as EXECUTING:
             // Harbor does not know whether the API executed. Record that
             // honestly; a later run must not silently repeat it (§32).
-            if (execution && executing && sequence !== undefined) {
-              await execution.journal.recordFailure(sequence, {
+            if (executionBridge && executing && sequence !== undefined) {
+              await executionBridge.journal.recordFailure(sequence, {
                 code: errorCode(err, ERR.API_ERROR), message: errorMessage(err), outcomeKnown: false
               }).catch(() => {})
             }

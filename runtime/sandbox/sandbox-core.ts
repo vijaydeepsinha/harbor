@@ -20,10 +20,10 @@ export interface SandboxRunOptions {
 
 export async function runInSandbox(
   userCode: string,
-  options: SandboxRunOptions,
+  sandboxRunOptions: SandboxRunOptions,
   setupContext: (jail: ivm.Reference<Record<string, unknown>>, context: ivm.Context, isolate: ivm.Isolate) => Promise<void>
 ): Promise<unknown> {
-  const isolate = new ivm.Isolate({ memoryLimit: options.memoryLimitMb })
+  const isolate = new ivm.Isolate({ memoryLimit: sandboxRunOptions.memoryLimitMb })
 
   // Wall-clock guard: ivm's script.run timeout only measures synchronous CPU,
   // so a Node-level setTimeout is the authoritative enforcer across awaits.
@@ -31,11 +31,11 @@ export async function runInSandbox(
   let timedOut = false
   const timeoutTimer = setTimeout(() => {
     timedOut = true
-    options.onDispose?.()
+    sandboxRunOptions.onDispose?.()
     try {
       if (!isolate.isDisposed) isolate.dispose()
     } catch { /* already disposed */ }
-  }, options.timeoutMs)
+  }, sandboxRunOptions.timeoutMs)
   if (typeof timeoutTimer.unref === 'function') timeoutTimer.unref()
 
   try {
@@ -54,7 +54,7 @@ export async function runInSandbox(
     try {
       script = await isolate.compileScript(wrappedCode)
     } catch (err) {
-      if (timedOut) throw new SandboxTimeoutError(options.timeoutMs)
+      if (timedOut) throw new SandboxTimeoutError(sandboxRunOptions.timeoutMs)
       throw new SandboxSyntaxError(errorMessage(err))
     }
 
@@ -63,12 +63,12 @@ export async function runInSandbox(
       // Inner CPU bound: lets V8 interrupt a pure-CPU runaway faster than the
       // Node event loop would service our setTimeout. Inert across awaits.
       rawResult = await script.run(context, {
-        timeout: options.timeoutMs,
+        timeout: sandboxRunOptions.timeoutMs,
         promise: true,
         copy: true
       })
     } catch (err) {
-      throw normalizeIsolateError(err, timedOut, options.timeoutMs)
+      throw normalizeIsolateError(err, timedOut, sandboxRunOptions.timeoutMs)
     }
 
     if (rawResult === undefined || rawResult === null) return undefined
@@ -97,7 +97,7 @@ export async function runInSandbox(
         || err instanceof SandboxRuntimeError) {
       throw err
     }
-    throw normalizeIsolateError(err, timedOut, options.timeoutMs)
+    throw normalizeIsolateError(err, timedOut, sandboxRunOptions.timeoutMs)
   } finally {
     clearTimeout(timeoutTimer)
     try {

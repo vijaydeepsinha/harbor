@@ -66,7 +66,7 @@ function makeCtx(
     idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c', sessionId: 's',
     auditCollector: new AuditCollector(),
     limits: { memoryLimitMb: 64, executeTimeoutMs: 5000, searchTimeoutMs: 1000, maxApiCalls: 20, maxConcurrentCalls: 3 },
-    execution: {
+    executionBridge: {
       journal: new ActivityJournal(store, executionId, 'trafficking', runIndex),
       resolve: (m, p) => resolveOperation(spec, m, p),
       ...(decide ? { decide: (seq: number) => decide(seq) } : {})
