@@ -28,7 +28,6 @@ import {
   ReplayDivergedError,
   ExecutionCancelledError,
   ActivityOutcomeUnknownError,
-  ExecutionError,
   ApprovalAlreadyDecidedError
 } from '../core/types/execution.types.js'
 import type { CodeModeRuntime } from '../runtime/execution/code-mode-runtime.js'
@@ -186,6 +185,8 @@ async () => {
       const progressCollector = new ProgressCollector(sandboxLimits.maxApiCalls)
       // Set once the execution is known so every audit line and error carries it.
       let executionId: string | undefined
+      // True once beginRun took the run lock — only then is there a run to end.
+      let runStarted = false
       let userIdHash = 'unknown'
 
       const audit = (extra: Partial<Parameters<typeof writeAuditRecord>[0]>, codeSubmitted: string): void => {
@@ -240,6 +241,7 @@ async () => {
           executionId = execution.executionId
           if (pendingRetry) return pendingRetry
           execution = await codeMode.manager.beginRun(execution.executionId)
+          runStarted = true
           bridge = makeBridge(codeMode, execution, svcResources, userIdHash)
         }
         const program = execution?.originalCode ?? code
@@ -342,9 +344,10 @@ async () => {
             : status === EXECUTION_STATUS.CANCELLED ? { kind: 'cancelled' as const, code: errorCode, message: errObj.message }
             : status === EXECUTION_STATUS.INTERRUPTED ? { kind: 'interrupted' as const, code: errorCode, message: errObj.message }
             : { kind: 'failed' as const, code: errorCode, message: errObj.message }
-          // beginRun may itself have thrown (locked / not resumable) — then there is no lock to release.
-          if (!(err instanceof ExecutionError && !(err instanceof ApprovalRequiredError) && !(err instanceof GovernanceDeniedError)
-                && !(err instanceof ExecutionCancelledError) && !(err instanceof ReplayDivergedError) && !(err instanceof ActivityOutcomeUnknownError))) {
+          // beginRun may itself have thrown (locked, not resumable, approval still
+          // pending) — then no run started, there is no lock to release and the
+          // stored execution must stay exactly as it was.
+          if (runStarted) {
             await codeMode.manager.endRun(executionId, outcomeForStore).catch(e =>
               logger.error({ correlationId, executionId, error: ensureError(e).message }, 'Failed to persist run outcome'))
           }

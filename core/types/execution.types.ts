@@ -163,6 +163,22 @@ export class ApprovalRequiredError extends ExecutionError {
   }
 }
 
+/**
+ * A resume arrived before the human decided the approval the execution is
+ * waiting on. This is the same pause signal as {@link ApprovalRequiredError},
+ * not a termination: nothing ran, no lock was taken, and the execution stays
+ * WAITING_APPROVAL — it resumes once the approval is decided.
+ */
+export class ApprovalPendingError extends ApprovalRequiredError {
+  constructor(executionId: string, activitySequence: number, approvalId: string, summary: ApprovalSummary) {
+    super(executionId, activitySequence, approvalId, summary)
+    this.message =
+      `Approval ${approvalId} for activity #${activitySequence} (${summary.method} ${summary.specPath}) is still pending. ` +
+      `The execution is paused; it resumes after a human decision.`
+    this.name = 'ApprovalPendingError'
+  }
+}
+
 /** A Governance Rule denied the operation, or a human rejected the approval. */
 export class GovernanceDeniedError extends ExecutionError {
   constructor(

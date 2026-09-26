@@ -4,9 +4,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ExecutionManager, buildHistory } from '../../runtime/execution/execution-manager.js'
 import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
-import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, GOVERNANCE_DECISION } from '../../core/constants.js'
+import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, GOVERNANCE_DECISION, ERR } from '../../core/constants.js'
 import {
-  ExecutionNotFoundError, ExecutionLockedError, ExecutionNotResumableError
+  ExecutionNotFoundError, ExecutionLockedError, ExecutionNotResumableError,
+  ApprovalPendingError, ApprovalRequiredError
 } from '../../core/types/execution.types.js'
 
 let tick = 0
@@ -54,7 +55,17 @@ describe('ExecutionManager', () => {
       summary: { service: 'svc', method: 'POST', specPath: '/x', reason: 'r', matchedRules: [] }, createdAt: clock()
     })
     expect((await manager.load('exec-1')).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
-    await expect(manager.beginRun('exec-1')).rejects.toBeInstanceOf(ExecutionNotResumableError)
+    // Undecided approval ⇒ the pause signal again, not a termination.
+    const pending = await manager.beginRun('exec-1').catch((e: unknown) => e)
+    expect(pending).toBeInstanceOf(ApprovalPendingError)
+    expect(pending).toBeInstanceOf(ApprovalRequiredError)
+    expect(pending).toMatchObject({ code: ERR.APPROVAL_REQUIRED, executionId: 'exec-1', approvalId: 'ap-1', activitySequence: 3 })
+    // …and the record is untouched: still paused, no extra run counted, lock free.
+    const untouched = await manager.load('exec-1')
+    expect(untouched.status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect(untouched.runCount).toBe(1)
+    expect(await store.acquireLock('exec-1')).toBe(true)
+    await store.releaseLock('exec-1')
 
     const ap = (await store.getApproval('ap-1'))!
     await store.putApproval({ ...ap, status: APPROVAL_STATUS.APPROVED, decidedAt: clock() })

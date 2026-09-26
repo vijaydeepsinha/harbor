@@ -11,7 +11,8 @@ import {
   type ExecutionHistoryEntry,
   ExecutionNotFoundError,
   ExecutionLockedError,
-  ExecutionNotResumableError
+  ExecutionNotResumableError,
+  ApprovalPendingError
 } from '../../core/types/execution.types.js'
 import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS } from '../../core/constants.js'
 
@@ -71,9 +72,11 @@ export class ExecutionManager {
 
   /**
    * Takes the run lock and moves the execution to RUNNING. Terminal
-   * executions and executions whose approval is still pending are refused
-   * (`EXECUTION_NOT_RESUMABLE`); a live concurrent run is refused with the
-   * retryable `EXECUTION_LOCKED`.
+   * executions are refused (`EXECUTION_NOT_RESUMABLE`); a live concurrent
+   * run is refused with the retryable `EXECUTION_LOCKED`. An execution whose
+   * approval is still undecided is not terminal — it is paused, so the caller
+   * gets the pause signal again (`ApprovalPendingError`) and the record is
+   * left untouched.
    */
   async beginRun(executionId: string): Promise<ExecutionRecord> {
     const record = await this.load(executionId)
@@ -81,7 +84,7 @@ export class ExecutionManager {
     if (record.pendingApprovalId) {
       const approval = await this.store.getApproval(record.pendingApprovalId)
       if (approval && approval.status === APPROVAL_STATUS.PENDING) {
-        throw new ExecutionNotResumableError(executionId, record.status)
+        throw new ApprovalPendingError(executionId, approval.activitySequence, approval.approvalId, approval.summary)
       }
     }
     // The lock — not the RUNNING status — is the concurrency guard: a RUNNING

@@ -142,6 +142,46 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect((await rt.manager.load(body.executionId)).originalCode).toBe(PROGRAM_FINALIZE)
   })
 
+  it('resuming before the approval is decided pauses again — it does not report the execution as FAILED', async () => {
+    const rt = makeRuntime([FINALIZE_RULE])
+    const { connector, count } = makeConnector()
+    const handler = registerGoverned(rt, makeResources('trafficking', connector))
+    const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false }))
+    const { executionId, approvalId } = parseContent(paused) as { executionId: string; approvalId: string }
+
+    // Fallback client resumes via _meta while the approval is still PENDING.
+    const early = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false, executionIdMeta: executionId }))
+    expect(early['isError']).toBe(true)
+    const body = parseContent(early) as { code: string; approvalId: string; activitySequence: number }
+    expect(body.code).toBe(ERR.APPROVAL_REQUIRED)
+    expect(body.approvalId).toBe(approvalId)
+    expect(body.activitySequence).toBe(2)
+    const meta = early['_meta'] as Record<string, unknown>
+    expect(meta[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect(meta[APPROVAL_ID_META_KEY]).toBe(approvalId)
+
+    // An elicitation-capable client that lost its requestState is simply asked again.
+    const reasked = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ executionIdMeta: executionId }))
+    expect(reasked['resultType']).toBe('input_required')
+    expect((reasked['_meta'] as Record<string, unknown>)[APPROVAL_ID_META_KEY]).toBe(approvalId)
+
+    // Nothing ran and nothing changed: still paused on the same approval, one run so far.
+    const exec = await rt.manager.load(executionId)
+    expect(exec.status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect(exec.pendingApprovalId).toBe(approvalId)
+    expect(exec.runCount).toBe(1)
+    expect(count('GET', '/campaigns')).toBe(1)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
+    expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+
+    // Still resumable once decided.
+    await rt.approvals.decide(approvalId, { action: 'accept', via: 'http' })
+    const done = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false, executionIdMeta: executionId }))
+    expect(done['isError']).toBeUndefined()
+    expect((done['_meta'] as Record<string, unknown>)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
+  })
+
   it('a DENY rule stops the execution before the call and records the decision', async () => {
     const rt = makeRuntime([{ name: 'no-finalize', match: { operation: 'finalizeCampaign' }, action: { type: 'DENY', reason: 'frozen' } }])
     const { connector, count } = makeConnector()
