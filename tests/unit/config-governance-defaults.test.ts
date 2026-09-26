@@ -6,7 +6,7 @@ import { validateGlobalConfig } from '../../core/config/config.js'
 import { GOVERNANCE_DECISION } from '../../core/constants.js'
 
 describe('governance configuration defaults', () => {
-  const KEYS = ['GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC'] as const
+  const KEYS = ['GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION'] as const
   let saved: Record<string, string | undefined> = {}
   beforeEach(() => {
     saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]]))
@@ -37,6 +37,12 @@ describe('governance configuration defaults', () => {
     expect(validateGlobalConfig().codeMode.governance).toMatchObject({
       rulesSource: 'url', rulesUrl: 'https://rules.example/set.yaml', rulesUrlTimeoutMs: 2500, rulesRefreshSec: 30
     })
+  })
+
+  it('drops a terminal execution\'s code by default; KEEP keeps it', () => {
+    expect(validateGlobalConfig().codeMode.retention).toEqual({ code: 'DROP' })
+    process.env['EXECUTION_CODE_RETENTION'] = 'KEEP'
+    expect(validateGlobalConfig().codeMode.retention).toEqual({ code: 'KEEP' })
   })
 
   it('honours an explicit value', () => {

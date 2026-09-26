@@ -107,7 +107,9 @@ describe('§47 acceptance: two approval rounds, every side effect exactly once',
     const { execution, activities, approvals, decisions, history } = await rt.manager.inspect(executionId)
     expect(execution.status).toBe(EXECUTION_STATUS.COMPLETED)
     expect(execution.runCount).toBe(3)
-    expect(execution.originalCode).toBe(PROGRAM)
+    // The persisted program drove all three isolates (call order above); once
+    // COMPLETED its text is dropped (EXECUTION_CODE_RETENTION=DROP, the default).
+    expect(execution.originalCode).toBeUndefined()
     expect(activities.map(a => a.status)).toEqual(Array(5).fill(ACTIVITY_STATUS.COMPLETED))
     expect(activities.map(a => a.runIndex)).toEqual([1, 1, 1, 2, 3])
     expect(activities[2]?.approvalId).toBe(approvals[0]?.approvalId)

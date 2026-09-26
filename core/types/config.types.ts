@@ -6,7 +6,7 @@ import type { CircuitBreakerStrategy } from './circuit-breaker.types.js'
 import type { IdempotencyStrategy } from './idempotency.types.js'
 import type { PermissionGuard } from './permission.types.js'
 import type { SpecLoaderStrategy } from './spec.types.js'
-import type { Environment, GovernanceDecisionType } from '../constants.js'
+import type { Environment, GovernanceDecisionType, ExecutionCodeRetention } from '../constants.js'
 import type { OAuthResourceConfig } from './oauth.types.js'
 
 /** Pino log levels. Narrowed from `string` so typos are caught at compile time. */
@@ -46,6 +46,11 @@ export type ExecutionStoreBackendConfig =
 /** Code Mode governance layer settings (see docs/code-mode-governance.md). */
 export interface CodeModeConfig {
   store: ExecutionStoreBackendConfig
+  /** What is kept once an execution is terminal. */
+  retention?: {
+    /** `DROP` (default) removes the program text; `KEEP` keeps it against the executionId. */
+    code?: ExecutionCodeRetention
+  }
   governance: {
     /** Directory of Governance Rule files (`*.yaml` / `*.yml` / `*.json`) for the `dir` source. Missing dir ⇒ no rules. */
     rulesDir: string

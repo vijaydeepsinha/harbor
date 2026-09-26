@@ -24,8 +24,12 @@ import {
 export interface ExecutionRecord {
   executionId: string
   service: string
-  /** The program as first submitted. Authoritative for every resume (Invariant 2). */
-  originalCode: string
+  /**
+   * The program as first submitted. Authoritative for every resume (Invariant 2).
+   * Stored before the first run — an interrupted or crashed run resumes from it —
+   * and removed once the execution is terminal unless EXECUTION_CODE_RETENTION=KEEP.
+   */
+  originalCode?: string
   status: ExecutionStatus
   /** sha256 of the caller's user id (or token) — never the raw principal. */
   userIdHash: string

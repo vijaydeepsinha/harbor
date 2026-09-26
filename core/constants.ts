@@ -350,6 +350,19 @@ export const EXECUTION_STORE_TYPE = {
   FILE: 'file',
 } as const
 
+/**
+ * What happens to an execution's program text once it is terminal
+ * (`EXECUTION_CODE_RETENTION`). The code is needed only to resume, and a
+ * terminal execution never resumes.
+ */
+export const EXECUTION_CODE_RETENTION = {
+  /** Remove it from the execution record (default). */
+  DROP: 'DROP',
+  /** Keep it stored against the executionId. */
+  KEEP: 'KEEP',
+} as const
+export type ExecutionCodeRetention = (typeof EXECUTION_CODE_RETENTION)[keyof typeof EXECUTION_CODE_RETENTION]
+
 /** Built-in Governance Rule sources (`GOVERNANCE_RULES_SOURCE`); others via registerGovernanceRuleSourceBackend. */
 export const GOVERNANCE_RULE_SOURCE_TYPE = {
   DIR: 'dir',

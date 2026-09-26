@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ExecutionManager, buildHistory } from '../../runtime/execution/execution-manager.js'
 import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
-import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, GOVERNANCE_DECISION, ERR } from '../../core/constants.js'
+import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, GOVERNANCE_DECISION, ERR, EXECUTION_CODE_RETENTION } from '../../core/constants.js'
 import {
   ExecutionNotFoundError, ExecutionLockedError, ExecutionNotResumableError,
   ApprovalPendingError, ApprovalRequiredError
@@ -72,6 +72,50 @@ describe('ExecutionManager', () => {
     const resumed = await manager.beginRun('exec-1')
     expect(resumed.runCount).toBe(2)
     expect(resumed.status).toBe(EXECUTION_STATUS.RUNNING)
+  })
+
+  describe('code retention (EXECUTION_CODE_RETENTION)', () => {
+    it('DROP (default): the program text is removed once the execution is terminal, kept while it can still resume', async () => {
+      for (const [kind, extra] of [
+        ['completed', { result: 1 }], ['failed', { code: 'X', message: 'm' }], ['denied', { code: 'X', message: 'm' }], ['cancelled', { code: 'X', message: 'm' }]
+      ] as const) {
+        const rec = await manager.create({ service: 'svc', code: 'async () => 1', userIdHash: 'h' })
+        await manager.beginRun(rec.executionId)
+        await manager.endRun(rec.executionId, { kind, ...extra } as never)
+        expect((await manager.load(rec.executionId)).originalCode).toBeUndefined()
+      }
+      for (const outcome of [{ kind: 'waitingApproval', approvalId: 'ap' }, { kind: 'interrupted', code: 'CIRCUIT_OPEN', message: 'm' }] as const) {
+        const rec = await manager.create({ service: 'svc', code: 'async () => 2', userIdHash: 'h' })
+        await manager.beginRun(rec.executionId)
+        await manager.endRun(rec.executionId, outcome)
+        expect((await manager.load(rec.executionId)).originalCode).toBe('async () => 2')
+      }
+    })
+
+    it('DROP applies to a human rejection or cancellation too', async () => {
+      for (const status of [EXECUTION_STATUS.DENIED, EXECUTION_STATUS.CANCELLED] as const) {
+        const rec = await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+        await manager.markApprovalDecided(rec.executionId, status, { code: 'X', message: 'm' })
+        expect((await manager.load(rec.executionId)).originalCode).toBeUndefined()
+      }
+    })
+
+    it('KEEP stores the code against the executionId for good', async () => {
+      const keep = new ExecutionManager(store, clock, newId, { codeRetention: EXECUTION_CODE_RETENTION.KEEP })
+      const rec = await keep.create({ service: 'svc', code: 'async () => 3', userIdHash: 'h' })
+      await keep.beginRun(rec.executionId)
+      await keep.endRun(rec.executionId, { kind: 'completed', result: 3 })
+      await keep.markApprovalDecided((await keep.create({ service: 'svc', code: 'k', userIdHash: 'h' })).executionId, EXECUTION_STATUS.DENIED)
+      expect((await keep.load(rec.executionId)).originalCode).toBe('async () => 3')
+      expect((await keep.load('exec-2')).originalCode).toBe('k')
+    })
+
+    it('an execution without its program cannot be resumed — nothing else may run in its place', async () => {
+      const rec = await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+      const { originalCode: _dropped, ...withoutCode } = await manager.load(rec.executionId)
+      await store.updateExecution({ ...withoutCode, status: EXECUTION_STATUS.INTERRUPTED })
+      await expect(manager.beginRun(rec.executionId)).rejects.toBeInstanceOf(ExecutionNotResumableError)
+    })
   })
 
   it('endRun records terminal reasons for failed / denied / cancelled and releases the lock', async () => {

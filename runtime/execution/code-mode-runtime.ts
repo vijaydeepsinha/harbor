@@ -29,7 +29,9 @@ export interface CodeModeRuntime {
 
 export async function buildCodeModeRuntime(config: CodeModeConfig, logger: Logger): Promise<CodeModeRuntime> {
   const store = buildExecutionStore(config.store, logger)
-  const manager = new ExecutionManager(store)
+  const manager = new ExecutionManager(store, undefined, undefined, {
+    ...(config.retention?.code !== undefined ? { codeRetention: config.retention.code } : {})
+  })
   const approvals = new ApprovalService(store, manager)
   const rules = new GovernanceRuleStore()
   // Fail loud at boot: a source that cannot be read, or a rule that does not

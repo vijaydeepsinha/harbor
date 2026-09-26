@@ -451,7 +451,7 @@ async function resolveExecution(
   if (execution.service !== input.service) {
     return { error: mcpError(`Execution ${resumeId} runs against service "${execution.service}", not "${input.service}"`, ERR.EXECUTION_NOT_RESUMABLE, false) }
   }
-  if (input.code !== execution.originalCode) {
+  if (execution.originalCode !== undefined && input.code !== execution.originalCode) {
     logger.warn({ correlationId, executionId: resumeId }, 'Resume carried different code — ignored; the persisted original program is authoritative')
   }
 

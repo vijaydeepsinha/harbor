@@ -43,7 +43,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(meta[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
     expect(calls.length).toBe(2)
     const exec = await rt.manager.load(executionId)
-    expect(exec.originalCode).toBe(PROGRAM)
+    expect(exec.originalCode).toBeUndefined() // a COMPLETED execution keeps no program text (EXECUTION_CODE_RETENTION=DROP)
     expect(exec.currentActivity).toBe(2)
     expect((await rt.store.listDecisions(executionId)).map(d => d.decision)).toEqual(['ALLOW', 'ALLOW'])
   })
@@ -134,12 +134,14 @@ describe('api_execute under the Code Mode governance layer', () => {
     const meta = paused['_meta'] as Record<string, unknown>
     expect(meta[APPROVAL_ID_META_KEY]).toBe(body.approvalId)
 
+    expect((await rt.manager.load(body.executionId)).originalCode).toBe(PROGRAM_FINALIZE) // persisted while paused
+
     await rt.approvals.decide(body.approvalId, { action: 'accept', via: 'http' })
     const done = await handler({ service: 'trafficking', code: 'async () => "REPLACEMENT CODE IS IGNORED"' }, makeCtx({ elicitation: false, executionIdMeta: body.executionId }))
     expect(done['isError']).toBeUndefined()
-    expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' })
+    expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' }) // the persisted program ran
     expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
-    expect((await rt.manager.load(body.executionId)).originalCode).toBe(PROGRAM_FINALIZE)
+    expect((await rt.manager.load(body.executionId)).originalCode).toBeUndefined() // dropped once COMPLETED (default DROP)
   })
 
   it('resuming before the approval is decided pauses again — it does not report the execution as FAILED', async () => {

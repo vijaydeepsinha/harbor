@@ -14,7 +14,7 @@ import {
   ExecutionNotResumableError,
   ApprovalPendingError
 } from '../../core/types/execution.types.js'
-import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS } from '../../core/constants.js'
+import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_CODE_RETENTION, type ExecutionCodeRetention } from '../../core/constants.js'
 
 /** How a sandbox run of an execution ended. */
 export type RunOutcome =
@@ -24,6 +24,15 @@ export type RunOutcome =
   | { kind: 'failed'; code: string; message: string }
   | { kind: 'denied'; code: string; message: string }
   | { kind: 'cancelled'; code: string; message: string }
+
+export interface ExecutionManagerOptions {
+  /** `DROP` (default): remove the program text once the execution is terminal. */
+  codeRetention?: ExecutionCodeRetention
+}
+
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  EXECUTION_STATUS.COMPLETED, EXECUTION_STATUS.FAILED, EXECUTION_STATUS.DENIED, EXECUTION_STATUS.CANCELLED
+])
 
 export interface ExecutionInspection {
   execution: ExecutionRecord
@@ -43,7 +52,8 @@ export class ExecutionManager {
   constructor(
     private readonly store: CodeModeStore,
     private readonly now: () => string = () => new Date().toISOString(),
-    private readonly newId: () => string = uuidv4
+    private readonly newId: () => string = uuidv4,
+    private readonly options: ExecutionManagerOptions = {}
   ) {}
 
   /** A brand-new logical execution. The code persisted here is authoritative forever (Invariant 2). */
@@ -81,6 +91,8 @@ export class ExecutionManager {
   async beginRun(executionId: string): Promise<ExecutionRecord> {
     const record = await this.load(executionId)
     this.assertNotTerminal(record)
+    // Only the persisted program may run on resume (Invariant 2): without it there is nothing to resume.
+    if (record.originalCode === undefined) throw new ExecutionNotResumableError(executionId, record.status)
     if (record.pendingApprovalId) {
       const approval = await this.store.getApproval(record.pendingApprovalId)
       if (approval && approval.status === APPROVAL_STATUS.PENDING) {
@@ -141,6 +153,7 @@ export class ExecutionManager {
           record.terminalReason = { code: outcome.code, message: outcome.message }
           break
       }
+      this.settle(record)
       await this.store.updateExecution(record)
       return record
     } finally {
@@ -164,6 +177,7 @@ export class ExecutionManager {
     record.status = status
     record.updatedAt = this.now()
     if (reason) record.terminalReason = reason
+    this.settle(record)
     await this.store.updateExecution(record)
   }
 
@@ -175,6 +189,18 @@ export class ExecutionManager {
       this.store.listDecisions(executionId)
     ])
     return { execution, activities, approvals, decisions, history: buildHistory(execution, activities, approvals, decisions) }
+  }
+
+  /**
+   * A terminal execution never runs again, so its program text is no longer
+   * needed: dropped unless EXECUTION_CODE_RETENTION=KEEP. Paused and
+   * interrupted executions keep it — they resume from it.
+   */
+  private settle(record: ExecutionRecord): void {
+    if (!TERMINAL_STATUSES.has(record.status)) return
+    if ((this.options.codeRetention ?? EXECUTION_CODE_RETENTION.DROP) === EXECUTION_CODE_RETENTION.DROP) {
+      delete record.originalCode
+    }
   }
 
   private assertNotTerminal(record: ExecutionRecord): void {

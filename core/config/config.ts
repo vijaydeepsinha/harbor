@@ -11,7 +11,7 @@ import type {
   CouchbaseConnectionConfig
 } from '../types/config.types.js'
 import { LOG_LEVELS } from '../types/config.types.js'
-import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, EXECUTION_STORE_TYPE, GOVERNANCE_DECISION, GOVERNANCE_RULE_SOURCE_TYPE } from '../constants.js'
+import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, EXECUTION_STORE_TYPE, EXECUTION_CODE_RETENTION, GOVERNANCE_DECISION, GOVERNANCE_RULE_SOURCE_TYPE } from '../constants.js'
 
 // ── Config-file loader ───────────────────────────────────────────────────────
 //
@@ -184,6 +184,8 @@ const GlobalConfigSchema = z.object({
   // ── Code Mode governance layer ──
   EXECUTION_STORE_TYPE: z.enum([EXECUTION_STORE_TYPE.IN_MEMORY, EXECUTION_STORE_TYPE.FILE]).default(EXECUTION_STORE_TYPE.IN_MEMORY),
   EXECUTION_STORE_DIR: z.string().default('./var/executions'),
+  // DROP (default): a terminal execution's program text is removed; KEEP: it stays stored against the executionId.
+  EXECUTION_CODE_RETENTION: z.enum([EXECUTION_CODE_RETENTION.DROP, EXECUTION_CODE_RETENTION.KEEP]).default(EXECUTION_CODE_RETENTION.DROP),
   GOVERNANCE_RULES_DIR: z.string().default('./governance/rules'),
   // Where rules come from: dir (GOVERNANCE_RULES_DIR), url (GOVERNANCE_RULES_URL), or a registered source type.
   GOVERNANCE_RULES_SOURCE: z.string().min(1).default(GOVERNANCE_RULE_SOURCE_TYPE.DIR),
@@ -251,6 +253,7 @@ export function validateGlobalConfig(): GlobalConfig {
       store: env.EXECUTION_STORE_TYPE === EXECUTION_STORE_TYPE.FILE
         ? { type: EXECUTION_STORE_TYPE.FILE, dir: env.EXECUTION_STORE_DIR }
         : { type: EXECUTION_STORE_TYPE.IN_MEMORY },
+      retention: { code: env.EXECUTION_CODE_RETENTION },
       governance: {
         rulesDir: env.GOVERNANCE_RULES_DIR,
         rulesSource: env.GOVERNANCE_RULES_SOURCE,
