@@ -148,6 +148,8 @@ When `HARBOR_RESOURCE_URI` is not set the gateway behaves identically to before 
 |---|---|---|
 | `EXECUTION_STORE_TYPE` | `in-memory` | Where executions, activities, approvals and decisions live: `in-memory` or `file` |
 | `EXECUTION_STORE_DIR` | `./var/executions` | Directory for the `file` store (one JSON document per execution) |
+| `EXECUTION_CODE_RETENTION` | `DROP` | `DROP`: remove a terminal execution's program text · `KEEP`: keep it stored against the `executionId` |
+| `EXECUTION_RETENTION_SEC` | `86400` | Seconds a finished execution and all its records (activities, approvals, decisions) are kept before deletion; `0` = keep forever. Paused and interrupted executions are never deleted |
 | `GOVERNANCE_RULES_SOURCE` | `dir` | Where Governance Rules come from: `dir`, `url`, or a type registered with `registerGovernanceRuleSourceBackend` |
 | `GOVERNANCE_RULES_DIR` | `./governance/rules` | Governance Rule files for the `dir` source (`*.yaml`/`*.yml`/`*.json`, top level only). Invalid files fail boot |
 | `GOVERNANCE_RULES_URL` | — | Rule document for the `url` source (required with it) |

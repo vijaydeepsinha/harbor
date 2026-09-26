@@ -47,7 +47,8 @@ CREATED ──► RUNNING ──► COMPLETED
 | Fact | Where |
 |---|---|
 | One logical program = one `executionId` (UUID minted by Harbor) | `runtime/execution/execution-manager.ts` |
-| The code first submitted is persisted and is authoritative for every resume; replacement code is ignored (logged) | `ExecutionRecord.originalCode` |
+| The code first submitted is persisted — before the first run, because an interrupted or crashed run resumes from it — and is authoritative for every resume; replacement code is ignored (logged) | `ExecutionRecord.originalCode` |
+| Once the execution is terminal its code is dropped (`EXECUTION_CODE_RETENTION=DROP`, default; `KEEP` keeps it against the `executionId`); the execution is stamped `finishedAt` and, under `EXECUTION_RETENTION_SEC`, `expiresAt` | `ExecutionManager` |
 | Every run takes a per-execution lock; a concurrent run gets `EXECUTION_LOCKED` (retryable). A `RUNNING` record whose lock is free is a crashed run and may resume | `ExecutionManager.beginRun` |
 | Terminal states are not resumable (`EXECUTION_NOT_RESUMABLE`) | same |
 | A resume that arrives while the approval is still undecided is not a failure: the run does not start, the execution stays `WAITING_APPROVAL`, and the caller gets the pause again (`ApprovalPendingError` → `input_required`, or `APPROVAL_REQUIRED` for clients without elicitation) | same, and `tools/execute-api.tool.ts` |
@@ -60,6 +61,15 @@ never by hashing code (`runtime/execution/activity-journal.ts`). Each record
 holds the request (`method`, raw path, resolved OpenAPI path template,
 `operationId`, path params, query, body — never headers) and, once the call
 returns, the response (`status`, `ok`, `data`).
+
+**Updated in place, never rebuilt.** There is exactly one activity record per
+call, keyed by `executionId + sequence`. An approval moves that same record
+`WAITING_APPROVAL → APPROVED → EXECUTING → COMPLETED` (or `DENIED` /
+`CANCELLED`); every resume starts a fresh isolate and a fresh cursor at `#1`
+that reads the same records — completed ones are replayed, nothing is copied
+or recreated. Approvals and governance decisions are separate records bound
+to their sequence. Records are deleted only with their execution, by the
+retention sweep (§12).
 
 The journal is also the run's single record of what happened to each call —
 replayed, executed (with the response) or failed. Nothing else keeps call
@@ -262,7 +272,9 @@ journal.
 ## 11. Inspection
 
 `GET /executions/{id}` (bearer) returns `{ execution, activities, approvals,
-decisions, history }`. `history` is derived from the records, e.g.
+decisions, history }` — for a terminal execution without `originalCode` under
+the default `DROP`, and `404 EXECUTION_NOT_FOUND` once the retention sweep has
+deleted it. `history` is derived from the records, e.g.
 
 ```
 EXECUTION:CREATED
@@ -278,12 +290,20 @@ EXECUTION:COMPLETED
 
 ## 12. Storage
 
-`EXECUTION_STORE_TYPE=in-memory` (default) keeps executions for the life of
-the process; `file` writes one JSON document per execution under
-`EXECUTION_STORE_DIR` (temp file + rename) and reloads them at boot, so a
-single gateway survives a restart. Both implement the same SPI
-(`spi/execution/execution-store.ts`); register another backend with
-`registerExecutionStoreBackend('postgres', factory)` in `wiring/strategy-builders.ts`.
+`EXECUTION_STORE_TYPE=in-memory` (default) keeps executions in the process;
+`file` writes one JSON document per execution under `EXECUTION_STORE_DIR`
+(temp file + rename) and reloads them at boot, so a single gateway survives a
+restart. Both implement the same SPI (`spi/execution/execution-store.ts`);
+register another backend with `registerExecutionStoreBackend('postgres',
+factory)` in `wiring/strategy-builders.ts`.
+
+**Retention.** A finished (terminal) execution and everything recorded for it
+— activities, approvals, decisions — is deleted `EXECUTION_RETENTION_SEC`
+after it finished (default one day; `0` keeps it for good). The sweep
+(`runtime/execution/execution-retention.ts`) runs every min(retention, 1 h) and
+uses the SPI's `listExpiredExecutions` / `deleteExecution`. Paused and
+interrupted executions are never deleted. Independently, the program text of
+a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
 
 ## 13. Configuration
 
@@ -291,6 +311,8 @@ single gateway survives a restart. Both implement the same SPI
 |---|---|---|
 | `EXECUTION_STORE_TYPE` | `in-memory` | `in-memory` \| `file` |
 | `EXECUTION_STORE_DIR` | `./var/executions` | file store directory |
+| `EXECUTION_CODE_RETENTION` | `DROP` | `DROP`: a terminal execution's program text is removed · `KEEP`: stored against the `executionId` |
+| `EXECUTION_RETENTION_SEC` | `86400` | seconds a finished execution and its records are kept before deletion; `0` = keep forever |
 | `GOVERNANCE_RULES_SOURCE` | `dir` | `dir` \| `url` \| a registered source type |
 | `GOVERNANCE_RULES_DIR` | `./governance/rules` | rule files for the `dir` source (top level only) |
 | `GOVERNANCE_RULES_URL` | — | rule document for the `url` source |
@@ -317,6 +339,11 @@ single gateway survives a restart. Both implement the same SPI
 - Error-path audit lines keep the pre-existing `userIdHash: "unknown"`.
 - Programs that depend on time or randomness before an external call are not
   made deterministic.
+- Retention deletes only finished executions. A paused or interrupted
+  execution nobody resumes or cancels stays in the store.
+- `EXECUTION_CODE_RETENTION` governs the execution store. The per-call audit
+  line still carries the submitted program (`codeSubmitted`) to the log
+  pipeline while `ENABLE_AUDIT` is on.
 
 ## 15. Invariants (from the requirements) and where they hold
 
