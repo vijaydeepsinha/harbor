@@ -186,6 +186,8 @@ const GlobalConfigSchema = z.object({
   EXECUTION_STORE_DIR: z.string().default('./var/executions'),
   // DROP (default): a terminal execution's program text is removed; KEEP: it stays stored against the executionId.
   EXECUTION_CODE_RETENTION: z.enum([EXECUTION_CODE_RETENTION.DROP, EXECUTION_CODE_RETENTION.KEEP]).default(EXECUTION_CODE_RETENTION.DROP),
+  // Seconds a finished (terminal) execution and all its records are kept before deletion; 0 = keep forever.
+  EXECUTION_RETENTION_SEC: z.coerce.number().int().min(0).default(86_400),
   GOVERNANCE_RULES_DIR: z.string().default('./governance/rules'),
   // Where rules come from: dir (GOVERNANCE_RULES_DIR), url (GOVERNANCE_RULES_URL), or a registered source type.
   GOVERNANCE_RULES_SOURCE: z.string().min(1).default(GOVERNANCE_RULE_SOURCE_TYPE.DIR),
@@ -253,7 +255,7 @@ export function validateGlobalConfig(): GlobalConfig {
       store: env.EXECUTION_STORE_TYPE === EXECUTION_STORE_TYPE.FILE
         ? { type: EXECUTION_STORE_TYPE.FILE, dir: env.EXECUTION_STORE_DIR }
         : { type: EXECUTION_STORE_TYPE.IN_MEMORY },
-      retention: { code: env.EXECUTION_CODE_RETENTION },
+      retention: { code: env.EXECUTION_CODE_RETENTION, executionSec: env.EXECUTION_RETENTION_SEC },
       governance: {
         rulesDir: env.GOVERNANCE_RULES_DIR,
         rulesSource: env.GOVERNANCE_RULES_SOURCE,

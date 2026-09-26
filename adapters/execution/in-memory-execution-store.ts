@@ -50,6 +50,24 @@ export class InMemoryCodeModeStore implements CodeModeStore {
     await this.persist(record.executionId)
   }
 
+  async deleteExecution(executionId: string): Promise<void> {
+    this.executions.delete(executionId)
+    this.activities.delete(executionId)
+    this.decisions.delete(executionId)
+    for (const [approvalId, approval] of this.approvals) {
+      if (approval.executionId === executionId) this.approvals.delete(approvalId)
+    }
+    this.locks.delete(executionId)
+  }
+
+  async listExpiredExecutions(now: string, limit: number): Promise<string[]> {
+    return [...this.executions.values()]
+      .filter(e => e.expiresAt !== undefined && e.expiresAt <= now)
+      .sort((a, b) => (a.expiresAt as string).localeCompare(b.expiresAt as string))
+      .slice(0, limit)
+      .map(e => e.executionId)
+  }
+
   async putActivity(record: ActivityRecord): Promise<void> {
     let bySeq = this.activities.get(record.executionId)
     if (!bySeq) {

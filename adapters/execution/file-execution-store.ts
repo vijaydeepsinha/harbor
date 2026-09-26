@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Logger } from '../../core/types/logger.types.js'
 import type { CodeModeStore } from '../../spi/execution/execution-store.js'
@@ -34,6 +34,11 @@ export class FileCodeModeStore extends InMemoryCodeModeStore {
     const tmp = `${file}.tmp`
     writeFileSync(tmp, JSON.stringify(snap, null, 2), 'utf8')
     renameSync(tmp, file)
+  }
+
+  override async deleteExecution(executionId: string): Promise<void> {
+    await super.deleteExecution(executionId)
+    rmSync(this.fileFor(executionId), { force: true })
   }
 
   private loadAll(): void {

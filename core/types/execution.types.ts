@@ -45,6 +45,10 @@ export interface ExecutionRecord {
   pendingApprovalId?: string
   /** Value the program returned when it COMPLETED. */
   result?: unknown
+  /** When the execution became terminal (COMPLETED / FAILED / DENIED / CANCELLED). */
+  finishedAt?: string
+  /** When the retention sweep may delete it with all its records (EXECUTION_RETENTION_SEC after `finishedAt`; absent ⇒ kept). */
+  expiresAt?: string
 }
 
 /** What the program asked the bridge to do. Volatile headers are never recorded. */

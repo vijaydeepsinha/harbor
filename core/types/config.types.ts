@@ -50,6 +50,8 @@ export interface CodeModeConfig {
   retention?: {
     /** `DROP` (default) removes the program text; `KEEP` keeps it against the executionId. */
     code?: ExecutionCodeRetention
+    /** Seconds after it finished that a terminal execution and all its records are deleted; 0 / absent ⇒ kept. */
+    executionSec?: number
   }
   governance: {
     /** Directory of Governance Rule files (`*.yaml` / `*.yml` / `*.json`) for the `dir` source. Missing dir ⇒ no rules. */

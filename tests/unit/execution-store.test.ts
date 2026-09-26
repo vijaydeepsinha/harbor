@@ -100,6 +100,37 @@ function contractSuite(name: string, make: () => CodeModeStore, cleanup?: () => 
       expect(decisions.map(d => d.activitySequence)).toEqual([1, 3])
     })
 
+    it('deleteExecution removes the execution and everything recorded for it — and nothing else', async () => {
+      for (const id of ['e-1', 'e-2']) {
+        await store.createExecution(execution(id))
+        await store.putActivity(activity(id, 1))
+        await store.putApproval({ approvalId: `ap-${id}`, executionId: id, activitySequence: 1, status: APPROVAL_STATUS.PENDING, summary: { service: 'svc', method: 'POST', specPath: '/x', reason: 'r', matchedRules: [] }, createdAt: now() })
+        await store.putDecision({ executionId: id, activitySequence: 1, decision: GOVERNANCE_DECISION.ALLOW, reason: 'NO_GOVERNANCE', matchedRules: [], ruleVersions: [], evaluatedAt: now() })
+      }
+      await store.acquireLock('e-1')
+      await store.deleteExecution('e-1')
+      expect(await store.getExecution('e-1')).toBeUndefined()
+      expect(await store.listActivities('e-1')).toEqual([])
+      expect(await store.getApproval('ap-e-1')).toBeUndefined()
+      expect(await store.listDecisions('e-1')).toEqual([])
+      expect(await store.acquireLock('e-1')).toBe(true)
+      expect(await store.getExecution('e-2')).toBeDefined()
+      expect(await store.listActivities('e-2')).toHaveLength(1)
+      expect(await store.getApproval('ap-e-2')).toBeDefined()
+      await store.deleteExecution('never-existed')
+    })
+
+    it('listExpiredExecutions returns only executions past their expiresAt, oldest first, up to the limit', async () => {
+      const at = (iso: string) => ({ expiresAt: iso })
+      await store.createExecution({ ...execution('late'), ...at('2026-01-03T00:00:00.000Z') })
+      await store.createExecution({ ...execution('early'), ...at('2026-01-01T00:00:00.000Z') })
+      await store.createExecution({ ...execution('future'), ...at('2027-01-01T00:00:00.000Z') })
+      await store.createExecution(execution('kept')) // no expiresAt: never swept
+      expect(await store.listExpiredExecutions('2026-06-01T00:00:00.000Z', 10)).toEqual(['early', 'late'])
+      expect(await store.listExpiredExecutions('2026-06-01T00:00:00.000Z', 1)).toEqual(['early'])
+      expect(await store.listExpiredExecutions('2026-01-01T00:00:00.000Z', 10)).toEqual(['early']) // at expiresAt is expired
+    })
+
     it('locks are exclusive per execution and released explicitly', async () => {
       expect(await store.acquireLock('e-1')).toBe(true)
       expect(await store.acquireLock('e-1')).toBe(false)
@@ -149,6 +180,20 @@ describe('file store durability', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('a deleted execution\'s document is removed from disk and does not come back on reload', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'harbor-exec-'))
+    try {
+      const a = new FileCodeModeStore(dir)
+      await a.createExecution(execution('e-1'))
+      await a.createExecution(execution('e-2'))
+      await a.deleteExecution('e-1')
+      expect(readdirSync(dir).sort()).toEqual(['e-2.json'])
+      const b = new FileCodeModeStore(dir)
+      expect(await b.getExecution('e-1')).toBeUndefined()
+      expect(await b.getExecution('e-2')).toBeDefined()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
   it('rejects an executionId that could escape the directory', async () => {

@@ -6,6 +6,7 @@ import type { Logger } from '../../core/types/logger.types.js'
 import type { CodeModeStore } from '../../spi/execution/execution-store.js'
 import { buildExecutionStore, buildGovernanceRuleSource } from '../../wiring/strategy-builders.js'
 import { ExecutionManager } from './execution-manager.js'
+import { ExecutionRetentionSweeper } from './execution-retention.js'
 import { ApprovalService } from './approval-service.js'
 import { createResumeStateCodec, type ResumeStateCodec } from './request-state.js'
 import { GovernanceRuleStore } from '../governance/rule-store.js'
@@ -30,8 +31,11 @@ export interface CodeModeRuntime {
 export async function buildCodeModeRuntime(config: CodeModeConfig, logger: Logger): Promise<CodeModeRuntime> {
   const store = buildExecutionStore(config.store, logger)
   const manager = new ExecutionManager(store, undefined, undefined, {
-    ...(config.retention?.code !== undefined ? { codeRetention: config.retention.code } : {})
+    ...(config.retention?.code !== undefined ? { codeRetention: config.retention.code } : {}),
+    retentionSec: config.retention?.executionSec ?? 0
   })
+  const retention = new ExecutionRetentionSweeper(store, config.retention?.executionSec ?? 0, logger)
+  retention.start()
   const approvals = new ApprovalService(store, manager)
   const rules = new GovernanceRuleStore()
   // Fail loud at boot: a source that cannot be read, or a rule that does not
@@ -52,6 +56,7 @@ export async function buildCodeModeRuntime(config: CodeModeConfig, logger: Logge
   return {
     store, manager, approvals, rules, requestState, config,
     async shutdown() {
+      retention.stop()
       ruleRefresher.stop()
       await store.destroy?.()
     }

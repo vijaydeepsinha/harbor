@@ -118,6 +118,33 @@ describe('ExecutionManager', () => {
     })
   })
 
+  it('stamps a terminal execution with finishedAt, and with expiresAt under a retention period; a paused one gets neither', async () => {
+    const retained = new ExecutionManager(store, clock, newId, { retentionSec: 3600 })
+    const done = await retained.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await retained.beginRun(done.executionId)
+    await retained.endRun(done.executionId, { kind: 'completed', result: 1 })
+    const finished = await retained.load(done.executionId)
+    expect(finished.finishedAt).toBe(finished.updatedAt)
+    expect(Date.parse(finished.expiresAt!) - Date.parse(finished.finishedAt!)).toBe(3_600_000)
+
+    const paused = await retained.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await retained.beginRun(paused.executionId)
+    await retained.endRun(paused.executionId, { kind: 'waitingApproval', approvalId: 'ap' })
+    expect((await retained.load(paused.executionId)).finishedAt).toBeUndefined()
+    expect((await retained.load(paused.executionId)).expiresAt).toBeUndefined()
+
+    const rejected = await retained.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await retained.markApprovalDecided(rejected.executionId, EXECUTION_STATUS.DENIED)
+    expect((await retained.load(rejected.executionId)).expiresAt).toBeDefined()
+
+    // no retention period ⇒ finished, but never expires
+    const kept = await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await manager.beginRun(kept.executionId)
+    await manager.endRun(kept.executionId, { kind: 'failed', code: 'X', message: 'm' })
+    expect((await manager.load(kept.executionId)).finishedAt).toBeDefined()
+    expect((await manager.load(kept.executionId)).expiresAt).toBeUndefined()
+  })
+
   it('endRun records terminal reasons for failed / denied / cancelled and releases the lock', async () => {
     for (const [kind, status] of [
       ['failed', EXECUTION_STATUS.FAILED], ['denied', EXECUTION_STATUS.DENIED], ['cancelled', EXECUTION_STATUS.CANCELLED]

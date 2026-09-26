@@ -28,6 +28,8 @@ export type RunOutcome =
 export interface ExecutionManagerOptions {
   /** `DROP` (default): remove the program text once the execution is terminal. */
   codeRetention?: ExecutionCodeRetention
+  /** Seconds a terminal execution is kept before the retention sweep may delete it; 0 / absent ⇒ kept. */
+  retentionSec?: number
 }
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
@@ -193,13 +195,20 @@ export class ExecutionManager {
 
   /**
    * A terminal execution never runs again, so its program text is no longer
-   * needed: dropped unless EXECUTION_CODE_RETENTION=KEEP. Paused and
-   * interrupted executions keep it — they resume from it.
+   * needed: dropped unless EXECUTION_CODE_RETENTION=KEEP. It is stamped with
+   * when it finished and, under EXECUTION_RETENTION_SEC, when the retention
+   * sweep may delete it. Paused and interrupted executions get neither — they
+   * resume from their code and are never swept.
    */
   private settle(record: ExecutionRecord): void {
     if (!TERMINAL_STATUSES.has(record.status)) return
     if ((this.options.codeRetention ?? EXECUTION_CODE_RETENTION.DROP) === EXECUTION_CODE_RETENTION.DROP) {
       delete record.originalCode
+    }
+    record.finishedAt = record.updatedAt
+    const retentionSec = this.options.retentionSec ?? 0
+    if (retentionSec > 0) {
+      record.expiresAt = new Date(Date.parse(record.finishedAt) + retentionSec * 1000).toISOString()
     }
   }
 
