@@ -199,6 +199,12 @@ describe('governance rule loader', () => {
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
+  it('the documented example rule set loads (copying it into governance/rules/ must not stop the gateway)', () => {
+    const loaded = loadGovernanceRules(join(process.cwd(), 'governance/rules/examples'))
+    expect(loaded.map(l => l.rule.name)).toContain('never-delete-campaigns')
+    expect(loaded.find(l => l.rule.name === 'never-delete-campaigns')?.rule.match.path).toBe('/campaigns/{id}')
+  })
+
   it('rule store swaps atomically and describes itself', () => {
     const store = new GovernanceRuleStore()
     expect(store.describe()).toEqual({ count: 0, rules: [] })

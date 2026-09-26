@@ -23,5 +23,5 @@ rules:
     action: { type: ALLOW }
 
   - name: never-delete-campaigns
-    match: { service: trafficking, method: DELETE, path: /campaigns/{id} }
+    match: { service: trafficking, method: DELETE, path: '/campaigns/{id}' }
     action: { type: DENY, reason: Campaign deletion is not permitted through agents }
