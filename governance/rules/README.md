@@ -18,8 +18,8 @@ description: Large spends need a human
 match:                              # which operations — every present clause must match; "*" = anything
   service: trafficking
   operation: createCampaign         # OpenAPI operationId
-  # method: POST
-  # path: /campaigns                # OpenAPI path template, exactly as in the spec
+  # method: POST                    # or a list: [POST, PUT]
+  # path: /campaigns                # OpenAPI path template, exactly as in the spec; /campaigns/** = it and everything beneath
 conditions:                         # when — a boolean tree over request values
   allOf:
     - percent_of: { part: body.budget, whole: body.totalBudget }
@@ -29,6 +29,24 @@ action:                             # what — advisory only
   type: REQUIRE_APPROVAL            # ALLOW | DENY | REQUIRE_APPROVAL
   reason: Campaign budget exceeds the approval threshold
 ```
+
+## Levels
+
+What `match` names sets how broadly a rule applies:
+
+| Level | `match` names | Applies to | Example |
+|---|---|---|---|
+| **gateway** | no service, operation or path | every service | `match: { method: DELETE }` |
+| **service** | a `service` only | every endpoint of that service | `match: { service: trafficking }` |
+| **endpoint** | an `operation` or a `path` (incl. `/prefix/**`) | those endpoints | `match: { service: trafficking, operation: createCampaign }` |
+
+`*` (and the path `/**`) names nothing, so it does not raise a rule's level.
+`method` — one method or a list — restricts a rule to those kinds of request at
+any level; it does not change the level.
+
+`path: /campaigns/**` targets `/campaigns` and every template beneath it
+(`/campaigns/{id}`, `/campaigns/{id}/finalize`, …), segment by segment — not
+`/campaigns-archive`. `**` is only valid as the whole last segment.
 
 ## Conditions
 
@@ -91,8 +109,46 @@ shorthand — `body.not`, not `not`.
 optional `reason`. A rule never rewrites the request and has no side effects;
 any other key is a load error.
 
-Precedence among matched rules: **DENY > REQUIRE_APPROVAL > ALLOW**. No match
-⇒ `GOVERNANCE_DEFAULT_DECISION` (default `ALLOW`).
+## How a call is decided
+
+A rule **targets** a call when its `match` fits it, and **matches** it when it
+targets it and its `conditions` hold.
+
+1. **The most specific level with a matching rule decides**: endpoint rules
+   override service rules, service rules override gateway rules. An endpoint
+   rule whose conditions are false does not match, so the service level
+   decides.
+2. **`final: true` pins a broader level**: when a `final` rule matches, the
+   decision is made at its level and more specific rules are not consulted
+   (with several, the broadest wins) — e.g. a gateway "never DELETE" that no
+   service or endpoint rule can override.
+3. **Within the deciding level: DENY > REQUIRE_APPROVAL > ALLOW**; the first
+   rule in file order carrying the winning action is the deciding rule.
+4. **Nothing matches**:
+   - some rule targets the call ⇒ `GOVERNANCE_DEFAULT_DECISION` (default
+     **`DENY`**, reason `NO_MATCHING_RULE`);
+   - no rule targets it ⇒ the call is ungoverned and **allowed** (reason
+     `NO_GOVERNANCE`). A gateway with no rules behaves exactly as without
+     governance.
+
+```yaml
+- name: no-deletes-anywhere          # gateway, final: nothing below can allow a DELETE
+  match: { method: DELETE }
+  final: true
+  action: { type: DENY }
+- name: trafficking-reads            # service: all trafficking reads are fine …
+  match: { service: trafficking, method: GET }
+  action: { type: ALLOW }
+- name: big-campaigns                # endpoint: … and large campaigns need a human
+  match: { service: trafficking, operation: createCampaign }
+  conditions: { budget: { greater_than: 1000000 } }
+  action: { type: REQUIRE_APPROVAL }
+```
+
+With these rules and the default `DENY`, a `POST /campaigns` with a budget of
+500 is denied: the endpoint rule targets it but does not match, and no service
+rule allows POSTs. Add a service- or endpoint-level `ALLOW` for what should
+pass.
 
 ## Validation
 

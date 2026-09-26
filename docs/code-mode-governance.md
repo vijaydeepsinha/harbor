@@ -129,7 +129,8 @@ format and operators in [`governance/rules/README.md`](../governance/rules/READM
   `POST /campaigns/C1/activate` resolves to `operationId: activateCampaign`,
   path template `/campaigns/{id}/activate`, `pathParams.id = "C1"`
   (`runtime/governance/operation-resolver.ts`). Rules match on `service`,
-  `operation`, `method`, `path` (template) — `*` matches anything.
+  `operation`, `method` (one or a list), `path` (template, or `/prefix/**` for
+  a template and everything beneath it) — `*` matches anything.
 - **Conditions** are a bounded boolean tree — `allOf` (AND), `anyOf` (OR),
   `not` (NOT) — over actual request values. A leaf compares one operand: a
   field (bare names from the body, `query.*`, `path.*`, `body.a.b`) or a
@@ -140,10 +141,18 @@ format and operators in [`governance/rules/README.md`](../governance/rules/READM
   accepted as shorthand for `allOf`. At most 8 levels and 64 nodes.
 - **Actions are advisory**: `ALLOW`, `DENY` or `REQUIRE_APPROVAL` plus a
   reason. A rule never rewrites the request and has no side effects.
-- **Precedence** among matched rules: `DENY > REQUIRE_APPROVAL > ALLOW`; the
-  first rule (file order) carrying the winning action is the deciding rule.
-  No match ⇒ `GOVERNANCE_DEFAULT_DECISION` (default `ALLOW`, which preserves
-  pre-governance behaviour when no rules exist).
+- **Levels**: what `match` names sets a rule's level — an operation or path ⇒
+  endpoint, a service only ⇒ service, neither ⇒ gateway. The most specific
+  level with a matching rule decides (endpoint overrides service, service
+  overrides gateway); a matching `final: true` rule pins the decision to its
+  own, broader level.
+- **Precedence** within the deciding level: `DENY > REQUIRE_APPROVAL >
+  ALLOW`; the first rule (file order) carrying the winning action is the
+  deciding rule. `matchedRules` on the decision lists every matched rule.
+- **Default**: a call some rule *targets* (its `match` fits) but no rule
+  matches gets `GOVERNANCE_DEFAULT_DECISION` — default `DENY`
+  (`NO_MATCHING_RULE`). A call no rule targets is ungoverned and allowed
+  (`NO_GOVERNANCE`), so a gateway without rules behaves as before.
 - **Fail closed**: an evaluation error is a `DENY`; an invalid rule file stops
   the gateway at boot; a duplicate rule name is an error.
 - **Every decision is persisted** per activity: decision, reason, matched
@@ -277,7 +286,7 @@ single gateway survives a restart. Both implement the same SPI
 | `EXECUTION_STORE_TYPE` | `in-memory` | `in-memory` \| `file` |
 | `EXECUTION_STORE_DIR` | `./var/executions` | file store directory |
 | `GOVERNANCE_RULES_DIR` | `./governance/rules` | rule files (top level only) |
-| `GOVERNANCE_DEFAULT_DECISION` | `ALLOW` | when no rule matches |
+| `GOVERNANCE_DEFAULT_DECISION` | `DENY` | a call some rule targets but none matches; calls no rule targets are allowed (`NO_GOVERNANCE`) |
 | `GOVERNANCE_REQUEST_STATE_KEY` | *(random per process)* | ≥32-char HMAC key; required for multi-instance deployments |
 | `GOVERNANCE_APPROVAL_TTL_SEC` | `600` | how long a paused execution's `requestState` stays redeemable |
 
