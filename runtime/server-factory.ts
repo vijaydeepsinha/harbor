@@ -69,7 +69,7 @@ export async function createMcpGateway(
   const stdioPat = globalConfig.mcp.token ?? ''
 
   // Process-wide Code Mode governance layer: executions outlive requests and isolates.
-  const codeMode = buildCodeModeRuntime(globalConfig.codeMode, gatewayLogger)
+  const codeMode = await buildCodeModeRuntime(globalConfig.codeMode, gatewayLogger)
 
   const createMcpServer = buildMcpServerFactory({
     registry,

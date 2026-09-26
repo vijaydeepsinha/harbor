@@ -4,12 +4,13 @@
 import type { CodeModeConfig } from '../../core/types/config.types.js'
 import type { Logger } from '../../core/types/logger.types.js'
 import type { CodeModeStore } from '../../spi/execution/execution-store.js'
-import { buildExecutionStore } from '../../wiring/strategy-builders.js'
+import { buildExecutionStore, buildGovernanceRuleSource } from '../../wiring/strategy-builders.js'
 import { ExecutionManager } from './execution-manager.js'
 import { ApprovalService } from './approval-service.js'
 import { createResumeStateCodec, type ResumeStateCodec } from './request-state.js'
 import { GovernanceRuleStore } from '../governance/rule-store.js'
-import { loadGovernanceRules } from '../governance/rule-loader.js'
+import { parseRuleDocuments } from '../governance/rule-loader.js'
+import { GovernanceRuleRefresher } from '../governance/rule-refresher.js'
 
 /**
  * Everything the Code Mode governance layer needs at runtime, built once per
@@ -26,13 +27,17 @@ export interface CodeModeRuntime {
   shutdown(): Promise<void>
 }
 
-export function buildCodeModeRuntime(config: CodeModeConfig, logger: Logger): CodeModeRuntime {
+export async function buildCodeModeRuntime(config: CodeModeConfig, logger: Logger): Promise<CodeModeRuntime> {
   const store = buildExecutionStore(config.store, logger)
   const manager = new ExecutionManager(store)
   const approvals = new ApprovalService(store, manager)
   const rules = new GovernanceRuleStore()
-  // Fail loud at boot: a rule file that does not validate must never become "no rule".
-  rules.swap(loadGovernanceRules(config.governance.rulesDir, logger))
+  // Fail loud at boot: a source that cannot be read, or a rule that does not
+  // validate, must never become "no rule". Later refreshes keep the last valid set.
+  const ruleSource = buildGovernanceRuleSource(config.governance, logger)
+  rules.swap(parseRuleDocuments(await ruleSource.load(), logger, ruleSource.name))
+  const ruleRefresher = new GovernanceRuleRefresher(ruleSource, rules, config.governance.rulesRefreshSec ?? 0, logger)
+  ruleRefresher.start()
   const requestState = createResumeStateCodec({
     ...(config.governance.requestStateKey ? { key: config.governance.requestStateKey } : {}),
     ttlSeconds: config.governance.approvalTtlSec,
@@ -45,6 +50,7 @@ export function buildCodeModeRuntime(config: CodeModeConfig, logger: Logger): Co
   return {
     store, manager, approvals, rules, requestState, config,
     async shutdown() {
+      ruleRefresher.stop()
       await store.destroy?.()
     }
   }

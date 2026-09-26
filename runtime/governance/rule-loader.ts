@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join, extname } from 'node:path'
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
 import type { Logger } from '../../core/types/logger.types.js'
+import type { GovernanceRuleDocument } from '../../spi/governance/rule-source.js'
+import { readRuleDirectory } from '../../spi/governance/strategies/directory-rule-source.strategy.js'
 import { governanceRuleSchema, type GovernanceRule } from './rule-schema.js'
 
 /** A rule plus where it came from and a content hash for audit (§35). */
 export interface LoadedRule {
   rule: GovernanceRule
+  /** The document it was read from: a file name, or a URL without credentials or query. */
   source: string
-  /** sha256 of the file the rule was read from (first 12 hex chars used in decision records). */
+  /** sha256 of that document (first 12 hex chars used in decision records). */
   contentHash: string
 }
 
@@ -29,44 +30,40 @@ export class GovernanceRuleLoadError extends Error {
 }
 
 /**
- * Loads every `*.yaml` / `*.yml` / `*.json` under `dir`, in filename order
- * (that order is the tie-break for precedence — see the evaluator).
+ * Validates a whole rule set — the documents one GovernanceRuleSource
+ * returned, in order (that order is the tie-break for precedence — see the
+ * evaluator).
  *
- * Fail loud: a rule file that does not validate throws, so a typo can never
- * silently turn into "rule not enforced". A missing directory is not an
- * error — it means no rules, which the evaluator resolves to the configured
- * default decision.
+ * Fail loud: a document that does not parse or a rule that does not validate
+ * throws, as does a rule name used twice anywhere in the set, so a typo can
+ * never silently turn into "rule not enforced". At boot that stops the
+ * gateway; on a refresh the caller keeps the previous set.
  */
-export function loadGovernanceRules(dir: string, logger?: Logger): LoadedRule[] {
-  if (!existsSync(dir)) {
-    logger?.info({ dir }, 'Governance rules directory absent — no rules loaded')
-    return []
-  }
-  const files = readdirSync(dir)
-    .filter(f => ['.yaml', '.yml', '.json'].includes(extname(f)))
-    .sort()
+export function parseRuleDocuments(documents: readonly GovernanceRuleDocument[], logger?: Logger, sourceName?: string): LoadedRule[] {
   const loaded: LoadedRule[] = []
   const seen = new Map<string, string>()
-  for (const file of files) {
-    const path = join(dir, file)
-    const text = readFileSync(path, 'utf8')
-    const contentHash = createHash('sha256').update(text).digest('hex')
+  for (const doc of documents) {
+    const contentHash = createHash('sha256').update(doc.text).digest('hex')
     let raw: unknown
     try {
-      raw = extname(file) === '.json' ? JSON.parse(text) : yaml.load(text)
+      raw = doc.format === 'json' ? JSON.parse(doc.text) : yaml.load(doc.text)
     } catch (err) {
-      throw new GovernanceRuleLoadError(`${file}: cannot parse — ${(err as Error).message}`, path)
+      throw new GovernanceRuleLoadError(`${doc.name}: cannot parse — ${(err as Error).message}`, doc.name)
     }
-    const rules = parseRuleFile(raw, file, path)
-    for (const rule of rules) {
+    for (const rule of parseRuleFile(raw, doc.name, doc.name)) {
       const dup = seen.get(rule.name)
-      if (dup) throw new GovernanceRuleLoadError(`${file}: duplicate rule name "${rule.name}" (also in ${dup})`, path)
-      seen.set(rule.name, file)
-      loaded.push({ rule, source: file, contentHash })
+      if (dup) throw new GovernanceRuleLoadError(`${doc.name}: duplicate rule name "${rule.name}" (also in ${dup})`, doc.name)
+      seen.set(rule.name, doc.name)
+      loaded.push({ rule, source: doc.name, contentHash })
     }
   }
-  logger?.info({ dir, rules: loaded.map(ruleVersionTag) }, 'Governance rules loaded')
+  logger?.info({ ...(sourceName !== undefined ? { source: sourceName } : {}), rules: loaded.map(ruleVersionTag) }, 'Governance rules loaded')
   return loaded
+}
+
+/** The rule files directly in `dir` (see readRuleDirectory), validated. A missing directory means no rules. */
+export function loadGovernanceRules(dir: string, logger?: Logger): LoadedRule[] {
+  return parseRuleDocuments(readRuleDirectory(dir, logger), logger, `dir:${dir}`)
 }
 
 /**

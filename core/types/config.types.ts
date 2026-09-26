@@ -47,8 +47,16 @@ export type ExecutionStoreBackendConfig =
 export interface CodeModeConfig {
   store: ExecutionStoreBackendConfig
   governance: {
-    /** Directory of Governance Rule files (`*.yaml` / `*.yml` / `*.json`). Missing dir ⇒ no rules. */
+    /** Directory of Governance Rule files (`*.yaml` / `*.yml` / `*.json`) for the `dir` source. Missing dir ⇒ no rules. */
     rulesDir: string
+    /** Where rules come from: `dir` (default), `url`, or a type registered with registerGovernanceRuleSourceBackend. */
+    rulesSource?: string
+    /** Rule document URL for the `url` source. */
+    rulesUrl?: string
+    /** Fetch timeout for the `url` source. */
+    rulesUrlTimeoutMs?: number
+    /** Re-read the source every N seconds (0 / absent ⇒ load once at boot). A failed refresh keeps the last valid set. */
+    rulesRefreshSec?: number
     /**
      * Decision for a call that some rule targets (its `match` fits) but no rule
      * matches. A call no rule targets is ungoverned and always allowed

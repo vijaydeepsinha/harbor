@@ -350,6 +350,12 @@ export const EXECUTION_STORE_TYPE = {
   FILE: 'file',
 } as const
 
+/** Built-in Governance Rule sources (`GOVERNANCE_RULES_SOURCE`); others via registerGovernanceRuleSourceBackend. */
+export const GOVERNANCE_RULE_SOURCE_TYPE = {
+  DIR: 'dir',
+  URL: 'url',
+} as const
+
 /** Reason codes attached to governance decisions and execution failures. */
 export const GOVERNANCE_REASON = {
   /** Some rule targets the call, none matched ⇒ the configured default decision. */

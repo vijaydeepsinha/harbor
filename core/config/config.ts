@@ -11,7 +11,7 @@ import type {
   CouchbaseConnectionConfig
 } from '../types/config.types.js'
 import { LOG_LEVELS } from '../types/config.types.js'
-import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, EXECUTION_STORE_TYPE, GOVERNANCE_DECISION } from '../constants.js'
+import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, EXECUTION_STORE_TYPE, GOVERNANCE_DECISION, GOVERNANCE_RULE_SOURCE_TYPE } from '../constants.js'
 
 // ── Config-file loader ───────────────────────────────────────────────────────
 //
@@ -185,6 +185,12 @@ const GlobalConfigSchema = z.object({
   EXECUTION_STORE_TYPE: z.enum([EXECUTION_STORE_TYPE.IN_MEMORY, EXECUTION_STORE_TYPE.FILE]).default(EXECUTION_STORE_TYPE.IN_MEMORY),
   EXECUTION_STORE_DIR: z.string().default('./var/executions'),
   GOVERNANCE_RULES_DIR: z.string().default('./governance/rules'),
+  // Where rules come from: dir (GOVERNANCE_RULES_DIR), url (GOVERNANCE_RULES_URL), or a registered source type.
+  GOVERNANCE_RULES_SOURCE: z.string().min(1).default(GOVERNANCE_RULE_SOURCE_TYPE.DIR),
+  GOVERNANCE_RULES_URL: z.string().url().optional(),
+  GOVERNANCE_RULES_URL_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  // 0 = load once at boot. A refresh that fails (unreachable, invalid) keeps the last valid rule set.
+  GOVERNANCE_RULES_REFRESH_SEC: z.coerce.number().int().min(0).default(0),
   // Fail closed where governance applies: a call some rule targets but none matches is denied.
   // Calls no rule targets are ungoverned and allowed regardless (NO_GOVERNANCE).
   GOVERNANCE_DEFAULT_DECISION: z.enum([GOVERNANCE_DECISION.ALLOW, GOVERNANCE_DECISION.DENY, GOVERNANCE_DECISION.REQUIRE_APPROVAL]).default(GOVERNANCE_DECISION.DENY),
@@ -247,6 +253,10 @@ export function validateGlobalConfig(): GlobalConfig {
         : { type: EXECUTION_STORE_TYPE.IN_MEMORY },
       governance: {
         rulesDir: env.GOVERNANCE_RULES_DIR,
+        rulesSource: env.GOVERNANCE_RULES_SOURCE,
+        ...(env.GOVERNANCE_RULES_URL ? { rulesUrl: env.GOVERNANCE_RULES_URL } : {}),
+        rulesUrlTimeoutMs: env.GOVERNANCE_RULES_URL_TIMEOUT_MS,
+        rulesRefreshSec: env.GOVERNANCE_RULES_REFRESH_SEC,
         defaultDecision: env.GOVERNANCE_DEFAULT_DECISION,
         ...(env.GOVERNANCE_REQUEST_STATE_KEY ? { requestStateKey: env.GOVERNANCE_REQUEST_STATE_KEY } : {}),
         approvalTtlSec: env.GOVERNANCE_APPROVAL_TTL_SEC
