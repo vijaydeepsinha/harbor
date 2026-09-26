@@ -185,7 +185,9 @@ const GlobalConfigSchema = z.object({
   EXECUTION_STORE_TYPE: z.enum([EXECUTION_STORE_TYPE.IN_MEMORY, EXECUTION_STORE_TYPE.FILE]).default(EXECUTION_STORE_TYPE.IN_MEMORY),
   EXECUTION_STORE_DIR: z.string().default('./var/executions'),
   GOVERNANCE_RULES_DIR: z.string().default('./governance/rules'),
-  GOVERNANCE_DEFAULT_DECISION: z.enum([GOVERNANCE_DECISION.ALLOW, GOVERNANCE_DECISION.DENY, GOVERNANCE_DECISION.REQUIRE_APPROVAL]).default(GOVERNANCE_DECISION.ALLOW),
+  // Fail closed where governance applies: a call some rule targets but none matches is denied.
+  // Calls no rule targets are ungoverned and allowed regardless (NO_GOVERNANCE).
+  GOVERNANCE_DEFAULT_DECISION: z.enum([GOVERNANCE_DECISION.ALLOW, GOVERNANCE_DECISION.DENY, GOVERNANCE_DECISION.REQUIRE_APPROVAL]).default(GOVERNANCE_DECISION.DENY),
   // HMAC key for the MRTR requestState codec (spec MUST integrity-protect state that drives authorization).
   GOVERNANCE_REQUEST_STATE_KEY: z.string().min(32).optional(),
   GOVERNANCE_APPROVAL_TTL_SEC: z.coerce.number().int().positive().default(600),

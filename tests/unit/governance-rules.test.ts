@@ -215,11 +215,33 @@ describe('governance rule loader', () => {
 })
 
 describe('governance evaluator', () => {
-  it('returns the configured default with NO_MATCHING_RULE when nothing matches', () => {
-    expect(evaluateGovernance([], req, GOVERNANCE_DECISION.ALLOW)).toEqual({
-      decision: 'ALLOW', reason: GOVERNANCE_REASON.NO_MATCHING_RULE, matchedRules: [], ruleVersions: []
+  it('a call no rule targets is ungoverned: ALLOW (NO_GOVERNANCE), whatever the default', () => {
+    for (const defaultDecision of [GOVERNANCE_DECISION.DENY, GOVERNANCE_DECISION.REQUIRE_APPROVAL, GOVERNANCE_DECISION.ALLOW]) {
+      const ungoverned = { decision: 'ALLOW', reason: GOVERNANCE_REASON.NO_GOVERNANCE, matchedRules: [], ruleVersions: [] }
+      expect(evaluateGovernance([], req, defaultDecision)).toEqual(ungoverned)
+      expect(evaluateGovernance([rule({ match: { service: 'other' }, action: { type: 'DENY' } })], req, defaultDecision)).toEqual(ungoverned)
+    }
+  })
+
+  it('a call some rule targets but none matches gets the configured default (NO_MATCHING_RULE)', () => {
+    const conditional = rule({ match: { service: 'trafficking', operation: 'createCampaign' }, conditions: { budget: { greater_than: 5_000_000 } }, action: { type: 'REQUIRE_APPROVAL' } })
+    expect(evaluateGovernance([conditional], req, GOVERNANCE_DECISION.DENY)).toEqual({
+      decision: 'DENY', reason: GOVERNANCE_REASON.NO_MATCHING_RULE, matchedRules: [], ruleVersions: []
     })
-    expect(evaluateGovernance([rule({ match: { service: 'other' } })], req, GOVERNANCE_DECISION.DENY).decision).toBe('DENY')
+    expect(evaluateGovernance([conditional], req, GOVERNANCE_DECISION.ALLOW).decision).toBe('ALLOW')
+  })
+
+  it('targeting follows match only: a subtree or a gateway method rule targets every call it covers', () => {
+    const subtree = rule({ match: { path: '/campaigns/**' }, conditions: { 'body.force': { equals: true } }, action: { type: 'ALLOW' } })
+    const deletes = rule({ name: 'deletes', match: { method: 'DELETE' }, conditions: { 'query.confirm': { equals: true } }, action: { type: 'ALLOW' } })
+    const decide = (r: LoadedRule, request: GovernanceRequest) => evaluateGovernance([r], request, GOVERNANCE_DECISION.DENY)
+    // /campaigns/{id}/finalize is under the subtree: targeted, condition false ⇒ default DENY
+    expect(decide(subtree, { ...req, specPath: '/campaigns/{id}/finalize' })).toMatchObject({ decision: 'DENY', reason: GOVERNANCE_REASON.NO_MATCHING_RULE })
+    // /orders is not ⇒ ungoverned
+    expect(decide(subtree, { ...req, specPath: '/orders' })).toMatchObject({ decision: 'ALLOW', reason: GOVERNANCE_REASON.NO_GOVERNANCE })
+    // every DELETE on every service is targeted by the gateway rule; a POST is not
+    expect(decide(deletes, { ...req, service: 'billing', method: 'DELETE' }).reason).toBe(GOVERNANCE_REASON.NO_MATCHING_RULE)
+    expect(decide(deletes, req).reason).toBe(GOVERNANCE_REASON.NO_GOVERNANCE)
   })
 
   it('matches on service / operation / method / path with * wildcards, all clauses ANDed', () => {

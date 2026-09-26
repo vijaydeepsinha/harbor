@@ -31,8 +31,8 @@ export interface GovernanceOutcome {
 /**
  * Deterministic evaluator (§21–§22).
  *
- * 1. A rule *matches* when every clause in `match` equals the request (or
- *    is `*`) and its `conditions` tree holds (`allOf` AND, `anyOf` OR, `not`
+ * 1. A rule *targets* a call when every clause in `match` fits it (or is
+ *    `*`), and *matches* when it targets it and its `conditions` tree holds (`allOf` AND, `anyOf` OR, `not`
  *    NOT). A leaf on a missing field — or on a computed operand that cannot be
  *    computed — holds only for `exists: false`; comparisons between
  *    mismatched types are false.
@@ -45,7 +45,9 @@ export interface GovernanceOutcome {
  *    DENY > REQUIRE_APPROVAL > ALLOW. The deciding rule is the first (file
  *    order) rule of that level carrying the winning action. `matchedRules`
  *    still lists every matched rule, at every level, for audit.
- * 4. No rule matches ⇒ `defaultDecision` (`NO_MATCHING_RULE`).
+ * 4. No rule matches: if some rule *targets* the call (its `match` fits,
+ *    conditions aside) ⇒ `defaultDecision` (`NO_MATCHING_RULE`); if no rule
+ *    targets it at all, the call is ungoverned ⇒ ALLOW (`NO_GOVERNANCE`).
  * 5. Any internal error ⇒ DENY (`GOVERNANCE_EVALUATION_FAILED`). Fail closed.
  */
 export function evaluateGovernance(
@@ -54,9 +56,12 @@ export function evaluateGovernance(
   defaultDecision: GovernanceDecisionType
 ): GovernanceOutcome {
   try {
-    const matched = rules.filter(r => ruleMatches(r.rule, request))
+    const targeted = rules.filter(r => ruleTargets(r.rule, request))
+    const matched = targeted.filter(r => r.rule.conditions === undefined || conditionsHold(r.rule.conditions, request))
     if (matched.length === 0) {
-      return { decision: defaultDecision, reason: GOVERNANCE_REASON.NO_MATCHING_RULE, matchedRules: [], ruleVersions: [] }
+      return targeted.length === 0
+        ? { decision: GOVERNANCE_DECISION.ALLOW, reason: GOVERNANCE_REASON.NO_GOVERNANCE, matchedRules: [], ruleVersions: [] }
+        : { decision: defaultDecision, reason: GOVERNANCE_REASON.NO_MATCHING_RULE, matchedRules: [], ruleVersions: [] }
     }
     const deciding = decidingLevelRules(matched)
     let winner = deciding[0] as LoadedRule
@@ -104,13 +109,14 @@ function decidingLevelRules(matched: readonly LoadedRule[]): LoadedRule[] {
   return matched.filter(r => specificity(r) === level)
 }
 
-function ruleMatches(rule: GovernanceRule, req: GovernanceRequest): boolean {
+/** The rule's `match` fits the call — its service / operation / method / path clauses, conditions aside. */
+function ruleTargets(rule: GovernanceRule, req: GovernanceRequest): boolean {
   const m = rule.match
   if (m.service !== undefined && !clause(m.service, req.service)) return false
   if (m.operation !== undefined && !clause(m.operation, req.operationId)) return false
   if (m.method !== undefined && !m.method.includes(req.method)) return false
   if (m.path !== undefined && !pathClause(m.path, req.specPath)) return false
-  return rule.conditions === undefined || conditionsHold(rule.conditions, req)
+  return true
 }
 
 /** `allOf` = AND, `anyOf` = OR, `not` = NOT; a leaf compares its operand. */

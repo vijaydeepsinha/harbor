@@ -49,7 +49,11 @@ export interface CodeModeConfig {
   governance: {
     /** Directory of Governance Rule files (`*.yaml` / `*.yml` / `*.json`). Missing dir ⇒ no rules. */
     rulesDir: string
-    /** Decision when no rule matches. `ALLOW` preserves pre-governance behaviour. */
+    /**
+     * Decision for a call that some rule targets (its `match` fits) but no rule
+     * matches. A call no rule targets is ungoverned and always allowed
+     * (`NO_GOVERNANCE`), so deployments without rules behave as before.
+     */
     defaultDecision: GovernanceDecisionType
     /** HMAC key for MRTR `requestState`; ≥32 chars. Absent ⇒ a per-process random key (single-instance only). */
     requestStateKey?: string

@@ -352,7 +352,10 @@ export const EXECUTION_STORE_TYPE = {
 
 /** Reason codes attached to governance decisions and execution failures. */
 export const GOVERNANCE_REASON = {
+  /** Some rule targets the call, none matched ⇒ the configured default decision. */
   NO_MATCHING_RULE: 'NO_MATCHING_RULE',
+  /** No rule targets the call at all ⇒ it is ungoverned and allowed. */
+  NO_GOVERNANCE: 'NO_GOVERNANCE',
   RULE_MATCHED: 'RULE_MATCHED',
   EVALUATION_FAILED: 'GOVERNANCE_EVALUATION_FAILED',
   APPROVAL_REJECTED: 'APPROVAL_REJECTED',

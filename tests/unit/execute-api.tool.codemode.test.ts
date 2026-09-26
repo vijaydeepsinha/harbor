@@ -6,7 +6,7 @@ import {
   makeConnector, makeResources, makeRuntime, registerGoverned, makeCtx, retryCtx, parseContent
 } from './code-mode-harness.js'
 import {
-  ERR, EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS,
+  ERR, EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS, GOVERNANCE_DECISION, GOVERNANCE_REASON,
   EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY, APPROVAL_ID_META_KEY, APPROVAL_INPUT_KEY
 } from '../../core/constants.js'
 
@@ -231,6 +231,26 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(count('POST', '/campaigns/C1/finalize')).toBe(0)   // /campaigns/{id}/finalize is under /campaigns/**
     const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
     expect((await rt.store.listDecisions(executionId)).map(d => [d.decision, d.decidingRule])).toEqual([['ALLOW', undefined], ['REQUIRE_APPROVAL', 'campaign-writes']])
+  })
+
+  it('default DENY applies only where governance applies: untargeted calls run, a targeted unmatched call is denied', async () => {
+    const FORCE_ONLY = {
+      name: 'finalize-with-force', match: { service: 'trafficking', operation: 'finalizeCampaign' },
+      conditions: { 'body.force': { equals: true } }, action: { type: 'ALLOW' }
+    }
+    const rt = makeRuntime([FORCE_ONLY], GOVERNANCE_DECISION.DENY)
+    const { connector, count } = makeConnector()
+    const handler = registerGoverned(rt, makeResources('trafficking', connector))
+    const r = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+    expect((parseContent(r) as { code: string }).code).toBe(ERR.GOVERNANCE_DENIED)
+    expect(count('GET', '/campaigns')).toBe(1)               // no rule targets it: ungoverned
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)  // targeted, condition false: default DENY
+    const executionId = (r['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+    expect((await rt.store.listDecisions(executionId)).map(d => [d.decision, d.reason])).toEqual([
+      ['ALLOW', GOVERNANCE_REASON.NO_GOVERNANCE],
+      ['DENY', GOVERNANCE_REASON.NO_MATCHING_RULE]
+    ])
+    expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.DENIED)
   })
 
   it('a DENY rule stops the execution before the call and records the decision', async () => {
