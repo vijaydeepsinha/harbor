@@ -28,6 +28,8 @@ Thank you for your interest in contributing. This guide covers setup, developmen
 | Node.js | 22+ |
 | npm | 10+ |
 | Native build tools | Xcode CLT (macOS): `xcode-select --install`; `build-essential` (Debian/Ubuntu) |
+| Python | 3.13+ for the demo IRCTC backend; 3.9+ for `tests/demo_e2e.py` |
+| Docker | only for the governance E2E suite's default mode and the OAuth E2E |
 
 > Native build tools are required by `isolated-vm` (V8 sandbox).
 
@@ -43,17 +45,22 @@ npm install
 
 ```bash
 npm run typecheck     # TypeScript strict — must be clean
-npm test              # 312 unit + integration tests — must all pass
+npm run lint          # eslint — unused imports fail it
+npm test              # unit + integration: 743 passing, 1 skipped — none may fail
 ```
 
 ---
 
 ## 2. Running the Examples
 
-The demo runs three local services (product on 3001, order on 3002, tasks on 3003) plus the MCP gateway on 3333.
+The demo runs four local services (product on 3001, order on 3002, tasks on 3003, IRCTC on 3005) plus the MCP gateway on 3333. IRCTC is a Python FastAPI app; create its virtualenv once (see [`examples/demo/irctc/README.md`](examples/demo/irctc/README.md)):
 
 ```bash
-# One-command start (kills old processes, starts all services + gateway, registers cleanup trap)
+cd examples/demo/irctc && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd -
+```
+
+```bash
+# One-command start (kills old backend processes, starts all services + gateway, registers cleanup trap)
 bash examples/demo/start.sh
 ```
 
@@ -64,10 +71,13 @@ bash examples/demo/start.sh
 node examples/demo/product-service.js &
 node examples/demo/order-service.js &
 node examples/demo/task-service.js &
+(cd examples/demo/irctc && .venv/bin/python3 -m app.main) &
 
 # Terminal 2 — gateway
 npm run dev
 ```
+
+OAuth mode (billing services behind `oauth-2.1`, `jwt-validation` and `oauth-introspection`; needs Docker): `bash examples/demo/start-oauth-mode.sh`.
 
 **Smoke test (61 assertions)**
 
@@ -77,21 +87,28 @@ python3 tests/demo_e2e.py --start-services
 
 **Talk to the gateway**
 
-```bash
-# Initialize
-curl -s -X POST http://127.0.0.1:3333/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+The gateway speaks MCP **2026-07-28** only: no `initialize`, no session. Every request carries `MCP-Protocol-Version` and `Mcp-Method` headers (plus `Mcp-Name` for `tools/call`), its own bearer, and the `_meta` envelope in `params`; a request in an older protocol shape is rejected. The bearer must be a JWT or an opaque token of at least 32 base64url characters (`openssl rand -hex 32` works for the demo).
 
-# Discover registered services (bearer on every request)
+```bash
+# Discover registered services
 curl -s -X POST http://127.0.0.1:3333/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"discover_services","arguments":{}}}'
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/call" \
+  -H "Mcp-Name: discover_services" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+    "name":"discover_services","arguments":{},
+    "_meta":{
+      "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+      "io.modelcontextprotocol/clientInfo":{"name":"curl","version":"0"},
+      "io.modelcontextprotocol/clientCapabilities":{}
+    }
+  }}'
 ```
+
+More requests (`server/discover`, `search_code`, `api_execute`): [`docs/getting-started.md`](docs/getting-started.md#step-3--try-it-from-the-terminal).
 
 **Expected response shape from `api.request()`:** `{ data, status, ok }` — never `{ body }`. Full contract and error handling: [`docs/skill-authoring.md`](docs/skill-authoring.md#apirequest-contract).
 
@@ -100,30 +117,39 @@ curl -s -X POST http://127.0.0.1:3333/mcp \
 ## 3. Project Layout
 
 ```
-src/            All gateway source; tsconfig rootDir, compiled to dist/.
-  index.ts      Process entry — validates config, boots the gateway.
-  core/         Pure types, constants, config schema, shared utilities. No runtime deps.
-  runtime/      Gateway server, service registry, sandbox executor, API client. Imports spi/ only.
-  tools/        MCP tool handlers (discover_services, api_execute, …). Imports runtime/ + spi/.
-  spi/          Abstract contracts: ConnectorAPI, AuthMiddleware, PermissionGuard, SpecLoader, …
-  adapters/     Concrete implementations: in-memory, Memcache, Couchbase, static-token, oauth-introspection
-  wiring/       Composition root — strategy factories + service auth/circuit-breaker resolver.
-                Imports adapters/ + spi/ to wire concrete strategies; runtime/ re-exports from here.
-services/       Your service definitions — spec.yaml + config.json + skills/*.md (add yours here)
+src/              All gateway source; tsconfig rootDir, compiled to dist/.
+  index.ts        Process entry — validates config, boots the gateway.
+  core/           Types, constants, config schema (zod), shared utilities. Imports nothing else in src/.
+  spi/            Contracts: ConnectorAPI, AuthMiddleware, PermissionGuard, SpecLoader, CodeModeStore,
+                  GovernanceRuleSource, AuditSink, …
+  adapters/       Concrete implementations: token caches, idempotency, circuit breaker, auth strategies,
+                  execution stores (in-memory, file, memcache), console audit sink
+  wiring/         Composition root — strategy builders, register*Backend, service auth/circuit-breaker resolver.
+  runtime/        Gateway boot, HTTP/stdio transports, service registry, sandbox + host bridge, API client,
+                  execution (journal, replay, approvals), governance (resolver, rules, evaluator).
+  tools/          The five MCP tool handlers (discover_services … api_execute).
+services/         Service definitions — spec + config.json + skills/*.md (add yours here)
+governance/rules/ Governance Rule files (README.md = format; examples/ is documentation, not loaded)
 examples/
-  demo/         Runnable local backends + start.sh
-  01-06/        Scenario guides (README only)
-tests/          Vitest unit + integration tests; demo_e2e.py smoke test
-docs/           architecture.md, request-lifecycle.md
+  demo/           Runnable local backends (Node + the Python IRCTC app), start.sh, start-oauth-mode.sh
+  01-07/          Scenario guides (07-oauth also holds the mock AS docker-compose)
+tests/
+  unit/, integration/   Vitest (npm test)
+  e2e/            Governance E2E suite: client, mock API, fixtures, runner (npm run test:governance)
+  postman/        Builds and runs the Postman collections
+  demo_e2e.py     Python smoke test against the demo
+postman/          Postman collections (Harbor, mcp-governance) + environments
+docker/governance-e2e/  Compose file for the governance suite
+docs/             Architecture, request lifecycle, tool layer, configuration, governance, guides
 ```
 
-**Key layering rule:** `src/runtime/` must never import from `src/adapters/` directly — only from `src/spi/` interfaces. `src/wiring/` is the only layer that imports both `src/adapters/` and `src/spi/` — it is the composition root. `src/core/` has zero upward dependencies.
+**Key layering rule:** `src/runtime/` must never import from `src/adapters/` directly — it uses `src/spi/` interfaces and gets concrete strategies from `src/wiring/`. `src/wiring/` is the only layer that imports both `src/adapters/` and `src/spi/` — it is the composition root. `src/core/` has zero upward dependencies.
 
 ---
 
 ## 4. How to Add a Connector
 
-Connectors are concrete implementations of SPI interfaces. Two common extension points:
+Connectors are concrete implementations of SPI interfaces. The common extension points:
 
 ### 4a. Token Cache Backend
 
@@ -138,7 +164,7 @@ Extend `AbstractTokenCache` — do not implement `TokenCacheStrategy` directly. 
 // Copyright 2026 Contributors to the Harbor project.
 
 import { AbstractTokenCache, type CacheEntry } from '../../../spi/auth/abstract-token-cache.js'
-import type { Logger } from '../../../runtime/observability/logger.js'
+import type { Logger } from '../../../core/types/logger.types.js'
 
 export class RedisTokenCache extends AbstractTokenCache {
   readonly name = 'redis'
@@ -169,26 +195,28 @@ export class RedisTokenCache extends AbstractTokenCache {
 }
 ```
 
-2. Register it at startup — **no framework changes required**:
+2. Register it at startup, before `createMcpGateway` runs — in your own entry file next to `src/index.ts` — **no framework changes required**:
 
 ```typescript
-import { registerTokenCacheBackend } from './runtime/gateway/strategy-builders.js'
+import { registerTokenCacheBackend } from './wiring/strategy-builders.js'
 import { RedisTokenCache } from './adapters/auth/strategies/redis-token-cache.strategy.js'
 
 registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCache(config, ttlMs, logger))
 ```
 
-3. Add `'redis'` to the `allowedTypes` array in `src/core/config/config.ts` at the `TOKEN_CACHE_TYPE` call site — `resolveStoreTypeConfig` validates against this list on startup and exits if the type is unrecognized.
-
-4. Activate by setting `TOKEN_CACHE_TYPE=redis` in your environment (or `.env`). The registered factory is resolved at gateway startup — no `config.json` change needed.
+3. Activate by setting `TOKEN_CACHE_TYPE=redis` in your environment (or `.env`). The config loader accepts any lower-case kebab-case name; the builder resolves it from the registry at startup and refuses a name nothing registered. The factory receives `{ type }` only — the `TOKEN_CACHE_MEMCACHE_*` / `_CB_*` variables belong to the built-in backends — so read your connection settings yourself. No `config.json` change needed.
 
 ### 4b. Idempotency Backend
 
 **Interface:** `src/core/types/idempotency.types.ts` → `IdempotencyStrategy`
 
-Same pattern — create under `src/adapters/idempotency/strategies/`, register with `registerIdempotencyBackend('postgres', ...)`.
+Same pattern — create under `src/adapters/idempotency/strategies/`, register with `registerIdempotencyBackend('postgres', ...)`. Select it gateway-wide with `IDEMPOTENCY_TYPE=postgres`, or per service with `"idempotency": { "type": "postgres", … }` in `config.json` (the factory receives that whole block). An unregistered type skips the service.
 
-### 4c. Outbound Transport (ConnectorAPI)
+### 4c. Execution Store, Audit Sink, Rule Source
+
+The Code Mode governance layer has three more registries in `src/wiring/strategy-builders.ts`: `registerExecutionStoreBackend` (`EXECUTION_STORE_TYPE`; run the contract suite in `tests/unit/execution-store.test.ts` against your store), `registerAuditSinkBackend` (`AUDIT_SINKS`) and `registerGovernanceRuleSourceBackend` (`GOVERNANCE_RULES_SOURCE`). See [`docs/code-mode-governance.md`](docs/code-mode-governance.md).
+
+### 4d. Outbound Transport (ConnectorAPI)
 
 **Interface:** `src/spi/connector/connector-api.ts` → `ConnectorAPI`
 
@@ -207,7 +235,7 @@ export class GrpcConnector implements ConnectorAPI {
 }
 ```
 
-Pass your connector instance when building service resources (see `src/runtime/server-factory.ts`).
+The `ApiClient` is built per service in `src/runtime/gateway/service-resources-factory.ts`; swap your connector in there. A custom connector replaces `ApiClient`'s retries, idempotency, circuit-failure recording and Harbor-owned outbound headers, so provide what your transport needs.
 
 ---
 
@@ -225,17 +253,16 @@ services/my-service/
     my-skill.md   ← skill definition (optional)
 ```
 
-**`config.json` skeleton**
+**`config.json` skeleton** — required, and it must contain `auth`; the folder name is the service name:
 
 ```json
 {
-  "name": "my-service",
   "description": "What this service does",
   "api": {
     "host": "localhost",
     "port": 4000,
     "requestTimeoutMs": 10000,
-    "maxRetries": 2
+    "maxRetries": 1
   },
   "auth": {
     "type": "static-token",
@@ -253,11 +280,10 @@ services/my-service/
 - `servers[0].url` is used as the upstream base URL when no `api` block is present; when `api` is set, the scanner uses `api.host`/`api.port`/`api.basePath`
 - At least one path defined
 
-**Skill file (`skills/my-skill.md`) skeleton**
+**Skill file (`skills/my-skill.md`) skeleton** — the file name is the skill id; frontmatter is optional (`title`, else the first `#` heading; `tags`):
 
 ```markdown
 ---
-id: my-skill
 title: One-line description shown to the AI
 tags: [keyword1, keyword2]
 ---
@@ -286,7 +312,18 @@ npm run dev
 curl -s -X POST http://127.0.0.1:3333/mcp \
   -H "Authorization: Bearer <YOUR_BEARER_TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"discover_services","arguments":{}}}'
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/call" \
+  -H "Mcp-Name: discover_services" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
+    "name":"discover_services","arguments":{},
+    "_meta":{
+      "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+      "io.modelcontextprotocol/clientInfo":{"name":"curl","version":"0"},
+      "io.modelcontextprotocol/clientCapabilities":{}
+    }
+  }}'
 ```
 
 ---
@@ -314,7 +351,7 @@ curl -s -X POST http://127.0.0.1:3333/mcp \
 - `src/core/` → no imports from anything else in this repo
 - `src/spi/` → may import `src/core/` only
 - `src/adapters/` → may import `src/core/` and `src/spi/` only
-- `src/runtime/` → may import `src/core/`, `src/spi/` only (not `src/adapters/` directly)
+- `src/runtime/` → may import `src/core/`, `src/spi/`, `src/wiring/` (never `src/adapters/` directly); the MCP server factory also registers the handlers from `src/tools/`
 - `src/wiring/` → may import `src/core/`, `src/spi/`, `src/adapters/` (composition root — this is the only layer that wires concrete adapters)
 - `src/tools/` → may import `src/core/`, `src/spi/`, `src/runtime/`
 
@@ -323,9 +360,10 @@ Violations get caught in review. When in doubt, check `docs/architecture.md`.
 **Tests**
 
 - Every non-trivial change needs test coverage
-- Unit tests under `tests/unit/`, integration tests under `tests/integration/`
+- Unit tests under `tests/unit/`, integration tests under `tests/integration/`; governance behaviour end to end under `tests/e2e/` (run with `npm run test:governance`, or `-- --local` without Docker)
 - Do not mock the database/cache layers in integration tests — use real in-memory strategies
-- `npm test` must pass; `npm run typecheck` must be clean
+- `npm run typecheck`, `npm run lint` and `npm test` must be clean
+- Docs are tested too: `tests/unit/doc-paths.test.ts` fails when a Markdown file cites a repository path that does not exist or an `#anchor` with no heading
 
 **Scope**
 
@@ -349,21 +387,26 @@ Violations get caught in review. When in doubt, check `docs/architecture.md`.
 
 3. Open a PR against `main`. Use the PR template — fill in **Summary**, **Test plan**, and the checklist.
 
-4. Ensure CI passes (`.github/workflows/ci.yml` runs typecheck + tests on every push).
+4. Ensure CI passes. Two workflows run:
+   - `.github/workflows/ci.yml` — every push and PR: `npm audit --audit-level=high`, typecheck, lint, `npm test`, and the Python E2E (`tests/demo_e2e.py`) including OAuth mode with a real JWT via Docker.
+   - `.github/workflows/governance-e2e.yml` — pushes and PRs that touch `src/`, `governance/`, the package or Docker files, `docker/governance-e2e/`, `tests/e2e/`, `tests/postman/` or the governance Postman collection: typechecks and lints the E2E suite, builds the production image and runs `npm run test:governance` (E2E + Postman).
 
 5. Address review feedback — push to the same branch; do not force-push after a review starts.
 
-6. Once approved, a maintainer squash-merges.
+6. Once approved, a maintainer merges.
 
 **Commit message format**
 
 ```
-<type>: <short summary in present tense>
+<type>(<scope>): <short summary in present tense>
 
-Optional body — explain the why, not the what.
+Optional body — explain the why, not the what: the old behaviour, the new
+behaviour, and any pinned test the change had to update.
 ```
 
-Types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`
+Types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`. The scope is optional and names the area (`governance`, `http`, `auth`, `sandbox`, `config`, …), e.g. `fix(api-client): never re-send a POST after a timeout`.
+
+Commit messages carry **no attribution trailers** — no `Co-authored-by:`, `Signed-off-by:`, `Generated with …` or other tool signatures, even if a tool adds them by default ([`AGENTS.md`](AGENTS.md) §7).
 
 ---
 
@@ -414,8 +457,8 @@ These are isolated, well-scoped tasks with clear acceptance criteria. Each links
 ### Connectors
 
 **Redis token-cache connector** (`good-first-issue`, `connector`)
-Implement `src/adapters/auth/strategies/redis-token-cache.strategy.ts` using `ioredis`.
-Interface: `src/core/types/auth.types.ts → TokenCacheStrategy`.
+Implement `src/adapters/auth/strategies/redis-token-cache.strategy.ts` by extending `AbstractTokenCache` (`src/spi/auth/abstract-token-cache.ts`).
+`ioredis` would be a new production dependency — ask in the issue before adding it.
 Register via `registerTokenCacheBackend('redis', ...)`.
 Include tests under `tests/unit/adapters/`.
 
@@ -443,7 +486,7 @@ Example: a `bulk-task-reporter` skill that calls `GET /api/v1/tasks` and summari
 ### Docker / Infrastructure
 
 **`docker-compose.yml` for one-command demo** (`good-first-issue`, `enhancement`)
-Create `examples/demo/docker-compose.yml` that starts all three demo services + the gateway.
+Create `examples/demo/docker-compose.yml` that starts the four demo services (including the Python IRCTC app) + the gateway.
 Acceptance: `docker compose up` from the repo root starts a working demo accessible on port 3333.
 
 **Node version guard in `start.sh`** (`good-first-issue`, `enhancement`)
