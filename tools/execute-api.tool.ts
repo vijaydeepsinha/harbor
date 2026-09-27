@@ -233,7 +233,7 @@ async () => {
         )
         if (isToolError(authResult)) return authResult
         const { payload: tokenPayload, invalidate } = authResult
-        userIdHash = hashAuthenticatedPrincipal(tokenPayload)
+        userIdHash = hashAuthenticatedPrincipal(tokenPayload, clientToken)
 
         logger.info({ correlationId, service, step: '2/4 code' }, `${LOG_PREFIX.MCP} JavaScript code received from AI client`)
         logger.debug({ correlationId, service, codeReceived: code }, `${LOG_PREFIX.MCP} code payload`)

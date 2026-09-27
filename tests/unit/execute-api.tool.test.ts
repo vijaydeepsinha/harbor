@@ -353,7 +353,7 @@ describe('registerExecuteApiTool', () => {
     expect(audit.endpointsAccessed).toEqual(['GET /campaigns', 'PATCH /orders/{id}'])
   })
 
-  it('hashes the raw access_token when metadata.userId is absent', async () => {
+  it('hashes the raw inbound bearer, not the rotating access_token, when metadata.userId is absent', async () => {
     const svc = makeResources({
       name: 'tasks',
       validate: async () => goodToken
@@ -375,8 +375,10 @@ describe('registerExecuteApiTool', () => {
     )
 
     const audit = vi.mocked(writeAuditRecord).mock.calls[0]![0]
-    const expected = createHash('sha256').update(goodToken.access_token).digest('hex')
-    expect(audit.userIdHash).toBe(expected)
+    // 'abc' is the raw bearer this tool was registered with. The middleware's
+    // `access_token` is deliberately not the identity — it rotates on refresh.
+    expect(audit.userIdHash).toBe(createHash('sha256').update('abc').digest('hex'))
+    expect(audit.userIdHash).not.toBe(createHash('sha256').update(goodToken.access_token).digest('hex'))
   })
 
   it('PermissionDeniedError ⇒ OUTCOME.PERMISSION_DENIED, audit with userIdHash="unknown", no CB_OPENS, no SANDBOX_ERRORS', async () => {
