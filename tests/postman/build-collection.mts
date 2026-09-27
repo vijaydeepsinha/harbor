@@ -182,7 +182,7 @@ const collection = {
         T.noRpcError, T.complete, T.notIsError, T.execId, T.status('COMPLETED'),
         "pm.test('backend answered 200', () => pm.expect(payload.status).to.eql(200));",
         T.capture('executionId', "meta['harbor/execution-id']")
-      ]),
+      ], { headers: { 'X-Harbor-Client-ID': 'postman-client-7' } }),
       inspect('GET /executions/{id} — decision ALLOW persisted', 'executionId', [
         "pm.test('execution COMPLETED', () => pm.expect(insp.execution.status).to.eql('COMPLETED'));",
         "pm.test('policy decision is ALLOW by allow-read-customer', () => { pm.expect(insp.decisions[0].decision).to.eql('ALLOW'); pm.expect(insp.decisions[0].decidingRule).to.eql('allow-read-customer'); });",
@@ -191,7 +191,8 @@ const collection = {
       ]),
       downstream('Downstream — exactly one GET /customers/customer-001 as alice', '?method=GET&path=/customers/customer-001', [
         "pm.test('backend received exactly 1 request', () => pm.expect(calls).to.have.length(1));",
-        "pm.test('the caller identity was forwarded', () => pm.expect(calls[0].identity).to.eql('alice'));"
+        "pm.test('the caller identity was forwarded', () => pm.expect(calls[0].identity).to.eql('alice'));",
+        "pm.test('Harbor-owned headers are stamped', () => { pm.expect(calls[0].headers['x-correlation-id']).to.be.a('string'); pm.expect(calls[0].headers['x-mcp-tool']).to.eql('api_execute'); pm.expect(calls[0].headers['x-mcp-service']).to.eql('commerce'); pm.expect(calls[0].headers['x-harbor-server-id']).to.eql('HARBOR_GATEWAY'); pm.expect(calls[0].headers['x-harbor-client-id']).to.eql('postman-client-7'); });"
       ])
     ]),
 
@@ -337,7 +338,7 @@ const collection = {
       downstream('Downstream after resume — the earlier calls were NOT repeated', '', ["pm.test('exactly one new call', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001','POST /orders','POST /payments']));"]),
       inspect('Inspect — journal holds the replayed responses', 'replayExecutionId', [
         "pm.test('activity #2 response persisted', () => pm.expect(insp.activities[1].response.data.id).to.eql('order-001'));",
-        "pm.test('original code persisted verbatim', () => pm.expect(insp.execution.originalCode).to.be.a('string'));",
+        "pm.test('terminal execution drops source code by default', () => pm.expect(insp.execution).to.not.have.property('originalCode'));",
         "pm.test('history ends with EXECUTION:COMPLETED', () => { const last = insp.history[insp.history.length - 1]; pm.expect(last.kind + ':' + last.event).to.eql('EXECUTION:COMPLETED'); });"
       ]),
       mcpItem({ name: 'Replay a COMPLETED execution — refused, result comes from the store', method: 'tools/call', toolName: 'api_execute', token: '{{tokenAlice}}',
@@ -373,6 +374,10 @@ const collection = {
       mcpItem({ name: 'No Authorization header → 401', method: 'server/discover', params: {}, tests: ["pm.test('401 MISSING_TOKEN', () => { pm.response.to.have.status(401); pm.expect(pm.response.json().code).to.eql('MISSING_TOKEN'); });"] }),
       mcpItem({ name: 'Weak bearer → 401', method: 'server/discover', token: 'short', params: {}, tests: ["pm.test('401 TOKEN_INVALID', () => { pm.response.to.have.status(401); pm.expect(pm.response.json().code).to.eql('TOKEN_INVALID'); });"] }),
       apiExecute('alice starts a high-value order (pauses)', 'commerce', highValue, [T.paused, T.capture('secExecutionId', "meta['harbor/execution-id']"), T.capture('secApprovalId', "meta['harbor/approval-id']"), T.capture('secRequestState', 'result.requestState')]),
+      httpItem({ name: 'GET Alice\'s execution as Bob → 403', method: 'GET', url: '{{mcpBaseUrl}}/executions/{{secExecutionId}}', token: '{{tokenBob}}', tests: ["pm.test('403 AUTH_FAILED', () => { pm.response.to.have.status(403); pm.expect(pm.response.json().code).to.eql('AUTH_FAILED'); });"] }),
+      httpItem({ name: 'POST Alice\'s approval as Bob → 403', method: 'POST', url: '{{mcpBaseUrl}}/executions/{{secExecutionId}}/approvals/{{secApprovalId}}', token: '{{tokenBob}}', body: { action: 'accept', approve: true }, tests: ["pm.test('403 AUTH_FAILED', () => { pm.response.to.have.status(403); pm.expect(pm.response.json().code).to.eql('AUTH_FAILED'); });"] }),
+      httpItem({ name: 'GET execution with a weak bearer → 401', method: 'GET', url: '{{mcpBaseUrl}}/executions/{{secExecutionId}}', token: 'short', tests: ["pm.test('401', () => pm.response.to.have.status(401));"] }),
+      inspect('Alice still sees a pending approval after rejected requests', 'secExecutionId', ["pm.test('approval remains PENDING', () => pm.expect(insp.approvals[0].status).to.eql('PENDING'));"]),
       mcpItem({ name: 'Tampered requestState → -32602 before the tool runs', method: 'tools/call', toolName: 'api_execute', token: '{{tokenAlice}}',
         params: { name: 'api_execute', arguments: { service: 'commerce', code: highValue }, requestState: '{{secRequestState}}TAMPERED', inputResponses: { approval: { action: 'accept', content: { approve: true } } } },
         tests: [T.rpcError(-32602)] }),

@@ -10,3 +10,10 @@ rules:
     version: 1
     match: { service: commerce, operation: createPayment }
     action: { type: REQUIRE_APPROVAL, reason: Payments are reviewed on the strict instance }
+
+  - name: strict-high-value-order-requires-approval
+    version: 1
+    match: { service: commerce, operation: createOrder }
+    conditions:
+      amount: { greater_than: 10000 }
+    action: { type: REQUIRE_APPROVAL, reason: High-value orders are reviewed on the strict instance }

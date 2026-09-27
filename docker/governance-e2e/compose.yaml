@@ -72,7 +72,7 @@ services:
     ports:
       - "${E2E_HARBOR_PORT:-3333}:3333"
 
-  # Fail-closed instance: default DENY with a one-rule set, short requestState
+  # Fail-closed instance: default DENY with a small rule set, short requestState
   # TTL so expiry is testable, in-memory store.
   harbor-strict:
     <<: *harbor-common

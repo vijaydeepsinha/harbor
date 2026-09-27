@@ -37,7 +37,7 @@ export interface DecisionView {
 export interface HistoryEntry { at: string; sequence?: number; kind: string; event: string; detail?: string }
 export interface Inspection {
   execution: {
-    executionId: string; service: string; originalCode: string; status: string; userIdHash: string
+    executionId: string; service: string; originalCode?: string; status: string; userIdHash: string
     createdAt: string; updatedAt: string; currentActivity: number; runCount: number
     terminalReason?: { code: string; message: string }; pendingApprovalId?: string; result?: unknown
   }

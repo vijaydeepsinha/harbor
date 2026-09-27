@@ -192,8 +192,8 @@ describe('approval required', () => {
       const c = s().client('alice', { capabilities: {} })
       const out = expectToolError(await c.apiExecute('commerce', program), ERR.APPROVAL_REQUIRED)
       s().track(out.meta.executionId)
-      const early = expectToolError(await c.resumeByMeta('commerce', program, out.meta.executionId!), ERR.EXECUTION_NOT_RESUMABLE)
-      expect(early.message).toContain('WAITING_APPROVAL')
+      const early = expectToolError(await c.resumeByMeta('commerce', program, out.meta.executionId!), ERR.APPROVAL_REQUIRED)
+      expect(early.message).toContain('still pending')
       expect(await s().mock.requests()).toHaveLength(0)
     })
 

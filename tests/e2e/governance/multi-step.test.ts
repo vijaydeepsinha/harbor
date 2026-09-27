@@ -171,7 +171,7 @@ describe('multi-step workflow with two approval points', () => {
     expectToolError(db, ERR.GOVERNANCE_DENIED)
     const orders = (await s().mock.requests({ method: 'POST', path: '/orders' })).map(r => r.identity)
     expect(orders).toEqual(['alice']) // only alice's order was placed
-    expect((await s().admin.inspect(b.executionId)).execution.status).toBe(EXECUTION_STATUS.DENIED)
+    expect((await s().adminAs('bob').inspect(b.executionId)).execution.status).toBe(EXECUTION_STATUS.DENIED)
     expect((await s().admin.inspect(a.executionId)).execution.status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
   })
 })

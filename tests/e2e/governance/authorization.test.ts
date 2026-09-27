@@ -63,15 +63,16 @@ describe('authorization of approvals and resumes', () => {
     expect(await s().mock.requests()).toHaveLength(0)
   })
 
-  it('should_refuse_a_stale_request_state_from_an_earlier_activity_once_the_execution_has_moved_on', async () => {
+  it('should_not_apply_a_stale_answer_and_reissue_the_current_approval', async () => {
     const c = s().client('alice')
     const p1 = expectPaused(await c.apiExecute('commerce', programs.fourStepWorkflow(RESOURCES.customerAllowed, AMOUNTS.highValue)))
     s().track(p1.executionId)
     const p2 = expectPaused(await c.answerApproval(p1, { action: 'accept' }))
     expect(await s().mock.calls()).toEqual(['GET /customers/customer-001', 'POST /orders'])
     // Replay the *first* approval's state (activity #2, already decided) while #3 waits.
-    const stale = expectToolError(await c.answerApproval(p1, { action: 'accept' }), ERR.EXECUTION_NOT_RESUMABLE)
-    expect(stale.message).toContain('WAITING_APPROVAL')
+    const stale = expectPaused(await c.answerApproval(p1, { action: 'accept' }))
+    expect(stale.executionId).toBe(p2.executionId)
+    expect(stale.approvalId).toBe(p2.approvalId)
     expect(await s().mock.calls()).toEqual(['GET /customers/customer-001', 'POST /orders']) // nothing moved
     const insp = await s().admin.inspect(p1.executionId)
     expect(insp.approvals.map(a => [a.activitySequence, a.status])).toEqual([[2, APPROVAL_STATUS.APPROVED], [3, APPROVAL_STATUS.PENDING]])
@@ -135,18 +136,17 @@ describe('authorization of approvals and resumes', () => {
     expect(await s().mock.requests()).toHaveLength(0)
   })
 
-  describe('known gaps pinned as documented in docs/code-mode-governance.md §14 (flip these when the approver model lands)', () => {
-    it('known_gap_any_valid_bearer_can_inspect_and_decide_another_principals_execution_over_http', async () => {
-      const alice = s().client('alice', { capabilities: {} })
-      const out = expectToolError(await alice.apiExecute('commerce', highValue), ERR.APPROVAL_REQUIRED)
-      s().track(out.meta.executionId)
-      const bobAdmin = s().adminAs('bob')
-      expect((await bobAdmin.inspectRaw(out.meta.executionId!)).status).toBe(200)
-      const decided = await bobAdmin.decide(out.meta.executionId!, out.meta.approvalId!, { action: 'accept', approve: true })
-      expect(decided.status).toBe(200)
-      // The *resume* is still bound to alice — bob cannot run it.
-      expectToolError(await s().client('bob', { capabilities: {} }).resumeByMeta('commerce', highValue, out.meta.executionId!), ERR.EXECUTION_NOT_RESUMABLE)
-      expect(await s().mock.requests()).toHaveLength(0)
-    })
+  it('should_bind_http_inspection_and_decisions_to_the_execution_owner', async () => {
+    const alice = s().client('alice', { capabilities: {} })
+    const out = expectToolError(await alice.apiExecute('commerce', highValue), ERR.APPROVAL_REQUIRED)
+    s().track(out.meta.executionId)
+    const bobAdmin = s().adminAs('bob')
+    expect((await bobAdmin.inspectRaw(out.meta.executionId!)).status).toBe(403)
+    const denied = await bobAdmin.decide(out.meta.executionId!, out.meta.approvalId!, { action: 'accept', approve: true })
+    expect(denied.status).toBe(403)
+    expect((denied.body as { code: string }).code).toBe('AUTH_FAILED')
+    expect((await s().admin.inspect(out.meta.executionId!)).approvals[0]!.status).toBe(APPROVAL_STATUS.PENDING)
+    expectToolError(await s().client('bob', { capabilities: {} }).resumeByMeta('commerce', highValue, out.meta.executionId!), ERR.EXECUTION_NOT_RESUMABLE)
+    expect(await s().mock.requests()).toHaveLength(0)
   })
 })

@@ -55,12 +55,15 @@ describe('replay of the activity journal', () => {
     const c = s().client('alice')
     const paused = expectPaused(await c.apiExecute('commerce', original))
     s().track(paused.executionId)
+    expect((await s().admin.inspect(paused.executionId)).execution.originalCode).toBe(original)
     const replacement = programs.createAdminUser('mallory') // would be a different program entirely
     const done = expectCompleted(await c.answerApproval(paused, { action: 'accept' }, { code: replacement }))
     expect(done.value).toMatchObject({ orderId: 'order-001', paymentId: 'payment-001' })
     expect(await s().mock.calls()).toEqual(['GET /customers/customer-001', 'POST /orders', 'POST /payments'])
     expect(await s().mock.count('POST', '/admin/users')).toBe(0)
-    expect((await s().admin.inspect(paused.executionId)).execution.originalCode).toBe(original)
+    // The program text is dropped once terminal (EXECUTION_CODE_RETENTION=DROP), so the
+    // paused snapshot above is where the persisted program can still be compared.
+    expect((await s().admin.inspect(paused.executionId)).execution).not.toHaveProperty('originalCode')
   })
 
   it('should_also_ignore_replacement_code_on_the_meta_resume_path', async () => {

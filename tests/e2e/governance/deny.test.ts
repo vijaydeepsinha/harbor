@@ -61,7 +61,7 @@ describe('denied operations', () => {
   it('should_deny_admin_user_creation_on_the_ops_service', async () => {
     const out = expectToolError(await s().client('admin').apiExecute('ops', programs.createAdminUser('mallory')), ERR.GOVERNANCE_DENIED)
     s().track(out.meta.executionId)
-    const insp = await s().admin.inspect(out.meta.executionId!)
+    const insp = await s().adminAs('admin').inspect(out.meta.executionId!)
     expect(insp.decisions[0]).toMatchObject({ decision: DECISION.DENY, decidingRule: 'deny-admin-user-creation' })
     expect(await s().mock.requests()).toHaveLength(0)
     expect((await s().mock.state())['adminUsers']).toEqual([])

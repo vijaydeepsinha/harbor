@@ -18,7 +18,9 @@ describe('allowed operations', () => {
   const s = useScenario()
 
   it('should_execute_downstream_exactly_once_when_a_rule_allows_the_read', async () => {
-    const out = expectCompleted(await s().client('alice').apiExecute('commerce', programs.readCustomer(RESOURCES.customerAllowed)))
+    const out = expectCompleted(await s().client('alice').apiExecute('commerce', programs.readCustomer(RESOURCES.customerAllowed), {
+      headers: { 'x-harbor-client-id': 'e2e-client-7' }
+    }))
     s().track(out.meta.executionId)
     expect(out.value).toMatchObject({ status: 200, ok: true, customer: { id: 'customer-001' } })
     expect(out.meta.executionStatus).toBe(EXECUTION_STATUS.COMPLETED)
@@ -43,14 +45,18 @@ describe('allowed operations', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]!.identity).toBe('alice')
     expect(calls[0]!.headers['x-mcp-service']).toBe('commerce')
+    expect(calls[0]!.headers['x-mcp-tool']).toBe('api_execute')
+    expect(calls[0]!.headers['x-correlation-id']).toBeTruthy()
+    expect(calls[0]!.headers['x-harbor-server-id']).toBe('HARBOR_GATEWAY')
+    expect(calls[0]!.headers['x-harbor-client-id']).toBe('e2e-client-7')
     expect(calls[0]!.headers['x-idempotency-key']).toMatch(/-1$/)
   })
 
-  it('should_allow_by_the_configured_default_when_no_rule_matches', async () => {
+  it('should_allow_an_ungoverned_call_when_no_rule_targets_it', async () => {
     const out = expectCompleted(await s().client('alice').apiExecute('commerce', programs.ping()))
     s().track(out.meta.executionId)
     const insp = await s().admin.inspect(out.meta.executionId!)
-    expect(insp.decisions[0]).toMatchObject({ decision: DECISION.ALLOW, reason: 'NO_MATCHING_RULE', matchedRules: [], ruleVersions: [] })
+    expect(insp.decisions[0]).toMatchObject({ decision: DECISION.ALLOW, reason: 'NO_GOVERNANCE', matchedRules: [], ruleVersions: [] })
     expect(insp.decisions[0]).not.toHaveProperty('decidingRule')
     expect(await s().mock.count('GET', '/ping')).toBe(1)
   })
@@ -64,7 +70,10 @@ describe('allowed operations', () => {
     const seen = (await s().mock.requests({ path: '/ping' })).map(r => r.identity)
     expect(seen).toEqual(['bob', 'finance-user'])
     // Different bearers are different principals: the executions are not the same owner.
-    const [b, f] = await Promise.all([s().admin.inspect(asBob.meta.executionId!), s().admin.inspect(asFinance.meta.executionId!)])
+    const [b, f] = await Promise.all([
+      s().adminAs('bob').inspect(asBob.meta.executionId!),
+      s().adminAs('finance-user').inspect(asFinance.meta.executionId!)
+    ])
     expect(b.execution.userIdHash).not.toBe(f.execution.userIdHash)
   })
 
@@ -93,7 +102,7 @@ describe('allowed operations', () => {
     const out = expectCompleted(await s().client('admin').apiExecute('ops', programs.listAdminUsers()))
     s().track(out.meta.executionId)
     expect(out.value).toMatchObject({ status: 200, count: 0 })
-    const insp = await s().admin.inspect(out.meta.executionId!)
+    const insp = await s().adminAs('admin').inspect(out.meta.executionId!)
     expect(insp.execution.service).toBe('ops')
     expect(insp.decisions[0]).toMatchObject({ decision: DECISION.ALLOW, decidingRule: 'allow-ops-reads' })
     expect(insp.activities[0]!.request.operationId).toBe('listAdminUsers')

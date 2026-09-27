@@ -48,6 +48,27 @@ describe('idempotency of approvals and resumes', () => {
     expect(await s().mock.count('POST', '/orders')).toBe(1)
   })
 
+  it('should_allow_only_one_of_two_simultaneous_http_approval_decisions', async () => {
+    const c = s().client('alice', { capabilities: {} })
+    const out = expectToolError(await c.apiExecute('commerce', highValue), ERR.APPROVAL_REQUIRED)
+    s().track(out.meta.executionId)
+    const id = out.meta.executionId!, ap = out.meta.approvalId!
+    const [accept, decline] = await Promise.all([
+      s().admin.decide(id, ap, { action: 'accept', approve: true }),
+      s().admin.decide(id, ap, { action: 'decline' })
+    ])
+    const winner = [accept, decline].find(result => result.status === 200)
+    const loser = [accept, decline].find(result => result.status !== 200)
+    expect(winner).toBeDefined()
+    expect(loser?.status).toBe(409)
+    expect(['APPROVAL_ALREADY_DECIDED', 'EXECUTION_LOCKED']).toContain((loser?.body as { code: string }).code)
+    const outcome = (winner?.body as { outcome: string }).outcome
+    const inspection = await s().admin.inspect(id)
+    expect(inspection.approvals[0]!.status).toBe(outcome === 'APPROVED' ? APPROVAL_STATUS.APPROVED : APPROVAL_STATUS.REJECTED)
+    expect(inspection.execution.status).toBe(outcome === 'APPROVED' ? EXECUTION_STATUS.WAITING_APPROVAL : EXECUTION_STATUS.DENIED)
+    expect(await s().mock.requests()).toHaveLength(0)
+  })
+
   it('should_refuse_a_duplicate_meta_resume_after_completion', async () => {
     const c = s().client('alice', { capabilities: {} })
     const out = expectToolError(await c.apiExecute('commerce', highValue), ERR.APPROVAL_REQUIRED)

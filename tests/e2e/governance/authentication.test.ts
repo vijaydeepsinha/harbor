@@ -61,7 +61,7 @@ describe('authentication', () => {
     const out = expectCompleted(await s().client('untrusted-user').apiExecute('commerce', programs.readCustomer('customer-001')))
     s().track(out.meta.executionId)
     expect(out.value).toMatchObject({ status: 401, ok: false })
-    const insp = await s().admin.inspect(out.meta.executionId!)
+    const insp = await s().adminAs('untrusted-user').inspect(out.meta.executionId!)
     expect(insp.activities[0]).toMatchObject({ status: ACTIVITY_STATUS.COMPLETED, response: { status: 401, ok: false } }) // explicit outcome, replayable
     const calls = await s().mock.requests()
     expect(calls).toHaveLength(1) // a 401 is not retried
@@ -84,8 +84,8 @@ describe('authentication', () => {
     const a = expectCompleted(await s().client('alice').apiExecute('commerce', programs.ping()))
     const b = expectCompleted(await s().client('bob').apiExecute('commerce', programs.ping()))
     s().track(a.meta.executionId); s().track(b.meta.executionId)
-    const ia = await s().admin.inspect(a.meta.executionId!)
-    const ib = await s().admin.inspect(b.meta.executionId!)
+    const ia = await s().adminAs('alice').inspect(a.meta.executionId!)
+    const ib = await s().adminAs('bob').inspect(b.meta.executionId!)
     expect(ia.execution.userIdHash).toMatch(/^[0-9a-f]{64}$/)
     expect(ia.execution.userIdHash).not.toBe(ib.execution.userIdHash)
     expect(JSON.stringify(ia)).not.toContain(IDENTITIES.alice) // the raw bearer is never persisted

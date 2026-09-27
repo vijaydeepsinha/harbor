@@ -5,7 +5,7 @@
  * RG-011 default decision · RG-025 requestState TTL · RG-026 fail closed.
  *
  * GIVEN the strict instance: GOVERNANCE_DEFAULT_DECISION=DENY, a one-rule
- * set (ping allowed, payments need approval) and a 3-second requestState TTL.
+ * set (ping allowed, high-value orders need approval) and a 3-second requestState TTL.
  */
 import { describe, it, expect } from 'vitest'
 import { useScenario } from '../helpers/diagnostics.js'
@@ -13,13 +13,13 @@ import { expectCompleted, expectPaused, expectRpcError, expectToolError } from '
 import { APPROVAL_STATUS, DECISION, ERR, EXECUTION_STATUS, env } from '../helpers/env.js'
 import { sleepUntil } from '../helpers/wait.js'
 import * as programs from '../fixtures/programs.js'
-import { RESOURCES } from '../fixtures/identities.js'
+import { AMOUNTS, RESOURCES } from '../fixtures/identities.js'
 
 describe.skipIf(!env.strictBaseUrl)('fail-closed instance (default DENY, short requestState TTL)', () => {
   const s = useScenario()
 
-  it('should_deny_an_operation_no_rule_matches_when_the_default_decision_is_deny', async () => {
-    const out = expectToolError(await s().strictClient('alice').apiExecute('commerce', programs.readCustomer(RESOURCES.customerAllowed)), ERR.GOVERNANCE_DENIED)
+  it('should_deny_a_targeted_operation_when_no_rule_conditions_match_and_the_default_is_deny', async () => {
+    const out = expectToolError(await s().strictClient('alice').apiExecute('commerce', programs.createOrder(RESOURCES.customerAllowed, AMOUNTS.normal)), ERR.GOVERNANCE_DENIED)
     expect(out.message).toContain('NO_MATCHING_RULE')
     const insp = await s().strictAdmin().inspect(out.meta.executionId!)
     expect(insp.execution.status).toBe(EXECUTION_STATUS.DENIED)
@@ -46,7 +46,7 @@ describe.skipIf(!env.strictBaseUrl)('fail-closed instance (default DENY, short r
     const c = s().strictClient('alice')
     const paused = expectPaused(await c.apiExecute('commerce', programs.slowPayment(0)))
     const mintedAt = Date.now()
-    await sleepUntil(mintedAt + 3500) // TTL is 3 s on this instance — a clock predicate, not a race
+    await sleepUntil(mintedAt + 4500) // The SDK encodes expiry in whole seconds, so wait beyond the 3 s TTL boundary.
     expectRpcError(await c.answerApproval(paused, { action: 'accept' }), -32602)
     expect(await s().mock.requests()).toHaveLength(0)
     const admin = s().strictAdmin()

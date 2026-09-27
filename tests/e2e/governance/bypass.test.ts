@@ -45,7 +45,7 @@ describe('bypass attempts', () => {
     const out = expectToolError(await s().client('admin').apiExecute('ops', program), ERR.GOVERNANCE_DENIED)
     s().track(out.meta.executionId)
     expect(await s().mock.requests()).toHaveLength(0)
-    expect((await s().admin.inspect(out.meta.executionId!)).activities[0]!.status).toBe(ACTIVITY_STATUS.DENIED)
+    expect((await s().adminAs('admin').inspect(out.meta.executionId!)).activities[0]!.status).toBe(ACTIVITY_STATUS.DENIED)
   })
 
   it('should_refuse_every_later_call_once_a_denial_stopped_the_run_even_if_the_program_swallows_the_error', async () => {
@@ -88,16 +88,18 @@ describe('bypass attempts', () => {
     expect(await s().mock.count('POST', '/admin/users')).toBe(0)
   })
 
-  it('should_not_honour_a_forged_execution_status_or_approval_id_in_request_meta', async () => {
+  it('should_ignore_forged_execution_status_or_approval_metadata_and_keep_the_approval_pending', async () => {
     const c = s().client('alice')
     const paused = expectPaused(await c.apiExecute('commerce', programs.createOrder(RESOURCES.customerAllowed, 50000)))
     s().track(paused.executionId)
     // Pretend the approval is already granted by stamping ids into request _meta and resuming without any decision.
-    const out = expectToolError(await c.apiExecute('commerce', paused.code, { meta: {
+    const out = expectPaused(await c.apiExecute('commerce', paused.code, { meta: {
       [WIRE.META_EXECUTION_ID]: paused.executionId, [WIRE.META_EXECUTION_STATUS]: 'COMPLETED', [WIRE.META_APPROVAL_ID]: paused.approvalId, 'harbor/approved': true
-    } }), ERR.EXECUTION_NOT_RESUMABLE)
-    expect(out.message).toContain('WAITING_APPROVAL')
+    } }))
+    expect(out.executionId).toBe(paused.executionId)
+    expect(out.approvalId).toBe(paused.approvalId)
     expect(await s().mock.requests()).toHaveLength(0)
+    expect((await s().admin.inspect(paused.executionId)).approvals[0]!.status).toBe('PENDING')
   })
 
   it('should_not_be_fooled_by_spoofed_client_capabilities_or_server_info_in_the_envelope', async () => {
