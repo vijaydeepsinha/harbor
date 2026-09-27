@@ -376,11 +376,14 @@ a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
 - `requestState` binds the principal via `userIdHash` inside the sealed
   payload and the JSON-RPC method via the codec; it is not bound to the
   transport bearer itself.
-- `/executions` accepts any bearer the gateway would accept on `/mcp`; there
-  is no approver role model yet.
-- The approver is the connected client's user (elicitation) or whoever can
-  reach the HTTP endpoint — separation of requester and approver is policy
-  for a later iteration.
+- `/executions` inspection and HTTP approval decisions are restricted to the
+  authenticated principal that owns the execution. A separate approver role
+  or requester/approver separation is not implemented yet.
+- `userIdHash` is `metadata.userId` when the auth strategy maps one, otherwise
+  the raw inbound bearer — never the middleware's `access_token`, which the
+  background/sync refresh rotates behind the caller. Without a mapped
+  `userId`, two bearers for the same human are two principals, so an
+  execution paused under one bearer is not resumable under the other.
 - Replay compares method + resolved path, not bodies (by design, §29); a
   program that changes a body between runs is not detected.
 - Error-path audit lines keep the pre-existing `userIdHash: "unknown"`.

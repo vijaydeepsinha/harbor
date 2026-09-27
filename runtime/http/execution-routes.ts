@@ -114,7 +114,7 @@ async function authorizeExecution(
     throw new HttpError(500, errorCode(err, ERR.INTERNAL), 'Internal server error', undefined, { url })
   }
 
-  if (hashAuthenticatedPrincipal(authResult.payload) !== execution.userIdHash) {
+  if (hashAuthenticatedPrincipal(authResult.payload, token) !== execution.userIdHash) {
     throw new HttpError(403, ERR.AUTH_FAILED, 'Execution belongs to a different authenticated principal', undefined, {
       url,
       service: execution.service

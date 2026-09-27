@@ -182,6 +182,37 @@ describe('execution routes', () => {
     expect((await res.json() as { executionStatus: string }).executionStatus).toBe(EXECUTION_STATUS.DENIED)
   })
 
+  it('keeps the owner authorized after the middleware silently refreshes the backend token', async () => {
+    // The gateway refreshes an expiring backend token behind the caller, who
+    // keeps presenting the same bearer. Identity must follow the bearer, not
+    // the rotating `access_token`, or the owner is locked out of their own
+    // paused execution forever.
+    const registry = new ServiceRegistry()
+    const resources = makeResources('trafficking', makeConnector().connector)
+    let rotation = 0
+    resources.authMiddleware.validateRequest = async (authorization) => {
+      const token = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : ''
+      if (token !== TOKEN) throw new TokenInvalidError()
+      rotation += 1
+      return {
+        payload: { access_token: `backend-token-${rotation}`, token_type: 'bearer', expires_in: 3600, scope: '' },
+        invalidate: async () => {}
+      }
+    }
+    registry.register('trafficking', resources)
+
+    const rt = makeRuntime()
+    const first = await resources.authMiddleware.validateRequest(`Bearer ${TOKEN}`, 'c')
+    const userIdHash = hashAuthenticatedPrincipal(first.payload, TOKEN)
+    const exec = await rt.manager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
+    const { baseUrl, close } = await start(rt, registry); cleanup = close
+
+    const res = await fetch(`${baseUrl}/executions/${exec.executionId}`, {
+      headers: { Authorization: `Bearer ${TOKEN}` }
+    })
+    expect(res.status).toBe(200)
+  })
+
   it('is absent when no Code Mode runtime is configured', async () => {
     const handle = startHttpGateway({
       host: '127.0.0.1', port: 0, createMcpServer: () => { throw new Error('no') }, registry: new ServiceRegistry(), logger: silentLogger
