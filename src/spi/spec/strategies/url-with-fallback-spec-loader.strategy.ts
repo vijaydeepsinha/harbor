@@ -5,6 +5,7 @@ import type { SpecLoaderStrategy, OpenAPISpec } from '../../../core/types/spec.t
 import { SpecLoadError } from '../../../core/types/spec.types.js'
 import type { Logger } from '../../../core/types/logger.types.js'
 import { errorMessage } from '../../../core/utils/errors.js'
+import { redactUrl } from '../../../core/utils/url.js'
 import { urlSpec } from './url-spec-loader.strategy.js'
 import { fileSpec } from './file-spec-loader.strategy.js'
 
@@ -31,7 +32,7 @@ export class UrlWithFallbackSpecLoaderStrategy implements SpecLoaderStrategy {
     } catch (err) {
       urlError = errorMessage(err)
       this.logger?.info(
-        { url: this.url, filePath: this.filePath, cause: urlError },
+        { url: redactUrl(this.url), filePath: this.filePath, cause: urlError },
         'Using file fallback for spec'
       )
     }
@@ -42,7 +43,7 @@ export class UrlWithFallbackSpecLoaderStrategy implements SpecLoaderStrategy {
       const fileError = fileErr instanceof Error ? fileErr.message : String(fileErr)
       throw new SpecLoadError(
         `Both URL and file spec loads failed.\n` +
-        `  URL (${this.url}): ${urlError}\n` +
+        `  URL (${redactUrl(this.url)}): ${urlError}\n` +
         `  File (${this.filePath}): ${fileError}`,
         { urlError, fileError }
       )

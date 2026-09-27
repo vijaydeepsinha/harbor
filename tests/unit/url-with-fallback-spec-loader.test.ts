@@ -92,3 +92,22 @@ describe('UrlWithFallbackSpecLoaderStrategy', () => {
     expect(typed.cause).toEqual({ urlError: 'network down', fileError: 'ENOENT: no such file' })
   })
 })
+
+describe('UrlWithFallbackSpecLoaderStrategy — the URL is redacted wherever it is shown', () => {
+  beforeEach(() => { urlLoadMock.mockReset(); fileLoadMock.mockReset() })
+
+  it('keeps credentials and the query string out of the fallback log and the combined error', async () => {
+    const url = 'https://user:pw@specs.example.com/openapi.yaml?token=abc'
+    urlLoadMock.mockRejectedValue(new Error('network down'))
+    fileLoadMock.mockResolvedValueOnce(spec())
+    const logger = fakeLogger()
+    await urlWithFallback(url, '/tmp/fallback.yaml', undefined, logger as unknown as Parameters<typeof urlWithFallback>[3]).load()
+    expect(JSON.stringify(logger.info.mock.calls)).not.toMatch(/pw|token=abc/)
+
+    fileLoadMock.mockRejectedValueOnce(new Error('no file'))
+    const err = await new UrlWithFallbackSpecLoaderStrategy(url, '/tmp/fallback.yaml').load().catch((e: unknown) => e) as Error
+    expect(err).toBeInstanceOf(SpecLoadError)
+    expect(err.message).not.toMatch(/pw|token=abc/)
+    expect(err.message).toContain('specs.example.com/openapi.yaml')
+  })
+})
