@@ -68,7 +68,7 @@ export async function runInSandbox(
         copy: true
       })
     } catch (err) {
-      throw normalizeIsolateError(err, timedOut, sandboxRunOptions.timeoutMs)
+      throw normalizeIsolateError(err, timedOut, isolate, sandboxRunOptions.timeoutMs)
     }
 
     if (rawResult === undefined || rawResult === null) return undefined
@@ -97,7 +97,7 @@ export async function runInSandbox(
         || err instanceof SandboxRuntimeError) {
       throw err
     }
-    throw normalizeIsolateError(err, timedOut, sandboxRunOptions.timeoutMs)
+    throw normalizeIsolateError(err, timedOut, isolate, sandboxRunOptions.timeoutMs)
   } finally {
     clearTimeout(timeoutTimer)
     try {
@@ -106,15 +106,18 @@ export async function runInSandbox(
   }
 }
 
-/** Maps a raw ivm failure to a typed SandboxError: timeout → Timeout, disposed/OOM → Memory, else Runtime. */
-function normalizeIsolateError(err: unknown, timedOut: boolean, timeoutMs: number): Error {
+/**
+ * Maps a raw ivm failure to a typed SandboxError. Only facts decide, never
+ * the wording of a message the program (or a backend error it rethrew)
+ * could produce: our own wall-clock dispose or ivm's CPU-timeout message ⇒
+ * Timeout; an isolate ivm disposed on its own ⇒ Memory; anything else —
+ * including a backend "timeout of 2000ms exceeded" that reached the program
+ * uncaught — ⇒ Runtime.
+ */
+function normalizeIsolateError(err: unknown, timedOut: boolean, isolate: ivm.Isolate, timeoutMs: number): Error {
   if (timedOut) return new SandboxTimeoutError(timeoutMs)
   const msg = errorMessage(err)
-  if (msg.includes('Script execution timed out') || msg.includes('timeout')) {
-    return new SandboxTimeoutError(timeoutMs)
-  }
-  if (msg.includes('Isolate was disposed') || msg.includes('Isolate is disposed') || msg.includes('memory')) {
-    return new SandboxMemoryError()
-  }
+  if (msg.startsWith('Script execution timed out')) return new SandboxTimeoutError(timeoutMs)
+  if (isolate.isDisposed) return new SandboxMemoryError()
   return new SandboxRuntimeError(msg)
 }
