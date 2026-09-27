@@ -21,6 +21,14 @@ export interface ApprovalDecisionInput {
   approve?: boolean
   comment?: string
   via: 'mcp-elicitation' | 'http'
+  /**
+   * The execution the caller believes this approval belongs to. Required so
+   * that the pairing is asserted here, at the mutation point, rather than
+   * left to each caller: `decide` locks and mutates the approval's *own*
+   * execution, so a caller authorized against a different one would decide
+   * an approval it never proved it owns.
+   */
+  executionId: string
 }
 
 export interface ApprovalDecisionResult {
@@ -71,6 +79,12 @@ export class ApprovalService {
 
   async decide(approvalId: string, input: ApprovalDecisionInput): Promise<ApprovalDecisionResult> {
     const observed = await this.get(approvalId)
+    // Before anything is locked or mutated: this approval must belong to the
+    // execution the caller named. Reported as "not found" so a caller cannot
+    // probe for approvals on executions it does not own.
+    if (observed.executionId !== input.executionId) {
+      throw new ApprovalNotFoundError(approvalId)
+    }
     if (observed.status !== APPROVAL_STATUS.PENDING) {
       throw new ApprovalAlreadyDecidedError(approvalId, observed.status)
     }

@@ -61,10 +61,10 @@ async function start(codeMode: ReturnType<typeof makeRuntime>, registry = makeRo
 }
 
 /** An execution paused on approval #1, as the tool would leave it. */
-async function seedPaused(rt: ReturnType<typeof makeRuntime>) {
+async function seedPaused(rt: ReturnType<typeof makeRuntime>, token = TOKEN, userId = 'user-42') {
   const userIdHash = hashAuthenticatedPrincipal({
-    access_token: TOKEN,
-    metadata: { userId: 'user-42' }
+    access_token: token,
+    metadata: { userId }
   })
   const exec = await rt.manager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
   await rt.manager.beginRun(exec.executionId)
@@ -151,6 +151,26 @@ describe('execution routes', () => {
     })
     expect(decision.status).toBe(403)
     expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+  })
+
+  it('refuses an approval that belongs to another principal execution, even with a valid token for one of them', async () => {
+    const rt = makeRuntime()
+    const mine = await seedPaused(rt, TOKEN, 'user-42')
+    const theirs = await seedPaused(rt, OTHER_TOKEN, 'user-99')
+    const { baseUrl, close } = await start(rt); cleanup = close
+
+    // A valid token for *my* execution, paired with *their* approval id.
+    const res = await fetch(`${baseUrl}/executions/${mine.executionId}/approvals/${theirs.approvalId}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'accept' })
+    })
+
+    expect(res.status).toBe(404)
+    expect((await res.json() as { code: string }).code).toBe(ERR.APPROVAL_NOT_FOUND)
+    // Their approval is untouched and their execution still pauses on it.
+    expect((await rt.approvals.get(theirs.approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+    expect((await rt.manager.load(theirs.executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
   })
 
   it('returns a conflict when another operation holds the execution lock', async () => {

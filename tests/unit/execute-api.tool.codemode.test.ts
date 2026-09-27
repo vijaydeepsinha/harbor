@@ -141,7 +141,7 @@ describe('api_execute under the Code Mode governance layer', () => {
 
     expect((await rt.manager.load(body.executionId)).originalCode).toBe(PROGRAM_FINALIZE) // persisted while paused
 
-    await rt.approvals.decide(body.approvalId, { action: 'accept', via: 'http' })
+    await rt.approvals.decide(body.approvalId, { action: 'accept', via: 'http', executionId: body.executionId })
     const done = await handler({ service: 'trafficking', code: 'async () => "REPLACEMENT CODE IS IGNORED"' }, makeCtx({ elicitation: false, executionIdMeta: body.executionId }))
     expect(done['isError']).toBeUndefined()
     expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' }) // the persisted program ran
@@ -182,7 +182,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
 
     // Still resumable once decided.
-    await rt.approvals.decide(approvalId, { action: 'accept', via: 'http' })
+    await rt.approvals.decide(approvalId, { action: 'accept', via: 'http', executionId })
     const done = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false, executionIdMeta: executionId }))
     expect(done['isError']).toBeUndefined()
     expect((done['_meta'] as Record<string, unknown>)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
