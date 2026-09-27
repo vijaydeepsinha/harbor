@@ -85,22 +85,40 @@ function requireEnvVars(
   }
 }
 
+/**
+ * A positive integer from the environment (a port stays ≤ 65535). `Number()`
+ * alone turned "abc" into NaN — a NaN port or a NaN/1000 client timeout —
+ * and accepted 0 and negatives, so every cache or store call failed later
+ * instead of the gateway refusing to start.
+ */
+function positiveIntEnv(env: NodeJS.ProcessEnv, key: string, fallback?: string, max = Number.MAX_SAFE_INTEGER): number {
+  const raw = env[key] ?? fallback
+  const n = Number(raw)
+  if (raw === undefined || raw.trim() === '' || !Number.isInteger(n) || n <= 0 || n > max) {
+    console.error(`Configuration validation failed:\n  - ${key}: expected a positive integer${max < Number.MAX_SAFE_INTEGER ? ` ≤ ${max}` : ''}, got "${raw ?? ''}"`)
+    process.exit(1)
+  }
+  return n
+}
+
+const MAX_PORT = 65_535
+
 function parseMemcacheEnv(env: NodeJS.ProcessEnv, prefix: string): MemcacheConnectionConfig {
   return {
     host: env[`${prefix}HOST`]!,
-    port: Number(env[`${prefix}PORT`]),
-    kvTimeoutMs: Number(env[`${prefix}TIMEOUT_MS`] ?? '2000')
+    port: positiveIntEnv(env, `${prefix}PORT`, undefined, MAX_PORT),
+    kvTimeoutMs: positiveIntEnv(env, `${prefix}TIMEOUT_MS`, '2000')
   }
 }
 
 function parseCouchbaseEnv(env: NodeJS.ProcessEnv, prefix: string): CouchbaseConnectionConfig {
   return {
     host: env[`${prefix}HOST`]!,
-    port: Number(env[`${prefix}PORT`] ?? '8093'),
+    port: positiveIntEnv(env, `${prefix}PORT`, '8093', MAX_PORT),
     bucket: env[`${prefix}BUCKET`]!,
     username: env[`${prefix}USERNAME`]!,
     password: env[`${prefix}PASSWORD`]!,
-    kvTimeoutMs: Number(env[`${prefix}TIMEOUT_MS`] ?? '3000')
+    kvTimeoutMs: positiveIntEnv(env, `${prefix}TIMEOUT_MS`, '3000')
   }
 }
 
@@ -191,7 +209,8 @@ const GlobalConfigSchema = z.object({
   // Harbor's stamp on every backend call (X-Harbor-Server-ID): printable ASCII, ≤128 characters.
   HARBOR_SERVER_ID: z.string().regex(SAFE_HEADER_VALUE, 'printable ASCII, 1–128 characters, no leading/trailing space').default(DEFAULT_HARBOR_SERVER_ID),
   ENVIRONMENT: z.enum([ENV.DEV, ENV.STAGING, ENV.STAGING_SECONDARY, ENV.CANARY, ENV.PROD]).default(ENV.DEV),
-  ENABLE_AUDIT: z.coerce.boolean().default(true),
+  // z.coerce.boolean() would read the string "false" (any non-empty string) as true.
+  ENABLE_AUDIT: z.enum(['true', 'false', '1', '0']).default('true').transform(v => v === 'true' || v === '1'),
   // Where audit records and execution-state events go: comma list of `console` (built in) or registered sink types.
   AUDIT_SINKS: z.string().default('console'),
   HARBOR_RESOURCE_URI: z.string().optional(),
@@ -222,6 +241,11 @@ const GlobalConfigSchema = z.object({
   // HMAC key for the MRTR requestState codec (spec MUST integrity-protect state that drives authorization).
   GOVERNANCE_REQUEST_STATE_KEY: z.string().min(32).optional(),
   GOVERNANCE_APPROVAL_TTL_SEC: z.coerce.number().int().positive().default(600),
+}).superRefine((env, ctx) => {
+  // Audit on with no destination would drop every record while the switch says it is on.
+  if (env.ENABLE_AUDIT && env.AUDIT_SINKS.split(',').every(sink => sink.trim() === '')) {
+    ctx.addIssue({ code: 'custom', path: ['AUDIT_SINKS'], message: 'names no sink while ENABLE_AUDIT is on — set a sink (e.g. console) or ENABLE_AUDIT=false' })
+  }
 })
 
 /** EXECUTION_STORE_TYPE → the store config; memcache connection vars are required like the token cache's. */

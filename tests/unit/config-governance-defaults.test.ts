@@ -11,7 +11,7 @@ import { GOVERNANCE_DECISION } from '../../src/core/constants.js'
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
 describe('governance configuration defaults', () => {
-  const KEYS = ['GOVERNANCE_RULES_DIR', 'GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
+  const KEYS = ['ENABLE_AUDIT', 'AUDIT_SINKS', 'GOVERNANCE_RULES_DIR', 'GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
     'EXECUTION_STORE_TYPE', 'EXECUTION_STORE_MEMCACHE_HOST', 'EXECUTION_STORE_MEMCACHE_PORT', 'EXECUTION_STORE_MEMCACHE_TIMEOUT_MS',
     'EXECUTION_STORE_MEMCACHE_KEY_PREFIX', 'EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC', 'HARBOR_SERVER_ID'] as const
   let saved: Record<string, string | undefined> = {}
@@ -115,5 +115,50 @@ describe('governance configuration defaults', () => {
   it('honours an explicit value', () => {
     process.env['GOVERNANCE_DEFAULT_DECISION'] = GOVERNANCE_DECISION.ALLOW
     expect(validateGlobalConfig().codeMode.governance.defaultDecision).toBe(GOVERNANCE_DECISION.ALLOW)
+  })
+
+  const expectBootRefused = (needle: string) => {
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => { throw new Error(`exit ${code}`) }) as never)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(() => validateGlobalConfig()).toThrow('exit 1')
+      expect(String(error.mock.calls[0]?.[0])).toContain(needle)
+    } finally {
+      exit.mockRestore()
+      error.mockRestore()
+    }
+  }
+
+  it('ENABLE_AUDIT=false turns audit off (any non-empty string used to read as true)', () => {
+    expect(validateGlobalConfig().observability.enableAudit).toBe(true)
+    for (const [raw, on] of [['false', false], ['0', false], ['true', true], ['1', true]] as const) {
+      process.env['ENABLE_AUDIT'] = raw
+      expect(validateGlobalConfig().observability.enableAudit, raw).toBe(on)
+    }
+    process.env['ENABLE_AUDIT'] = 'no'
+    expectBootRefused('ENABLE_AUDIT')
+  })
+
+  it('audit on with an empty AUDIT_SINKS stops the gateway instead of dropping every record', () => {
+    for (const sinks of ['', ' , ']) {
+      process.env['AUDIT_SINKS'] = sinks
+      expectBootRefused('AUDIT_SINKS')
+    }
+    process.env['ENABLE_AUDIT'] = 'false'
+    expect(validateGlobalConfig().observability.enableAudit).toBe(false) // no sink needed when audit is off
+  })
+
+  it('memcache port and timeout must be positive integers — NaN, 0 and negatives stop the gateway', () => {
+    process.env['EXECUTION_STORE_TYPE'] = 'memcache'
+    process.env['EXECUTION_STORE_MEMCACHE_HOST'] = 'cache'
+    for (const [port, timeout] of [['abc', undefined], ['0', undefined], ['70000', undefined], ['11211', 'abc'], ['11211', '-1']] as const) {
+      process.env['EXECUTION_STORE_MEMCACHE_PORT'] = port
+      if (timeout === undefined) delete process.env['EXECUTION_STORE_MEMCACHE_TIMEOUT_MS']
+      else process.env['EXECUTION_STORE_MEMCACHE_TIMEOUT_MS'] = timeout
+      expectBootRefused(timeout === undefined ? 'EXECUTION_STORE_MEMCACHE_PORT' : 'EXECUTION_STORE_MEMCACHE_TIMEOUT_MS')
+    }
+    process.env['EXECUTION_STORE_MEMCACHE_PORT'] = '11211'
+    delete process.env['EXECUTION_STORE_MEMCACHE_TIMEOUT_MS']
+    expect(validateGlobalConfig().codeMode.store).toMatchObject({ type: 'memcache', host: 'cache', port: 11211, kvTimeoutMs: 2000 })
   })
 })
