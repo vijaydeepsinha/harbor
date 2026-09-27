@@ -2,6 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import type {
   GlobalConfig,
@@ -14,6 +15,14 @@ import type {
 import { LOG_LEVELS } from '../types/config.types.js'
 import { SAFE_HEADER_VALUE } from '../utils/header-value.js'
 import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, DEFAULT_HARBOR_SERVER_ID, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, EXECUTION_STORE_TYPE, EXECUTION_CODE_RETENTION, GOVERNANCE_DECISION, GOVERNANCE_RULE_SOURCE_TYPE } from '../constants.js'
+
+/**
+ * `<install root>/governance/rules`: three levels up from both
+ * src/core/config/config.ts and dist/core/config/config.js — the same root
+ * SERVICES_DIR defaults to, so the rules are found whatever the working
+ * directory the gateway was started from.
+ */
+export const DEFAULT_GOVERNANCE_RULES_DIR = fileURLToPath(new URL('../../../governance/rules', import.meta.url))
 
 // ── Config-file loader ───────────────────────────────────────────────────────
 //
@@ -198,7 +207,8 @@ const GlobalConfigSchema = z.object({
   EXECUTION_CODE_RETENTION: z.enum([EXECUTION_CODE_RETENTION.DROP, EXECUTION_CODE_RETENTION.KEEP]).default(EXECUTION_CODE_RETENTION.DROP),
   // Seconds a finished (terminal) execution and all its records are kept before deletion; 0 = keep forever.
   EXECUTION_RETENTION_SEC: z.coerce.number().int().min(0).default(86_400),
-  GOVERNANCE_RULES_DIR: z.string().default('./governance/rules'),
+  // Unset ⇒ <install root>/governance/rules, like SERVICES_DIR (see DEFAULT_GOVERNANCE_RULES_DIR); a set value is relative to the working directory.
+  GOVERNANCE_RULES_DIR: z.string().min(1).optional(),
   // Where rules come from: dir (GOVERNANCE_RULES_DIR), url (GOVERNANCE_RULES_URL), or a registered source type.
   GOVERNANCE_RULES_SOURCE: z.string().min(1).default(GOVERNANCE_RULE_SOURCE_TYPE.DIR),
   GOVERNANCE_RULES_URL: z.string().url().optional(),
@@ -289,7 +299,7 @@ export function validateGlobalConfig(): GlobalConfig {
       store: resolveExecutionStoreConfig(env),
       retention: { code: env.EXECUTION_CODE_RETENTION, executionSec: env.EXECUTION_RETENTION_SEC },
       governance: {
-        rulesDir: env.GOVERNANCE_RULES_DIR,
+        rulesDir: env.GOVERNANCE_RULES_DIR ?? DEFAULT_GOVERNANCE_RULES_DIR,
         rulesSource: env.GOVERNANCE_RULES_SOURCE,
         ...(env.GOVERNANCE_RULES_URL ? { rulesUrl: env.GOVERNANCE_RULES_URL } : {}),
         rulesUrlTimeoutMs: env.GOVERNANCE_RULES_URL_TIMEOUT_MS,

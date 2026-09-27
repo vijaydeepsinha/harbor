@@ -2,11 +2,16 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { validateGlobalConfig } from '../../src/core/config/config.js'
 import { GOVERNANCE_DECISION } from '../../src/core/constants.js'
 
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
+
 describe('governance configuration defaults', () => {
-  const KEYS = ['GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
+  const KEYS = ['GOVERNANCE_RULES_DIR', 'GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
     'EXECUTION_STORE_TYPE', 'EXECUTION_STORE_MEMCACHE_HOST', 'EXECUTION_STORE_MEMCACHE_PORT', 'EXECUTION_STORE_MEMCACHE_TIMEOUT_MS',
     'EXECUTION_STORE_MEMCACHE_KEY_PREFIX', 'EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC', 'HARBOR_SERVER_ID'] as const
   let saved: Record<string, string | undefined> = {}
@@ -24,6 +29,18 @@ describe('governance configuration defaults', () => {
   it('defaults GOVERNANCE_DEFAULT_DECISION to DENY (fail closed where governance applies)', () => {
     delete process.env['GOVERNANCE_DEFAULT_DECISION']
     expect(validateGlobalConfig().codeMode.governance.defaultDecision).toBe(GOVERNANCE_DECISION.DENY)
+  })
+
+  it('the default rules directory is the install root\'s governance/rules, whatever the working directory', () => {
+    const cwd = process.cwd()
+    try {
+      process.chdir(tmpdir())
+      expect(validateGlobalConfig().codeMode.governance.rulesDir).toBe(resolve(REPO_ROOT, 'governance', 'rules'))
+    } finally {
+      process.chdir(cwd)
+    }
+    process.env['GOVERNANCE_RULES_DIR'] = './my-rules'
+    expect(validateGlobalConfig().codeMode.governance.rulesDir).toBe('./my-rules')
   })
 
   it('rules load once from the directory by default', () => {

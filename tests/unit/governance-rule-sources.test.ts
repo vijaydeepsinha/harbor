@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
-import { DirectoryRuleSourceStrategy } from '../../src/spi/governance/strategies/directory-rule-source.strategy.js'
+import { DirectoryRuleSourceStrategy, GovernanceRulesDirectoryAbsentError } from '../../src/spi/governance/strategies/directory-rule-source.strategy.js'
 import { UrlRuleSourceStrategy } from '../../src/spi/governance/strategies/url-rule-source.strategy.js'
 import type { GovernanceRuleDocument, GovernanceRuleSource } from '../../src/spi/governance/rule-source.js'
 import { parseRuleDocuments, GovernanceRuleLoadError } from '../../src/runtime/governance/rule-loader.js'
@@ -61,7 +61,39 @@ describe('Governance Rule sources', () => {
     expect(source.name).toBe(`dir:${dir}`)
     const docs = await source.load()
     expect(docs.map(d => [d.name, d.format])).toEqual([['10-a.json', 'json'], ['20-b.yaml', 'yaml']])
-    expect(await new DirectoryRuleSourceStrategy(join(dir, 'missing')).load()).toEqual([])
+    // An absent directory is a failure, not "no rules" (the source contract): see the refresher test below.
+    await expect(new DirectoryRuleSourceStrategy(join(dir, 'missing')).load()).rejects.toBeInstanceOf(GovernanceRulesDirectoryAbsentError)
+  })
+
+  it('dir: a rules directory that disappears keeps the last valid set in force; it is picked up again once back', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'harbor-src-'))
+    const live = join(dir, 'rules')
+    mkdirSync(live)
+    writeFileSync(join(live, '10-a.yaml'), ruleYaml('a'))
+    const source = new DirectoryRuleSourceStrategy(live)
+    const store = new GovernanceRuleStore()
+    store.swap(parseRuleDocuments(await source.load()))
+    const refresher = new GovernanceRuleRefresher(source, store, 60, silent)
+    rmSync(live, { recursive: true }) // a volume remount / move-style deploy
+    expect(await refresher.refresh()).toBe('failed')
+    expect(store.getRules().map(r => r.rule.name)).toEqual(['a'])
+    mkdirSync(live)
+    writeFileSync(join(live, '10-a.yaml'), ruleYaml('a'))
+    writeFileSync(join(live, '20-b.yaml'), ruleYaml('b'))
+    expect(await refresher.refresh()).toBe('swapped')
+    expect(store.getRules().map(r => r.rule.name)).toEqual(['a', 'b'])
+  })
+
+  it('dir: boot tolerates a directory that does not exist yet — no rules, and says so', async () => {
+    const warnings: string[] = []
+    const logger = { ...silent, warn: (_o: unknown, msg: string) => { warnings.push(msg) }, info: () => {}, error: () => {}, debug: () => {}, child: () => logger } as unknown as Logger
+    const rt = await buildCodeModeRuntime({
+      store: { type: 'in-memory' },
+      governance: { rulesDir: join(tmpdir(), 'harbor-no-such-rules-' + Date.now()), defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600 }
+    } as CodeModeConfig, logger)
+    expect(rt.rules.getRules()).toEqual([])
+    expect(warnings.some(w => w.includes('every call is ungoverned'))).toBe(true)
+    await rt.shutdown()
   })
 
   describe('url', () => {

@@ -5,6 +5,8 @@ import type { CodeModeConfig } from '../../core/types/config.types.js'
 import type { Logger } from '../../core/types/logger.types.js'
 import type { CodeModeStore } from '../../spi/execution/execution-store.js'
 import { buildExecutionStore, buildGovernanceRuleSource } from '../../wiring/strategy-builders.js'
+import { GovernanceRulesDirectoryAbsentError } from '../../spi/governance/strategies/directory-rule-source.strategy.js'
+import type { GovernanceRuleDocument, GovernanceRuleSource } from '../../spi/governance/rule-source.js'
 import { ExecutionManager } from './execution-manager.js'
 import { ExecutionRetentionSweeper } from './execution-retention.js'
 import { ApprovalService } from './approval-service.js'
@@ -51,7 +53,7 @@ export async function buildCodeModeRuntime(config: CodeModeConfig, logger: Logge
   // Fail loud at boot: a source that cannot be read, or a rule that does not
   // validate, must never become "no rule". Later refreshes keep the last valid set.
   const ruleSource = buildGovernanceRuleSource(config.governance, logger)
-  rules.swap(parseRuleDocuments(await ruleSource.load(), logger, ruleSource.name))
+  rules.swap(parseRuleDocuments(await loadAtBoot(ruleSource, logger), logger, ruleSource.name))
   const ruleRefresher = new GovernanceRuleRefresher(ruleSource, rules, config.governance.rulesRefreshSec ?? 0, logger)
   ruleRefresher.start()
   const requestState = createResumeStateCodec({
@@ -70,5 +72,24 @@ export async function buildCodeModeRuntime(config: CodeModeConfig, logger: Logge
       ruleRefresher.stop()
       await store.destroy?.()
     }
+  }
+}
+
+/**
+ * The first load. The one tolerated failure is a rules directory that does
+ * not exist yet: that boots with no rules — every call ungoverned — and says
+ * so loudly, and a later refresh picks the directory up once it appears.
+ * Anything else (unreadable source, invalid rule) stops the gateway.
+ */
+async function loadAtBoot(source: GovernanceRuleSource, logger: Logger): Promise<GovernanceRuleDocument[]> {
+  try {
+    return await source.load()
+  } catch (err) {
+    if (!(err instanceof GovernanceRulesDirectoryAbsentError)) throw err
+    logger.warn(
+      { source: source.name },
+      'Governance rules directory does not exist — no Governance Rules are loaded, so every call is ungoverned (NO_GOVERNANCE). Set GOVERNANCE_RULES_DIR.'
+    )
+    return []
   }
 }
