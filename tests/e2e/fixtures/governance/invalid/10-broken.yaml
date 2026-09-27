@@ -1,0 +1,6 @@
+# Deliberately invalid: `MAYBE` is not a governance action. A gateway pointed
+# at this directory must refuse to boot (fail closed).
+rules:
+  - name: broken-rule
+    match: { service: commerce, operation: createOrder }
+    action: { type: MAYBE }

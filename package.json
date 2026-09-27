@@ -67,6 +67,14 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "node tests/e2e/setup/run-governance.mjs e2e",
+    "test:postman": "node tests/e2e/setup/run-governance.mjs postman",
+    "test:governance": "node tests/e2e/setup/run-governance.mjs run",
+    "governance:up": "node tests/e2e/setup/run-governance.mjs up",
+    "governance:down": "node tests/e2e/setup/run-governance.mjs down",
+    "governance:logs": "node tests/e2e/setup/run-governance.mjs logs",
+    "typecheck:e2e": "tsc --noEmit -p tests/e2e/tsconfig.json",
+    "postman:build": "node --import tsx tests/postman/build-collection.mts"
   }
 }

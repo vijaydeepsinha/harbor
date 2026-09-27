@@ -1,0 +1,12 @@
+# Admin operations on the ops service.
+rules:
+  - name: deny-admin-user-creation
+    version: 1
+    match: { service: ops, operation: createAdminUser }
+    action: { type: DENY, reason: Administrative users are provisioned by humans only }
+
+  - name: allow-ops-reads
+    version: 1
+    description: Service + method targeting with a wildcard path
+    match: { service: ops, method: GET, path: "*" }
+    action: { type: ALLOW }

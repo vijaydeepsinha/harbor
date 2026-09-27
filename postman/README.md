@@ -1,5 +1,12 @@
 # Testing Harbor with Postman
 
+Two collections live here:
+
+| Collection | Covers | Environment |
+|---|---|---|
+| `mcp-governance.postman_collection.json` + `environments/local.postman_environment.json` | the Code Mode governance lifecycle — allow / deny / approval-required, MRTR approve + resume, the HTTP fallback approval, a multi-step workflow with two approvals, denial, replay, idempotency, error cases, security, audit (14 folders, 84 requests, ~180 assertions). Generated from the vitest E2E fixtures by `npm run postman:build`. | `npm run governance:up` (Docker) or `npm run governance:up -- --local`; run with `npm run test:postman`, `npx newman`, or the Postman GUI (folders top to bottom — they chain ids through collection variables). Runs in CI (`governance-e2e.yml`) through the dependency-free runner `tests/postman/run-collection.mjs`, see [`TESTING.md`](../TESTING.md). |
+| `Harbor.postman_collection.json` | the four auth strategies (below) | `examples/demo/start.sh` / `start-oauth-mode.sh` — manual only |
+
 `Harbor.postman_collection.json` exercises Harbor's `/mcp` endpoint across all
 4 pluggable auth strategies (`static-token`, `oauth-2.1`, `jwt-validation`,
 `oauth-introspection`), including negative/rejection cases for each. Every
@@ -99,7 +106,7 @@ Docker container, and restores `services/*/config.json` back to default
    through requests top-to-bottom manually.
 4. Check the **Test Results** tab on each request/run for pass/fail.
 
-## This collection is a manual testing tool — deliberately not run in CI
+## `Harbor.postman_collection.json` is a manual testing tool — deliberately not run in CI
 
 Harbor's CI (`.github/workflows/ci.yml`) does **not** run this collection or
 depend on `newman` in any way — not even ephemerally via `npx`. This was a
@@ -109,7 +116,11 @@ high-severity CVEs and one critical (a Handlebars template-injection RCE).
 For an open-source project, keeping the CI/build dependency surface as small
 and auditable as possible matters more than automating this one collection —
 so it stays a manual, human-run tool, and `newman` never appears in
-`package.json`, `package-lock.json`, or any workflow step.
+`package.json`, `package-lock.json`, or any workflow step. The governance
+collection above respects the same rule: CI runs it through the small
+dependency-free runner in `tests/postman/run-collection.mjs`, and
+`POSTMAN_RUNNER=newman npm run test:postman` is available for humans who
+want the real thing via `npx`.
 
 The same coverage this collection gives you by hand is already automated,
 dependency-free, on every commit via `tests/demo_e2e.py` (see

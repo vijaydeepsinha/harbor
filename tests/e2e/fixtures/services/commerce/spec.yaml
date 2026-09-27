@@ -1,0 +1,119 @@
+openapi: 3.0.3
+info:
+  title: E2E Commerce Service
+  version: 1.0.0
+  description: Deterministic mock used by the Harbor governance E2E suite.
+paths:
+  /ping:
+    get:
+      operationId: ping
+      summary: Cheap liveness read
+      responses:
+        '200': { description: pong }
+  /customers/{customerId}:
+    get:
+      operationId: getCustomer
+      summary: Read a customer
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: customer }
+        '404': { description: not found }
+  /customers/{customerId}/payment-details:
+    get:
+      operationId: getPaymentDetails
+      summary: Read a customer's stored payment details (sensitive)
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: payment details }
+  /orders:
+    post:
+      operationId: createOrder
+      summary: Create an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerId, amount]
+              properties:
+                customerId: { type: string }
+                amount: { type: number }
+                items: { type: array, items: { type: string } }
+      responses:
+        '201': { description: created }
+        '400': { description: invalid }
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Read an order
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: order }
+    patch:
+      operationId: updateOrder
+      summary: Update an order
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string }
+                expedite: { type: boolean }
+      responses:
+        '200': { description: updated }
+    delete:
+      operationId: deleteOrder
+      summary: Delete an order
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: deleted }
+  /payments:
+    post:
+      operationId: createPayment
+      summary: Charge a payment for an order
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                orderId: { type: string }
+                amount: { type: number }
+      responses:
+        '201': { description: captured }
+  /notifications:
+    post:
+      operationId: sendNotification
+      summary: Send a customer notification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customerId: { type: string }
+                message: { type: string }
+      responses:
+        '201': { description: sent }
+  /unstable:
+    post:
+      operationId: unstableOperation
+      summary: Deterministic failure injection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode: { type: string, description: "HTTP status to return, or `timeout`" }
+      responses:
+        '200': { description: ok }

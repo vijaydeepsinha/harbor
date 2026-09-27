@@ -120,6 +120,17 @@ Full setup guide → [`docs/getting-started.md`](docs/getting-started.md)
 
 ---
 
+## Governance test suite
+
+`npm run test:governance` runs the MCP governance suite end to end: real MCP
+2026-07-28 calls against the production image, the real Governance Rules
+engine, the real V8 isolate, the file store and a deterministic mock backend —
+allow / deny / approval, multi-step workflows with several approvals, resume in
+a fresh isolate, replay, restart survival, crash mid-call, security and
+protocol edge cases — plus a Postman collection. See [`TESTING.md`](TESTING.md),
+[`TEST_ARCHITECTURE.md`](TEST_ARCHITECTURE.md) and
+[`tests/REQUIREMENT_COVERAGE.md`](tests/REQUIREMENT_COVERAGE.md).
+
 ## Development
 
 ```bash
