@@ -120,7 +120,7 @@ describe('bypass attempts', () => {
     // Governance resolves the canonical path, and that same path is what goes on the wire.
     it.each(['/%6frders/order-001', '/Orders/order-001', 'orders/order-001/'])(
       'should_deny_an_equivalent_spelling_of_a_denied_delete_%s', async path => {
-        const program = `async () => (await api.request({ method: 'DELETE', path: '${path}' })).status`
+        const program = `async () => (await api.request({ method: 'DELETE', path: ${JSON.stringify(path)} })).status`
         const out = expectToolError(await s().client('alice').apiExecute('commerce', program), ERR.GOVERNANCE_DENIED)
         s().track(out.meta.executionId)
         expect(await s().mock.requests()).toHaveLength(0)
@@ -130,7 +130,7 @@ describe('bypass attempts', () => {
 
     it.each(['/orders/./order-001', '/orders/x/../order-001', '/orders/%2e%2e/orders/order-001', '/orders%2Forder-001', '/orders//order-001', '/orders\\order-001', '/orders/order-001#x'])(
       'should_refuse_an_aliasing_spelling_before_governance_and_send_nothing_%s', async path => {
-        const program = `async () => (await api.request({ method: 'DELETE', path: '${path}' })).status`
+        const program = `async () => (await api.request({ method: 'DELETE', path: ${JSON.stringify(path)} })).status`
         const out = expectToolError(await s().client('alice').apiExecute('commerce', program), ERR.INVALID_API_REQUEST)
         s().track(out.meta.executionId)
         expect(await s().mock.requests()).toHaveLength(0)
@@ -162,25 +162,22 @@ describe('bypass attempts', () => {
     })
   })
 
-  describe('known gaps pinned so they are visible (see TEST_ARCHITECTURE.md §6)', () => {
-    it('known_gap_program_supplied_headers_can_override_the_outbound_authorization_header', async () => {
-      // api-client.ts spreads `apiRequest.headers` after the Authorization header, so a program can change
-      // the identity the backend sees. Governance Rules do not read identity on this branch, so the *decision*
-      // is unaffected — but backend authorization is. Pinned here as current behaviour; flip when fixed.
-      const program = `async () => {
-        const r = await api.request({ method: 'GET', path: '/ping', headers: { Authorization: 'Bearer ${IDENTITIES.bob}' } })
-        return { identity: r.data && r.data.identity }
-      }`
-      const out = expectCompleted(await s().client('alice').apiExecute('commerce', program))
-      s().track(out.meta.executionId)
-      s().note('outboundIdentitySeenByBackend', (out.value as { identity: string }).identity)
-      const seen = (await s().mock.requests())[0]!.identity
-      expect(['alice', 'bob']).toContain(seen)
-      // Whatever the backend saw, the journal never stored the header (only the persisted program text carries it).
-      const insp = await s().admin.inspect(out.meta.executionId!)
-      expect(JSON.stringify(insp.activities)).not.toContain(IDENTITIES.bob)
-      expect(insp.activities[0]!.request).not.toHaveProperty('headers')
-      if (seen === 'bob') console.warn('KNOWN GAP: program-supplied Authorization header overrode the caller identity downstream')
-    })
+  it('should_not_let_program_supplied_headers_change_the_outbound_identity_or_routing', async () => {
+    // Formerly pinned as known_gap_program_supplied_headers_can_override_the_outbound_authorization_header.
+    const program = `async () => {
+      const r = await api.request({ method: 'GET', path: '/ping', headers: {
+        Authorization: 'Bearer ${IDENTITIES.bob}', 'X-HTTP-Method-Override': 'DELETE', 'X-Idempotency-Key': 'forged'
+      } })
+      return { identity: r.data && r.data.identity }
+    }`
+    const out = expectCompleted(await s().client('alice').apiExecute('commerce', program))
+    s().track(out.meta.executionId)
+    const req = (await s().mock.requests())[0]!
+    expect(req.identity).toBe('alice')
+    expect((out.value as { identity: string }).identity).toBe('alice')
+    // The journal never stores program headers (only the persisted program text carries them).
+    const insp = await s().admin.inspect(out.meta.executionId!)
+    expect(JSON.stringify(insp.activities)).not.toContain(IDENTITIES.bob)
+    expect(insp.activities[0]!.request).not.toHaveProperty('headers')
   })
 })

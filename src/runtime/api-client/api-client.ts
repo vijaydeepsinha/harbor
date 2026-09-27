@@ -47,9 +47,25 @@ export interface ApiClientContext {
   serverId?: string
 }
 
-/** Harbor's own headers: set by Harbor on every call, never by the sandboxed program. */
-const HARBOR_OWNED_HEADERS: ReadonlySet<string> = new Set([
-  HTTP_HEADER.CORRELATION_ID, HTTP_HEADER.HARBOR_SERVER_ID, HTTP_HEADER.HARBOR_CLIENT_ID
+/**
+ * Headers a sandboxed program may not set, in any letter case; its copies
+ * are dropped. Two kinds:
+ *  - Harbor's own: the caller's identity (Authorization), which gateway,
+ *    tool, service, session and execution the call belongs to, and the
+ *    idempotency key. A program that could set these could act as another
+ *    principal or defeat deduplication.
+ *  - Routing and framing: they would let the backend (or a proxy in front
+ *    of it) serve a different method, URL or host than the one governance
+ *    resolved, or smuggle a second request.
+ */
+const PROGRAM_FORBIDDEN_HEADERS: ReadonlySet<string> = new Set([
+  HTTP_HEADER.AUTHORIZATION, HTTP_HEADER.REQUEST_SOURCE, HTTP_HEADER.MCP_TOOL, HTTP_HEADER.MCP_SERVICE,
+  HTTP_HEADER.MCP_VERSION, HTTP_HEADER.SESSION_ID, HTTP_HEADER.IDEMPOTENCY_KEY,
+  HTTP_HEADER.CORRELATION_ID, HTTP_HEADER.HARBOR_SERVER_ID, HTTP_HEADER.HARBOR_CLIENT_ID,
+  'Host', 'Content-Length', 'Transfer-Encoding', 'Connection', 'Keep-Alive', 'Upgrade', 'TE', 'Trailer',
+  'Proxy-Authorization', 'Proxy-Connection', 'Cookie', 'Forwarded',
+  'X-Forwarded-For', 'X-Forwarded-Host', 'X-Forwarded-Proto', 'X-Forwarded-Port', 'X-Forwarded-Prefix', 'X-Real-IP',
+  'X-HTTP-Method-Override', 'X-HTTP-Method', 'X-Method-Override', 'X-Original-URL', 'X-Rewrite-URL', 'X-Original-Method'
 ].map(h => h.toLowerCase()))
 
 export class ApiClient implements ConnectorAPI {
@@ -100,14 +116,16 @@ export class ApiClient implements ConnectorAPI {
     const { path: apiPath, method, params, body } = apiRequest
     const normalizedPath = normalizeEndpointPath(apiPath)
 
-    // The program may add headers, but not Harbor's own: they tell the backend
-    // which gateway made the call, which script (execution) it belongs to and
-    // who the caller is, and must not be forgeable from inside the sandbox.
-    // Program-supplied copies — in any letter case — are dropped.
+    // The program may add headers (Accept, Content-Type, its own X-…), but
+    // never one Harbor owns or one that changes routing — see
+    // PROGRAM_FORBIDDEN_HEADERS. Harbor's own are applied after the
+    // program's, so even a copy that slipped the filter could not win.
     const programHeaders = Object.fromEntries(
-      Object.entries(apiRequest.headers ?? {}).filter(([name]) => !HARBOR_OWNED_HEADERS.has(name.toLowerCase()))
+      Object.entries(apiRequest.headers ?? {}).filter(([name]) => !PROGRAM_FORBIDDEN_HEADERS.has(name.toLowerCase()))
     )
     const headers: Record<string, string> = {
+      [HTTP_HEADER.CONTENT_TYPE]: CONTENT_TYPE_JSON,
+      ...programHeaders,
       [HTTP_HEADER.AUTHORIZATION]: `${AUTH_SCHEME} ${tokenPayload.access_token}`,
       [HTTP_HEADER.REQUEST_SOURCE]: this.context.agentName,
       [HTTP_HEADER.MCP_TOOL]: TOOL.API_EXECUTE,
@@ -115,8 +133,6 @@ export class ApiClient implements ConnectorAPI {
       [HTTP_HEADER.MCP_VERSION]: MCP_FRAMEWORK_VERSION,
       [HTTP_HEADER.SESSION_ID]: sessionId,
       [HTTP_HEADER.IDEMPOTENCY_KEY]: idempotencyKey,
-      [HTTP_HEADER.CONTENT_TYPE]: CONTENT_TYPE_JSON,
-      ...programHeaders,
       [HTTP_HEADER.CORRELATION_ID]: correlationId,
       [HTTP_HEADER.HARBOR_SERVER_ID]: this.context.serverId ?? DEFAULT_HARBOR_SERVER_ID,
       ...(clientId !== undefined ? { [HTTP_HEADER.HARBOR_CLIENT_ID]: clientId } : {})

@@ -67,3 +67,44 @@ describe('ApiClient — the outbound call stays on the service', () => {
     expect(service.seen[0]?.headers['authorization']).toBe('Bearer USER-SECRET-TOKEN')
   })
 })
+
+describe('ApiClient — headers the program may and may not set', () => {
+  let service: Awaited<ReturnType<typeof listen>>
+  beforeAll(async () => { service = await listen() })
+  afterAll(async () => { await service.close() })
+  beforeEach(() => { service.seen.length = 0 })
+
+  it('drops identity, Harbor-owned and routing headers in any letter case; Harbor\'s own values stand', async () => {
+    await client(service.port).executeRequest({
+      method: 'POST', path: '/orders', body: { a: 1 },
+      headers: {
+        Authorization: 'Bearer SOMEONE-ELSE', 'x-idempotency-key': 'forged', 'X-MCP-Session-ID': 'forged',
+        'x-mcp-service': 'forged', 'X-Request-Source': 'forged', 'x-correlation-id': 'forged',
+        Host: 'evil.example', Cookie: 'session=stolen', 'X-HTTP-Method-Override': 'DELETE',
+        'X-Original-URL': '/admin', 'X-Forwarded-Host': 'evil.example', 'Transfer-Encoding': 'chunked'
+      }
+    }, ctx)
+    const h = service.seen[0]!.headers
+    expect(h['authorization']).toBe('Bearer USER-SECRET-TOKEN')
+    expect(h['x-idempotency-key']).toBe('idem-1')
+    expect(h['x-mcp-session-id']).toBe('sess-1')
+    expect(h['x-mcp-service']).toBe('svc')
+    expect(h['x-request-source']).toBe('agent')
+    expect(h['x-correlation-id']).toBe('exec-1')
+    expect(h['host']).toBe(`127.0.0.1:${service.port}`)
+    for (const dropped of ['cookie', 'x-http-method-override', 'x-original-url', 'x-forwarded-host']) expect(h[dropped], dropped).toBeUndefined()
+    expect(h['transfer-encoding']).toBeUndefined()
+    expect(service.seen[0]!.method).toBe('POST')
+  })
+
+  it('passes ordinary headers through, including a Content-Type override', async () => {
+    await client(service.port).executeRequest({
+      method: 'POST', path: '/orders', body: { a: 1 },
+      headers: { Accept: 'application/xml', 'X-Tenant': 't-1', 'content-type': 'application/merge-patch+json' }
+    }, ctx)
+    const h = service.seen[0]!.headers
+    expect(h['accept']).toBe('application/xml')
+    expect(h['x-tenant']).toBe('t-1')
+    expect(h['content-type']).toBe('application/merge-patch+json')
+  })
+})
