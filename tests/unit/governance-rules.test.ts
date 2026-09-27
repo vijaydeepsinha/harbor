@@ -317,6 +317,49 @@ describe('governance evaluator', () => {
     expect(holds({ budget: { exists: true, greater_than: 1 } })).toBe(true)
   })
 
+  it('reads a body passed as a JSON string as the object the backend receives', () => {
+    const decide = (body: unknown) => evaluateGovernance(
+      [rule({ conditions: { budget: { greater_than: 1_000_000 } }, action: { type: 'REQUIRE_APPROVAL' } })],
+      { ...req, body }, GOVERNANCE_DECISION.ALLOW
+    ).decision
+    expect(decide({ budget: 5_000_000 })).toBe('REQUIRE_APPROVAL')
+    expect(decide(JSON.stringify({ budget: 5_000_000 }))).toBe('REQUIRE_APPROVAL')
+    expect(decide('budget=5000000')).toBe('ALLOW') // not JSON: no body fields to read
+    expect(readField({ ...req, body: '{"owner":{"team":"x"}}' }, 'body.owner.team')).toBe('x')
+  })
+
+  it('reads only the request\'s own data — inherited properties are missing fields', () => {
+    for (const field of ['constructor', 'body.__proto__', 'body.toString', 'query.hasOwnProperty', 'body.tags.length']) {
+      expect(readField(req, field), field).toBe(field === 'body.tags.length' ? 2 : undefined)
+    }
+    const holds = (conditions: Record<string, unknown>) =>
+      evaluateGovernance([rule({ conditions, action: { type: 'DENY' } })], req, GOVERNANCE_DECISION.ALLOW).decision === 'DENY'
+    expect(holds({ constructor: { exists: true } })).toBe(false)
+    expect(holds({ constructor: { exists: false } })).toBe(true)
+  })
+
+  it('compares query parameters in their wire form: all=true is all=true however the program spelled it', () => {
+    const deny = (conditions: Record<string, unknown>, query: Record<string, unknown>) =>
+      evaluateGovernance([rule({ conditions, action: { type: 'DENY' } })], { ...req, query }, GOVERNANCE_DECISION.ALLOW).decision === 'DENY'
+    for (const all of [true, 'true']) expect(deny({ 'query.all': { equals: true } }, { all }), String(all)).toBe(true)
+    expect(deny({ 'query.all': { equals: 'true' } }, { all: true })).toBe(true)
+    expect(deny({ 'query.limit': { greater_than: 500 } }, { limit: '1000' })).toBe(true)
+    expect(deny({ 'query.limit': { greater_than: 500 } }, { limit: '100' })).toBe(false)
+    expect(deny({ 'query.limit': { greater_than: 500 } }, { limit: '0x3E8' })).toBe(false) // not a wire number
+    expect(deny({ 'query.status': { in: ['draft', 1] } }, { status: '1' })).toBe(true)
+    expect(deny({ 'query.status': { not_in: [1] } }, { status: '1' })).toBe(false)
+    expect(deny({ 'query.page': { starts_with: '1' } }, { page: 12 })).toBe(true)
+    // Outside the query types stay strict.
+    expect(deny({ 'body.all': { equals: true } }, {})).toBe(false)
+    expect(evaluateGovernance([rule({ conditions: { 'body.all': { equals: true } }, action: { type: 'DENY' } })], { ...req, body: { all: 'true' } }, GOVERNANCE_DECISION.ALLOW).decision).toBe('ALLOW')
+  })
+
+  it('refuses a path that is not a template, a subtree or *: it could never match and would govern nothing', () => {
+    const base = { name: 'ok', action: { type: 'DENY' } }
+    expect(governanceRuleSchema.safeParse({ ...base, match: { path: 'campaigns/{id}' } }).success).toBe(false)
+    for (const path of ['*', '/campaigns/{id}', '/campaigns/**', '/**']) expect(governanceRuleSchema.safeParse({ ...base, match: { path } }).success, path).toBe(true)
+  })
+
   describe('condition tree and computed operands', () => {
     const campaign = (body: Record<string, unknown>, query: Record<string, unknown> = {}): GovernanceRequest =>
       ({ ...req, body, query })

@@ -125,7 +125,7 @@ function conditionsHold(node: ConditionNode, req: GovernanceRequest): boolean {
     case 'allOf': return node.allOf.every(child => conditionsHold(child, req))
     case 'anyOf': return node.anyOf.some(child => conditionsHold(child, req))
     case 'not': return !conditionsHold(node.not, req)
-    case 'leaf': return comparisonHolds(node, operandValue(node, req))
+    case 'leaf': return comparisonHolds(node, operandValue(node, req), node.field?.startsWith('query.') === true)
   }
 }
 
@@ -193,46 +193,89 @@ function clause(expected: string, actual: string | undefined): boolean {
   return expected === '*' ? actual !== undefined : expected === actual
 }
 
-/** `budget` ≡ `body.budget`; `query.x`, `path.x`, `body.x.y` select explicitly. Arrays may be indexed numerically. */
+/**
+ * `budget` ≡ `body.budget`; `query.x`, `path.x`, `body.x.y` select explicitly.
+ * Arrays may be indexed numerically. Only the request's own data is read:
+ * `constructor`, `__proto__` or `toString` are missing fields, never
+ * inherited properties.
+ */
 export function readField(req: GovernanceRequest, field: string): unknown {
   const parts = field.split('.')
   let root: unknown
   let rest: string[]
   switch (parts[0]) {
-    case 'body': root = req.body; rest = parts.slice(1); break
+    case 'body': root = jsonBody(req.body); rest = parts.slice(1); break
     case 'query': root = req.query; rest = parts.slice(1); break
     case 'path': root = req.pathParams; rest = parts.slice(1); break
-    default: root = req.body; rest = parts
+    default: root = jsonBody(req.body); rest = parts
   }
   let cur: unknown = root
   for (const p of rest) {
-    if (cur === null || typeof cur !== 'object') return undefined
+    if (cur === null || typeof cur !== 'object' || !Object.prototype.hasOwnProperty.call(cur, p)) return undefined
     cur = (cur as Record<string, unknown>)[p]
   }
   return cur
 }
 
-/** The comparison operators of a leaf (or flat-form field), all ANDed. */
-function comparisonHolds(c: Condition, value: unknown): boolean {
+/**
+ * A body the program passed as a JSON string reaches the backend as that
+ * JSON — the same bytes as the object would — so rules read it as the
+ * object. Otherwise `body: JSON.stringify({ amount: 5e6 })` would slip past
+ * every `body.*` condition.
+ */
+function jsonBody(body: unknown): unknown {
+  if (typeof body !== 'string') return body
+  try {
+    const parsed: unknown = JSON.parse(body)
+    return parsed !== null && typeof parsed === 'object' ? parsed : body
+  } catch {
+    return body
+  }
+}
+
+/** A number as it appears in a query string: `5`, `-1.5`, `2e6` — not `0x10`, `''` or `1_000`. */
+const WIRE_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/
+
+/**
+ * The comparison operators of a leaf (or flat-form field), all ANDed.
+ *
+ * `wire`: the operand is a query parameter. On the wire every query value is
+ * text — `params: { all: true }`, `{ all: 'true' }` and `?all=true` all send
+ * `all=true` — so equality compares that text (`equals: true` matches the
+ * string `'true'`) and ordering reads a numeric string as its number.
+ * Elsewhere types stay strict: mismatched types never compare equal.
+ */
+function comparisonHolds(c: Condition, value: unknown, wire = false): boolean {
   if (c.exists !== undefined && (value !== undefined) !== c.exists) return false
   if (value === undefined) {
     // Only `exists: false` can be satisfied by a missing field.
     // (A leaf also carries its operand keys — only the operators count here.)
     return CONDITION_OPERATORS.every(k => c[k] === undefined || k === 'exists')
   }
-  if (c.equals !== undefined && value !== c.equals) return false
-  if (c.not_equals !== undefined && value === c.not_equals) return false
-  if (c.greater_than !== undefined && !(typeof value === 'number' && value > c.greater_than)) return false
-  if (c.greater_than_or_equal !== undefined && !(typeof value === 'number' && value >= c.greater_than_or_equal)) return false
-  if (c.less_than !== undefined && !(typeof value === 'number' && value < c.less_than)) return false
-  if (c.less_than_or_equal !== undefined && !(typeof value === 'number' && value <= c.less_than_or_equal)) return false
-  if (c.in !== undefined && !c.in.some(v => v === value)) return false
-  if (c.not_in !== undefined && c.not_in.some(v => v === value)) return false
-  if (c.starts_with !== undefined && !(typeof value === 'string' && value.startsWith(c.starts_with))) return false
+  const same = (expected: unknown): boolean =>
+    expected === value || (wire && isScalar(expected) && isScalar(value) && String(expected) === String(value))
+  const num: number | undefined =
+    typeof value === 'number' ? value
+    : wire && typeof value === 'string' && WIRE_NUMBER.test(value) ? Number(value)
+    : undefined
+  const text: string | undefined = typeof value === 'string' ? value : wire && isScalar(value) ? String(value) : undefined
+  if (c.equals !== undefined && !same(c.equals)) return false
+  if (c.not_equals !== undefined && same(c.not_equals)) return false
+  if (c.greater_than !== undefined && !(num !== undefined && num > c.greater_than)) return false
+  if (c.greater_than_or_equal !== undefined && !(num !== undefined && num >= c.greater_than_or_equal)) return false
+  if (c.less_than !== undefined && !(num !== undefined && num < c.less_than)) return false
+  if (c.less_than_or_equal !== undefined && !(num !== undefined && num <= c.less_than_or_equal)) return false
+  if (c.in !== undefined && !c.in.some(same)) return false
+  if (c.not_in !== undefined && c.not_in.some(same)) return false
+  if (c.starts_with !== undefined && !(text !== undefined && text.startsWith(c.starts_with))) return false
   if (c.contains !== undefined) {
-    if (typeof value === 'string') { if (typeof c.contains !== 'string' || !value.includes(c.contains)) return false }
-    else if (Array.isArray(value)) { if (!value.some(v => v === c.contains)) return false }
+    if (text !== undefined) { if (typeof c.contains !== 'string' || !text.includes(c.contains)) return false }
+    else if (Array.isArray(value)) { if (!value.some(v => v === c.contains || (wire && isScalar(v) && isScalar(c.contains) && String(v) === String(c.contains)))) return false }
     else return false
   }
   return true
+}
+
+function isScalar(v: unknown): v is string | number | boolean {
+  return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
 }

@@ -174,6 +174,14 @@ describe('bypass attempts', () => {
       expect(await s().mock.requests()).toHaveLength(0)
     })
 
+    it('should_govern_a_body_passed_as_a_json_string_like_the_object_it_is_on_the_wire', async () => {
+      const program = `async () => (await api.request({ method: 'POST', path: '/orders', body: JSON.stringify({ customerId: '${RESOURCES.customerAllowed}', amount: 50000 }) })).status`
+      const paused = expectPaused(await s().client('alice').apiExecute('commerce', program))
+      s().track(paused.executionId)
+      expect(paused.elicitation.message).toContain('high-value-order-requires-approval')
+      expect(await s().mock.requests()).toHaveLength(0)
+    })
+
     it('should_let_rules_read_a_query_written_into_the_path', async () => {
       const program = `async () => (await api.request({ method: 'GET', path: '/customers/customer-001?include=tier' })).status`
       const out = expectCompleted(await s().client('alice').apiExecute('commerce', program))
