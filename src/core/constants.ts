@@ -181,6 +181,9 @@ export const MCP_FRAMEWORK_VERSION = '1.0'
 
 // ── Metric names ─────────────────────────────────────────────────────────────
 
+/** Metric label for a `service` argument that names no registered service (never the caller's raw string). */
+export const UNKNOWN_SERVICE_LABEL = 'unknown'
+
 export const METRIC = {
   TOOL_CALLS: 'tool_calls_total',
   SANDBOX_ERRORS: 'sandbox_errors_total',

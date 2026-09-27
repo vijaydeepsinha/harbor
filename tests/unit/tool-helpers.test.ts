@@ -19,6 +19,7 @@ import {
 import type { ServiceRegistry, ServiceResources } from '../../src/runtime/registry/service-registry.js'
 import { MissingTokenError, SessionExpiredError, type TokenPayload } from '../../src/core/types/auth.types.js'
 import { ERR, METRIC, OUTCOME, GATEWAY_NAME, GATEWAY_VERSION, SERVER_INFO_META_KEY } from '../../src/core/constants.js'
+import { errorCode, errorRetryable } from '../../src/core/utils/errors.js'
 
 const silentLogger = pino({ level: 'silent' })
 
@@ -227,7 +228,7 @@ describe('resolveService', () => {
     expect(isToolError(result)).toBe(true)
     const body = JSON.parse(result.content[0].text)
     expect(body.code).toBe(ERR.UNKNOWN_SERVICE)
-    expect(body.retryable).toBe(true)
+    expect(body.retryable).toBe(false) // the registry is fixed at boot: retrying the same name cannot succeed
     expect(body.error).toContain('missing')
     expect(body.error).toContain('a, b')
   })
@@ -343,5 +344,14 @@ describe('runSandboxTool HOF', () => {
       tool: 'search_code',
       errorType: 'SANDBOX_TIMEOUT'
     })
+  })
+})
+
+describe('errorCode / errorRetryable on non-errors', () => {
+  it('a thrown null or undefined reads as the fallback, never as a TypeError', () => {
+    expect(errorCode(null)).toBe(ERR.UNKNOWN)
+    expect(errorCode(undefined, ERR.API_ERROR)).toBe(ERR.API_ERROR)
+    expect(errorRetryable(null)).toBe(false)
+    expect(errorRetryable(undefined)).toBe(false)
   })
 })
