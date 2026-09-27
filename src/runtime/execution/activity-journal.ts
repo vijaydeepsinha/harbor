@@ -10,6 +10,19 @@ import {
 } from '../../core/types/execution.types.js'
 import { ACTIVITY_STATUS, type AllowedHttpMethod } from '../../core/constants.js'
 
+/** Records whose request is about to be executed or is in front of a human: they bind query and body too. */
+const CONTENT_BOUND: ReadonlySet<string> = new Set([
+  ACTIVITY_STATUS.APPROVED, ACTIVITY_STATUS.WAITING_APPROVAL, ACTIVITY_STATUS.EXECUTING
+])
+
+/** Key-order-independent JSON, so `{a,b}` and `{b,a}` are the same request. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v !== null && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v) ?? 'undefined'
+}
+
 /** A call as audit, progress and the circuit breaker identify it: method + endpoint (OpenAPI template or normalized path). */
 export interface CallIdentity {
   method: AllowedHttpMethod
@@ -95,19 +108,37 @@ export class ActivityJournal extends CallLog {
 
   /**
    * Assigns the next sequence to an encountered call and returns the record
-   * already journaled at that sequence, if any. A record whose method or
-   * resolved path differs from the encountered call is a replay divergence
-   * and fails closed (§29): nothing is executed under the old history.
+   * already journaled at that sequence, if any. A mismatch with that record
+   * is a replay divergence and fails closed (§29): nothing is executed under
+   * the old history.
+   *
+   * What must match depends on what the record is about to authorise. Every
+   * record: method, resolved template and concrete path — a replayed response
+   * must belong to the same resource. A record that will be *executed* or
+   * *shown to a human* (APPROVED, WAITING_APPROVAL, an EXECUTING safe call):
+   * query and body as well. An approval is for the request the human saw;
+   * a program that reaches the same sequence with another resource, amount
+   * or filter (a clock-dependent branch, or `Promise.all` siblings arriving
+   * in a different order) must not inherit it.
    */
   async next(request: ActivityRequestRecord): Promise<{ sequence: number; existing?: ActivityRecord }> {
     const sequence = ++this.cursor
     const existing = await this.store.getActivity(this.executionId, sequence)
     if (!existing) return { sequence }
-    if (existing.request.method !== request.method || existing.request.specPath !== request.specPath) {
+    const recorded = existing.request
+    const diverged =
+      recorded.method !== request.method || recorded.specPath !== request.specPath || recorded.rawPath !== request.rawPath
+        ? 'path'
+        : CONTENT_BOUND.has(existing.status) &&
+          (canonicalJson(recorded.query) !== canonicalJson(request.query) || canonicalJson(recorded.body) !== canonicalJson(request.body))
+          ? 'content'
+          : undefined
+    if (diverged) {
+      const suffix = diverged === 'content' ? ' (query/body differ from the recorded request)' : ''
       throw new ReplayDivergedError(
         this.executionId, sequence,
-        `${existing.request.method} ${existing.request.specPath}`,
-        `${request.method} ${request.specPath}`
+        `${recorded.method} ${recorded.rawPath}`,
+        `${request.method} ${request.rawPath}${suffix}`
       )
     }
     return { sequence, existing }

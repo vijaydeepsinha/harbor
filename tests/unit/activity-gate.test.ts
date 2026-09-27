@@ -35,7 +35,11 @@ describe('ActivityGate — the single owner of replay and governance for a gover
     const resolved = resolveOperation(campaignSpec, req.method, req.path)
     await store.putActivity({
       executionId: 'exec-1', sequence: 1, service: 'trafficking', status,
-      request: { method: req.method, rawPath: req.path, specPath: resolved.specPath },
+      // As the journal records it: the request the program sent, query and body included.
+      request: {
+        method: req.method, rawPath: req.path, specPath: resolved.specPath,
+        ...(req.params !== undefined ? { query: req.params } : {}), ...(req.body !== undefined ? { body: req.body } : {})
+      },
       runIndex: 1, createdAt: 't0', updatedAt: 't1', ...extra
     })
   }
@@ -96,6 +100,29 @@ describe('ActivityGate — the single owner of replay and governance for a gover
   it('a different call at a journaled sequence propagates ReplayDivergedError', async () => {
     await seed(LIST, ACTIVITY_STATUS.COMPLETED, { response: { status: 200, ok: true, data: [] } })
     await expect(admit(gate(), FINALIZE)).rejects.toBeInstanceOf(ReplayDivergedError)
+  })
+
+  it.each([
+    [ACTIVITY_STATUS.APPROVED, { approvalId: 'ap-1' }],
+    [ACTIVITY_STATUS.WAITING_APPROVAL, { approvalId: 'ap-1' }],
+    [ACTIVITY_STATUS.EXECUTING, {}]
+  ] as const)('journaled %s binds the whole request: another body, query or resource diverges', async (status, extra) => {
+    const request = status === ACTIVITY_STATUS.EXECUTING ? { ...LIST, params: { page: 1 } } : FINALIZE
+    await seed(request, status, extra)
+    const variants: ApiRequest[] = status === ACTIVITY_STATUS.EXECUTING
+      ? [{ ...LIST, params: { page: 2 } }, LIST]
+      : [{ ...FINALIZE, body: { note: 'other' } }, { ...FINALIZE, params: { force: true } }, { ...FINALIZE, path: '/campaigns/C2/finalize' }]
+    for (const v of variants) {
+      journal = new ActivityJournal(store, 'exec-1', 'trafficking', 2) // each attempt is a fresh run reaching #1
+      await expect(admit(gate(), v)).rejects.toBeInstanceOf(ReplayDivergedError)
+    }
+  })
+
+  it('journaled COMPLETED binds the resource but not the body: a replay is a read of history, not an execution', async () => {
+    await seed(FINALIZE, ACTIVITY_STATUS.COMPLETED, { response: { status: 201, ok: true, data: {} } })
+    expect(await admit(gate(), { ...FINALIZE, body: { note: 'drifted' } })).toMatchObject({ kind: 'replay' })
+    journal = new ActivityJournal(store, 'exec-1', 'trafficking', 2)
+    await expect(admit(gate(), { ...FINALIZE, path: '/campaigns/C2/finalize' })).rejects.toBeInstanceOf(ReplayDivergedError)
   })
 
   it('begin journals an admitted call as EXECUTING; the journal then records how it ended', async () => {

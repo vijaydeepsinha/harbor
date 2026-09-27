@@ -88,6 +88,28 @@ describe('bypass attempts', () => {
     expect(await s().mock.count('POST', '/admin/users')).toBe(0)
   })
 
+  it('should_not_execute_a_request_other_than_the_one_approved_when_the_persisted_program_branches_on_the_clock', async () => {
+    // The persisted program is authoritative, but a non-deterministic one can reach the approved
+    // sequence with another resource or amount on resume. The approval binds the request the human saw.
+    const c = s().client('alice')
+    const flipAt = Date.now() + 1500
+    const program = `async () => {
+      const late = Date.now() > ${flipAt}
+      const o = await api.request({ method: 'POST', path: '/orders', body: { customerId: '${RESOURCES.customerAllowed}', amount: late ? 999999 : 50000 } })
+      return o.status
+    }`
+    const paused = expectPaused(await c.apiExecute('commerce', program))
+    s().track(paused.executionId)
+    expect(paused.elicitation.message).toContain('50000')
+    await new Promise(r => setTimeout(r, Math.max(0, flipAt - Date.now()) + 200))
+    const out = expectToolError(await c.answerApproval(paused, { action: 'accept' }), ERR.REPLAY_DIVERGED)
+    expect(out.message).toContain('query/body differ')
+    expect(await s().mock.count('POST', '/orders')).toBe(0)
+    const insp = await s().admin.inspect(paused.executionId)
+    expect(insp.execution.status).toBe(EXECUTION_STATUS.FAILED)
+    expect(insp.activities[0]!.request).toMatchObject({ body: { amount: 50000 } }) // the approved request, untouched
+  })
+
   it('should_ignore_forged_execution_status_or_approval_metadata_and_keep_the_approval_pending', async () => {
     const c = s().client('alice')
     const paused = expectPaused(await c.apiExecute('commerce', programs.createOrder(RESOURCES.customerAllowed, 50000)))

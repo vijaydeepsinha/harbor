@@ -151,7 +151,7 @@ describe('durable execution at the bridge: journal + replay', () => {
     const j = new ActivityJournal(store, 'exec-1', 'trafficking', 1)
     await j.next({ method: 'GET', rawPath: '/campaigns', specPath: '/campaigns' })
     await j.next({ method: 'GET', rawPath: '/campaigns/C1/creatives', specPath: '/campaigns/{id}/creatives' })
-    await j.recordWaitingApproval(3, { method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate' }, 'ap-1')
+    await j.recordWaitingApproval(3, { method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate', body: {} }, 'ap-1')
     expect(calls.length).toBe(2)
 
     // user code swallows the pause and tries to keep going — the bridge refuses and the pause is still promoted
@@ -176,7 +176,7 @@ describe('durable execution at the bridge: journal + replay', () => {
     }`, makeCtx(store, connector, 1))
     const j = new ActivityJournal(store, 'exec-1', 'trafficking', 1)
     await j.next({ method: 'GET', rawPath: '/campaigns', specPath: '/campaigns' })
-    await j.recordWaitingApproval(2, { method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate' }, 'ap-1')
+    await j.recordWaitingApproval(2, { method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate', body: { x: 1 } }, 'ap-1')
     const waiting = (await store.getActivity('exec-1', 2))!
     await store.putActivity({ ...waiting, status: ACTIVITY_STATUS.APPROVED })
 
@@ -195,6 +195,34 @@ describe('durable execution at the bridge: journal + replay', () => {
     expect(acts[1]?.approvalId).toBe('ap-1')
     expect(acts[1]?.runIndex).toBe(1)
     expect(acts[2]?.runIndex).toBe(2)
+  })
+
+  it('an APPROVED activity does not execute a request other than the one approved', async () => {
+    const { connector, calls } = makeConnector()
+    const j = new ActivityJournal(store, 'exec-1', 'trafficking', 1)
+    await j.next({ method: 'POST', rawPath: '/campaigns/C1/finalize', specPath: '/campaigns/{id}/finalize', body: { amount: 10 } })
+    await j.recordWaitingApproval(1, { method: 'POST', rawPath: '/campaigns/C1/finalize', specPath: '/campaigns/{id}/finalize', body: { amount: 10 } }, 'ap-1')
+    await store.putActivity({ ...(await store.getActivity('exec-1', 1))!, status: ACTIVITY_STATUS.APPROVED })
+    for (const swapped of [
+      `api.request({ method: 'POST', path: '/campaigns/C999/finalize', body: { amount: 10 } })`,
+      `api.request({ method: 'POST', path: '/campaigns/C1/finalize', body: { amount: 1000000 } })`,
+      `api.request({ method: 'POST', path: '/campaigns/C1/finalize', params: { force: true }, body: { amount: 10 } })`
+    ]) {
+      await expect(runApiInSandbox(`async () => { await ${swapped}; return 1 }`, makeCtx(store, connector, 2))).rejects.toBeInstanceOf(ReplayDivergedError)
+    }
+    expect(calls).toHaveLength(0)
+    expect((await store.getActivity('exec-1', 1))?.request.body).toEqual({ amount: 10 }) // the approved request is untouched
+    // Same request, keys in another order: still the approved one.
+    await runApiInSandbox(`async () => (await api.request({ method: 'POST', path: '/campaigns/C1/finalize', body: { amount: 10 } })).status`, makeCtx(store, connector, 2))
+    expect(calls.map(c => c.req.path)).toEqual(['/campaigns/C1/finalize'])
+  })
+
+  it('a replayed response belongs to the same concrete resource', async () => {
+    const { connector, calls } = makeConnector()
+    await runApiInSandbox(`async () => (await api.request({ method: 'POST', path: '/campaigns/C1' })).status`, makeCtx(store, connector, 1))
+    await expect(runApiInSandbox(`async () => (await api.request({ method: 'POST', path: '/campaigns/C2' })).status`, makeCtx(store, connector, 2)))
+      .rejects.toBeInstanceOf(ReplayDivergedError)
+    expect(calls).toHaveLength(1)
   })
 
   it('stops with REPLAY_DIVERGED when the program issues a different call at a journaled sequence', async () => {
