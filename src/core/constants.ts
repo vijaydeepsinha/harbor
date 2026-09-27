@@ -151,6 +151,8 @@ export const HTTP_ROUTES = {
   MCP: '/mcp',
   OAUTH_PROTECTED_RESOURCE: '/.well-known/oauth-protected-resource',
   OAUTH_PROTECTED_RESOURCE_MCP: '/mcp/.well-known/oauth-protected-resource',
+  /** RFC 9728 §3.1 path-inserted form for the `/mcp` resource — where discovery without a WWW-Authenticate hint looks. */
+  OAUTH_PROTECTED_RESOURCE_PATH_INSERTED: '/.well-known/oauth-protected-resource/mcp',
   /** Code Mode execution inspection + fallback approval decisions (see docs/code-mode-governance.md). */
   EXECUTIONS: '/executions',
 } as const

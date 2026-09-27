@@ -15,6 +15,7 @@ import { AuditPipeline } from './observability/audit-pipeline.js'
 import { startStdioGateway } from './transport/stdio-gateway.js'
 import { GATEWAY_NAME, STORE_TYPE } from '../core/constants.js'
 import { errorMessage } from '../core/utils/errors.js'
+import { extractBearerFromHeader } from '../spi/auth/bearer-authorization.js'
 
 /**
  * Boots a single MCP gateway by auto-scanning the services directory.
@@ -129,6 +130,14 @@ export async function createMcpGateway(
 
   if (!stdioPat) {
     gatewayLogger.error('MCP_TOKEN env var required for stdio transport — exiting')
+    process.exit(1)
+  }
+  // Every stdio call presents MCP_TOKEN as its bearer; one the bearer parser
+  // refuses (too short, not a JWT) would fail every tool call with
+  // TOKEN_INVALID after a clean-looking boot. Refuse it here instead.
+  const stdioBearer = extractBearerFromHeader(`Bearer ${stdioPat}`)
+  if (!stdioBearer.ok) {
+    gatewayLogger.error({ reason: stdioBearer.reason }, 'MCP_TOKEN is not an acceptable bearer (a JWT, or an opaque token of at least 32 base64url characters) — exiting')
     process.exit(1)
   }
 

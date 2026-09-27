@@ -104,7 +104,8 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
 
       if (
         url === HTTP_ROUTES.OAUTH_PROTECTED_RESOURCE ||
-        url === HTTP_ROUTES.OAUTH_PROTECTED_RESOURCE_MCP
+        url === HTTP_ROUTES.OAUTH_PROTECTED_RESOURCE_MCP ||
+        url === HTTP_ROUTES.OAUTH_PROTECTED_RESOURCE_PATH_INSERTED
       ) {
         if (oauthConfig) {
           handleProtectedResourceMetadata(res, oauthConfig)
