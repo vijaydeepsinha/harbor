@@ -27,7 +27,7 @@ LABEL org.opencontainers.image.title="Harbor" \
       org.opencontainers.image.version="0.1.0" \
       org.opencontainers.image.authors="Vijaydeep Sinha" \
       org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.source="https://github.com/vdssinha/harbor"
+      org.opencontainers.image.source="https://github.com/vijaydeepsinha/harbor"
 
 WORKDIR /app
 

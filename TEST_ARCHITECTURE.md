@@ -6,7 +6,7 @@ Everything below was read from the code on branch
 `poc/aug28-governance-automation`; nothing is assumed.
 
 Requirements source of truth: [`docs/poc/requirements-aug28.md`](docs/poc/requirements-aug28.md)
-(the repository's `requirement.md`). Design record of what was built:
+(the requirements document the harness was built against). Design record of what was built:
 [`docs/code-mode-governance.md`](docs/code-mode-governance.md).
 Requirement → test mapping: [`tests/REQUIREMENT_COVERAGE.md`](tests/REQUIREMENT_COVERAGE.md).
 How to run: [`TESTING.md`](TESTING.md).

@@ -4,10 +4,10 @@
   "description": "TypeScript framework that connects AI agents to backend APIs via the Model Context Protocol",
   "author": "Vijaydeep Sinha",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/vdssinha/harbor#readme",
+  "homepage": "https://github.com/vijaydeepsinha/harbor#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vdssinha/harbor.git"
+    "url": "https://github.com/vijaydeepsinha/harbor.git"
   },
   "bin": {
     "harbor-gateway": "./dist/index.js"

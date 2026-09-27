@@ -34,7 +34,7 @@ Thank you for your interest in contributing. This guide covers setup, developmen
 **Clone and install**
 
 ```bash
-git clone https://github.com/vdssinha/harbor
+git clone https://github.com/vijaydeepsinha/harbor
 cd harbor
 npm install
 ```
