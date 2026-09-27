@@ -10,7 +10,8 @@ It is aspirational — timelines depend on contributor activity.
 ### Observability
 - [ ] OpenTelemetry trace propagation
 - [ ] Prometheus `/metrics` endpoint
-- [ ] Structured audit log export (S3, GCS, file sink)
+- [x] Audit sink interface and pipeline (`AUDIT_SINKS`, `registerAuditSinkBackend`) — audit records and execution state
+- [ ] Built-in S3 / GCS / file audit sinks
 
 ### Auth
 - [ ] mTLS client certificate strategy

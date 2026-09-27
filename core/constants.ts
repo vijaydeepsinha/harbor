@@ -88,11 +88,25 @@ export const ERR = {
   INVALID_API_REQUEST: 'INVALID_API_REQUEST',
   NOT_FOUND: 'NOT_FOUND',
   INTERNAL: 'INTERNAL',
+  // ── Code Mode governance layer ──
+  APPROVAL_REQUIRED: 'APPROVAL_REQUIRED',
+  GOVERNANCE_DENIED: 'GOVERNANCE_DENIED',
+  REPLAY_DIVERGED: 'REPLAY_DIVERGED',
+  EXECUTION_LOCKED: 'EXECUTION_LOCKED',
+  EXECUTION_NOT_FOUND: 'EXECUTION_NOT_FOUND',
+  EXECUTION_NOT_RESUMABLE: 'EXECUTION_NOT_RESUMABLE',
+  EXECUTION_CANCELLED: 'EXECUTION_CANCELLED',
+  ACTIVITY_OUTCOME_UNKNOWN: 'ACTIVITY_OUTCOME_UNKNOWN',
+  APPROVAL_NOT_FOUND: 'APPROVAL_NOT_FOUND',
+  APPROVAL_ALREADY_DECIDED: 'APPROVAL_ALREADY_DECIDED',
 } as const
 
 /** Union of every string constant in `ERR`. Use anywhere you were tempted to
  *  type something as `code: string`. */
 export type ErrCode = (typeof ERR)[keyof typeof ERR]
+
+/** `X-Harbor-Server-ID` when HARBOR_SERVER_ID is not configured. */
+export const DEFAULT_HARBOR_SERVER_ID = 'HARBOR_GATEWAY'
 
 /** HTTP methods accepted by `api.request` from sandboxed user code. */
 export const ALLOWED_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
@@ -110,6 +124,10 @@ export const HTTP_HEADER = {
   MCP_SERVICE: 'X-MCP-Service',
   MCP_VERSION: 'X-MCP-Version',
   IDEMPOTENCY_KEY: 'X-Idempotency-Key',
+  /** Harbor's stamp on every backend call: which gateway made it (HARBOR_SERVER_ID). */
+  HARBOR_SERVER_ID: 'X-Harbor-Server-ID',
+  /** The external caller's own id, forwarded from the inbound `/mcp` request when it sent one. */
+  HARBOR_CLIENT_ID: 'X-Harbor-Client-ID',
   /** MCP 2026-07-28 protocol headers (spec §13/§14). Validated by the SDK;
    *  Harbor only reads them for routing/authorization/observability. */
   MCP_PROTOCOL_VERSION: 'MCP-Protocol-Version',
@@ -130,6 +148,8 @@ export const HTTP_ROUTES = {
   MCP: '/mcp',
   OAUTH_PROTECTED_RESOURCE: '/.well-known/oauth-protected-resource',
   OAUTH_PROTECTED_RESOURCE_MCP: '/mcp/.well-known/oauth-protected-resource',
+  /** Code Mode execution inspection + fallback approval decisions (see docs/code-mode-governance.md). */
+  EXECUTIONS: '/executions',
 } as const
 
 /** Default bind address and port for the MCP gateway HTTP transport. */
@@ -187,6 +207,10 @@ export const OUTCOME = {
   PERMISSION_DENIED: 'permission_denied',
   CALL_LIMIT_EXCEEDED: 'call_limit_exceeded',
   CONCURRENT_LIMIT_EXCEEDED: 'concurrent_limit_exceeded',
+  APPROVAL_REQUIRED: 'approval_required',
+  GOVERNANCE_DENIED: 'governance_denied',
+  REPLAY_DIVERGED: 'replay_diverged',
+  EXECUTION_CANCELLED: 'execution_cancelled',
 } as const
 
 export type AuditOutcome = typeof OUTCOME[keyof typeof OUTCOME]
@@ -232,3 +256,136 @@ export const CLIENT_CAPABILITIES_META_KEY = SDK_CLIENT_CAPABILITIES_META_KEY
 
 /** The single MCP protocol version this gateway speaks (spec §20). */
 export const MCP_PROTOCOL_VERSION = '2026-07-28'
+
+// ── Code Mode governance layer ───────────────────────────────────────────────
+// Vocabulary shared by the execution store, the sandbox bridge, the governance
+// evaluator and the api_execute tool. Kept here (not in the types module) so
+// runtime switch statements and tests reference one spelling.
+
+/**
+ * Harbor's own `_meta` namespace. MCP 2026-07-28 asks third parties to prefix
+ * custom keys with a vendor label (reverse-DNS preferred); the prefix must not
+ * have `mcp` / `modelcontextprotocol` as its second label. `harbor/` is a
+ * placeholder until the project's public name is settled — rename in one place.
+ */
+export const META_PREFIX = 'harbor/'
+/** Response `_meta`: the durable execution id of the Code Mode run. Request `_meta`: resume this execution (non-MRTR clients). */
+export const EXECUTION_ID_META_KEY = `${META_PREFIX}execution-id`
+/** Response `_meta`: execution status after this tool call. */
+export const EXECUTION_STATUS_META_KEY = `${META_PREFIX}execution-status`
+/** Response `_meta`: the approval the execution is waiting on (fallback path). */
+export const APPROVAL_ID_META_KEY = `${META_PREFIX}approval-id`
+
+/** Key of the embedded elicitation inside an `input_required` result. */
+export const APPROVAL_INPUT_KEY = 'approval'
+
+export const EXECUTION_STATUS = {
+  CREATED: 'CREATED',
+  RUNNING: 'RUNNING',
+  WAITING_APPROVAL: 'WAITING_APPROVAL',
+  /** A run ended on a retryable error (circuit open, timeout, transport) before completing; resumable. */
+  INTERRUPTED: 'INTERRUPTED',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  DENIED: 'DENIED',
+  CANCELLED: 'CANCELLED',
+} as const
+export type ExecutionStatus = (typeof EXECUTION_STATUS)[keyof typeof EXECUTION_STATUS]
+
+export const ACTIVITY_STATUS = {
+  /** Governance said REQUIRE_APPROVAL; no human decision yet. */
+  WAITING_APPROVAL: 'WAITING_APPROVAL',
+  /** The external call is in flight. Found on resume ⇒ the process died mid-call: safe methods re-execute, others fail closed. */
+  EXECUTING: 'EXECUTING',
+  /** Approved by a human; the external call has not been made yet. */
+  APPROVED: 'APPROVED',
+  /** External call made and a response (any HTTP status) recorded — replayable. */
+  COMPLETED: 'COMPLETED',
+  /** The transport threw: Harbor does not know whether the API executed. Never replayed, never retried silently. */
+  FAILED: 'FAILED',
+  /** Governance DENY, or a human rejected the approval. */
+  DENIED: 'DENIED',
+  /** A human cancelled the approval. */
+  CANCELLED: 'CANCELLED',
+} as const
+export type ActivityStatus = (typeof ACTIVITY_STATUS)[keyof typeof ACTIVITY_STATUS]
+
+export const GOVERNANCE_DECISION = {
+  ALLOW: 'ALLOW',
+  DENY: 'DENY',
+  REQUIRE_APPROVAL: 'REQUIRE_APPROVAL',
+} as const
+export type GovernanceDecisionType = (typeof GOVERNANCE_DECISION)[keyof typeof GOVERNANCE_DECISION]
+
+/** Precedence among matched rules of the deciding level (higher wins). Documented in docs/code-mode-governance.md. */
+export const GOVERNANCE_PRECEDENCE: Record<GovernanceDecisionType, number> = {
+  [GOVERNANCE_DECISION.DENY]: 3,
+  [GOVERNANCE_DECISION.REQUIRE_APPROVAL]: 2,
+  [GOVERNANCE_DECISION.ALLOW]: 1,
+}
+
+/**
+ * How broadly a Governance Rule applies, derived from what its `match` names:
+ * an operation or path ⇒ endpoint; a service only ⇒ service; neither ⇒
+ * gateway. The most specific level with a matching rule decides, unless a
+ * broader matching rule is `final`.
+ */
+export const RULE_LEVEL = {
+  GATEWAY: 'gateway',
+  SERVICE: 'service',
+  ENDPOINT: 'endpoint',
+} as const
+export type RuleLevel = (typeof RULE_LEVEL)[keyof typeof RULE_LEVEL]
+
+/** Specificity of each level (higher is more specific). */
+export const RULE_LEVEL_SPECIFICITY: Record<RuleLevel, number> = {
+  [RULE_LEVEL.GATEWAY]: 1,
+  [RULE_LEVEL.SERVICE]: 2,
+  [RULE_LEVEL.ENDPOINT]: 3,
+}
+
+export const APPROVAL_STATUS = {
+  PENDING: 'PENDING',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+  CANCELLED: 'CANCELLED',
+} as const
+export type ApprovalStatus = (typeof APPROVAL_STATUS)[keyof typeof APPROVAL_STATUS]
+
+export const EXECUTION_STORE_TYPE = {
+  IN_MEMORY: 'in-memory',
+  FILE: 'file',
+  /** Shared across pods: executions, journal, approvals and the run lock live in memcache. */
+  MEMCACHE: 'memcache',
+} as const
+
+/**
+ * What happens to an execution's program text once it is terminal
+ * (`EXECUTION_CODE_RETENTION`). The code is needed only to resume, and a
+ * terminal execution never resumes.
+ */
+export const EXECUTION_CODE_RETENTION = {
+  /** Remove it from the execution record (default). */
+  DROP: 'DROP',
+  /** Keep it stored against the executionId. */
+  KEEP: 'KEEP',
+} as const
+export type ExecutionCodeRetention = (typeof EXECUTION_CODE_RETENTION)[keyof typeof EXECUTION_CODE_RETENTION]
+
+/** Built-in Governance Rule sources (`GOVERNANCE_RULES_SOURCE`); others via registerGovernanceRuleSourceBackend. */
+export const GOVERNANCE_RULE_SOURCE_TYPE = {
+  DIR: 'dir',
+  URL: 'url',
+} as const
+
+/** Reason codes attached to governance decisions and execution failures. */
+export const GOVERNANCE_REASON = {
+  /** Some rule targets the call, none matched ⇒ the configured default decision. */
+  NO_MATCHING_RULE: 'NO_MATCHING_RULE',
+  /** No rule targets the call at all ⇒ it is ungoverned and allowed. */
+  NO_GOVERNANCE: 'NO_GOVERNANCE',
+  RULE_MATCHED: 'RULE_MATCHED',
+  EVALUATION_FAILED: 'GOVERNANCE_EVALUATION_FAILED',
+  APPROVAL_REJECTED: 'APPROVAL_REJECTED',
+  APPROVAL_CANCELLED: 'APPROVAL_CANCELLED',
+} as const

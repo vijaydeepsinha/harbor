@@ -3,18 +3,25 @@
 
 import { describe, it, expect } from 'vitest'
 import { ProgressCollector, extractTopLevelIds } from '../../runtime/observability/progress.js'
+import { CallLog } from '../../runtime/execution/activity-journal.js'
 
-describe('ProgressCollector', () => {
+describe('ProgressCollector — a projection of the run\'s call log', () => {
+  const ok = (status: number, data: unknown = {}) => ({ status, ok: status < 400, data })
+  const setup = (maxEntries = 100) => {
+    const log = new CallLog()
+    return { log, p: new ProgressCollector(log, maxEntries) }
+  }
+
   it('starts empty', () => {
-    const p = new ProgressCollector(100)
+    const { p } = setup()
     expect(p.hasAny()).toBe(false)
     expect(p.summary()).toEqual({ completedCalls: 0, calls: [] })
   })
 
-  it('records successful calls in completion order with monotonic indices', () => {
-    const p = new ProgressCollector(100)
-    p.recordSuccess('POST', '/campaigns', 201, true)
-    p.recordSuccess('GET', '/campaigns/{id}', 200, true)
+  it('records successful calls in completion order with monotonic indices', async () => {
+    const { log, p } = setup()
+    await log.recordResponse({ method: 'POST', endpoint: '/campaigns' }, ok(201))
+    await log.recordResponse({ method: 'GET', endpoint: '/campaigns/{id}' }, ok(200))
 
     const s = p.summary()
     expect(s.completedCalls).toBe(2)
@@ -24,20 +31,33 @@ describe('ProgressCollector', () => {
     ])
   })
 
-  it('attaches ids when provided and omits the field when empty', () => {
-    const p = new ProgressCollector(100)
-    p.recordSuccess('POST', '/campaigns', 201, true, { campaignId: 'C1' })
-    p.recordSuccess('POST', '/placements', 201, true, {})
+  it('attaches ids extracted from create responses (POST + ok only) and omits the field when there are none', async () => {
+    const { log, p } = setup()
+    await log.recordResponse({ method: 'POST', endpoint: '/campaigns' }, ok(201, { campaignId: 'C1', name: 'x' }))
+    await log.recordResponse({ method: 'POST', endpoint: '/placements' }, ok(201, { name: 'no ids here' }))
+    await log.recordResponse({ method: 'GET', endpoint: '/campaigns/{id}' }, ok(200, { id: 'C1' }))
+    await log.recordResponse({ method: 'POST', endpoint: '/ads' }, ok(409, { id: 'dup' }))
 
     const s = p.summary()
     expect(s.calls[0]!.ids).toEqual({ campaignId: 'C1' })
     expect(s.calls[1]!.ids).toBeUndefined()
+    expect(s.calls[2]!.ids).toBeUndefined()
+    expect(s.calls[3]!.ids).toBeUndefined()
   })
 
-  it('records failures with truncated message and aborted flag, and they do not count as completed', () => {
-    const p = new ProgressCollector(100)
+  it('includes calls replayed from an earlier run, with their recorded status and ids', () => {
+    const { log, p } = setup()
+    log.recordReplayed({ method: 'POST', endpoint: '/campaigns' }, 1, ok(201, { id: 'C1' }))
+    expect(p.summary()).toEqual({
+      completedCalls: 1,
+      calls: [{ i: 1, method: 'POST', endpoint: '/campaigns', status: 201, ok: true, ids: { id: 'C1' } }]
+    })
+  })
+
+  it('records failures with truncated message and aborted flag, and they do not count as completed', async () => {
+    const { log, p } = setup()
     const longMsg = 'x'.repeat(1000)
-    p.recordFailure('POST', '/ads', longMsg, true)
+    await log.recordFailure({ method: 'POST', endpoint: '/ads' }, { code: 'API_ERROR', message: longMsg, aborted: true })
 
     const s = p.summary()
     expect(s.completedCalls).toBe(0)
@@ -52,30 +72,30 @@ describe('ProgressCollector', () => {
     expect(entry.error!.length).toBeLessThanOrEqual(200)
   })
 
-  it('completedCalls counts entries with a status (any 2xx-5xx) and excludes failures', () => {
-    const p = new ProgressCollector(100)
-    p.recordSuccess('POST', '/campaigns', 201, true)
-    p.recordSuccess('POST', '/ads', 400, false) // 4xx still counts as completed
-    p.recordFailure('POST', '/ads', 'network error', false) // does not count
+  it('completedCalls counts entries with a status (any 2xx-5xx) and excludes failures', async () => {
+    const { log, p } = setup()
+    await log.recordResponse({ method: 'POST', endpoint: '/campaigns' }, ok(201))
+    await log.recordResponse({ method: 'POST', endpoint: '/ads' }, ok(400)) // 4xx still counts as completed
+    await log.recordFailure({ method: 'POST', endpoint: '/ads' }, { code: 'API_ERROR', message: 'network error', aborted: false }) // does not count
 
     expect(p.summary().completedCalls).toBe(2)
   })
 
-  it('caps recorded entries at maxEntries (aligned with sandbox maxApiCalls)', () => {
-    const p = new ProgressCollector(100)
-    for (let i = 0; i < 200; i++) p.recordSuccess('GET', '/x', 200, true)
+  it('caps recorded entries at maxEntries (aligned with sandbox maxApiCalls)', async () => {
+    const { log, p } = setup(100)
+    for (let i = 0; i < 200; i++) await log.recordResponse({ method: 'GET', endpoint: '/x' }, ok(200))
     expect(p.summary().calls.length).toBe(100)
   })
 
-  it('respects a smaller maxEntries from service config', () => {
-    const p = new ProgressCollector(25)
-    for (let i = 0; i < 50; i++) p.recordSuccess('GET', '/x', 200, true)
+  it('respects a smaller maxEntries from service config', async () => {
+    const { log, p } = setup(25)
+    for (let i = 0; i < 50; i++) await log.recordResponse({ method: 'GET', endpoint: '/x' }, ok(200))
     expect(p.summary().calls.length).toBe(25)
   })
 
-  it('summary returns a defensive copy of the calls array', () => {
-    const p = new ProgressCollector(100)
-    p.recordSuccess('GET', '/x', 200, true)
+  it('summary returns a defensive copy of the calls array', async () => {
+    const { log, p } = setup()
+    await log.recordResponse({ method: 'GET', endpoint: '/x' }, ok(200))
     const s = p.summary()
     s.calls.push({ i: 999, method: 'X', endpoint: '/x' })
     expect(p.summary().calls).toHaveLength(1)

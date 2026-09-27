@@ -4,6 +4,9 @@
 # Build output
 dist/
 
+# Code Mode execution store (EXECUTION_STORE_TYPE=file)
+var/
+
 # Node
 node_modules/
 .next/

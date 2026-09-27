@@ -81,7 +81,8 @@ All structured logs go to **stderr**. Stdout is reserved for the MCP protocol st
 
 Each HTTP request creates a fresh `McpServer` with the client's bearer token bound into the tool handlers. Request-scoped state includes:
 - The raw bearer token from the `Authorization` header (via `ctx.authInfo` in the SDK v2 factory)
-- A `correlationId` for request tracing (from the MCP request id in `ServerContext`)
+- A `correlationId` for request tracing in Harbor's logs (from the MCP request id in `ServerContext`); backend calls carry the execution id as `X-Correlation-ID` instead, so every call of one script correlates across approval resumes
+- The caller's optional `X-Harbor-Client-ID` request header, forwarded to backend calls
 - Active sandbox isolates for concurrent calls within that request
 
 When the HTTP response closes, the transport and `McpServer` are torn down.
@@ -91,6 +92,8 @@ When the HTTP response closes, the transport and `McpServer` are torn down.
 Because HTTP transport is stateless, **any pod can serve any request**. No sticky sessions or session affinity are required. Load balancers can use round-robin freely.
 
 The shared token cache (`TOKEN_CACHE_TYPE=memcache` or `couchbase`) still allows fast auth across pods — validated tokens are cached centrally so each request does not re-hit the auth backend unnecessarily.
+
+Code Mode executions are the exception: a paused `api_execute` run lives in the execution store. With `EXECUTION_STORE_TYPE=memcache` (and the same `GOVERNANCE_REQUEST_STATE_KEY` on every pod) any pod can resume it; with the default `in-memory` or `file` store only the pod that paused it can.
 
 ---
 
@@ -451,7 +454,7 @@ Every `api_execute` call produces a structured audit record at `info` level:
 
 Disable in development: `ENABLE_AUDIT=false`
 
-Audit records are written to stderr as structured JSON and can be forwarded to any log aggregator (ELK, Splunk, CloudWatch, etc.).
+Records go to every sink listed in `AUDIT_SINKS` (default `console`: the line above, written to stderr as structured JSON for any log aggregator — ELK, Splunk, CloudWatch, etc.). Under Code Mode governance each execution state change is published too (`execution-state`: statuses, approvals, decisions; no request or response bodies). Other destinations — S3, a SIEM — plug in with `registerAuditSinkBackend` (see `spi/observability/audit-sink.ts`).
 
 ---
 
@@ -484,3 +487,28 @@ In non-production environments (`ENVIRONMENT` not set to `prod`), every log line
 ```
 
 Powered by `pino-caller`. Automatically disabled in production.
+
+## Code Mode governance (durable executions, approvals)
+
+`api_execute` runs under the Code Mode governance layer when the gateway is
+started with an execution store (always, since `EXECUTION_STORE_TYPE` defaults
+to `in-memory`):
+
+- every call creates a **durable execution** (`_meta["harbor/execution-id"]`
+  on the result) whose original program is persisted;
+- every `api.request()` is a journaled **activity**; on resume, completed
+  activities are replayed from their stored responses and never re-executed;
+- **Governance Rules** (`governance/rules/`) decide `ALLOW` / `DENY` /
+  `REQUIRE_APPROVAL` per activity before the external call;
+- `REQUIRE_APPROVAL` returns an MCP 2026-07-28 `input_required` result with a
+  form elicitation and a sealed `requestState`; the client retries the same
+  call with `inputResponses` after the human decides, and Harbor resumes the
+  program in a fresh isolate. Clients without elicitation get
+  `APPROVAL_REQUIRED` and decide over `POST /executions/{id}/approvals/{approvalId}`.
+
+Additional error codes: `APPROVAL_REQUIRED`, `GOVERNANCE_DENIED`,
+`REPLAY_DIVERGED`, `EXECUTION_LOCKED`, `EXECUTION_NOT_FOUND`,
+`EXECUTION_NOT_RESUMABLE`, `EXECUTION_CANCELLED`, `ACTIVITY_OUTCOME_UNKNOWN`,
+`APPROVAL_NOT_FOUND`, `APPROVAL_ALREADY_DECIDED`.
+
+Full description: [`code-mode-governance.md`](code-mode-governance.md).

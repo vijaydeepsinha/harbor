@@ -20,8 +20,8 @@ vi.mock('../../runtime/observability/audit.js', async (importOriginal) => {
 })
 
 import { runApiInSandbox } from '../../runtime/sandbox/execute-api-in-sandbox.js'
-import { writeAuditRecord, AuditCollector } from '../../runtime/observability/audit.js'
-import { ProgressCollector } from '../../runtime/observability/progress.js'
+import { writeAuditRecord } from '../../runtime/observability/audit.js'
+import { CallLog } from '../../runtime/execution/activity-journal.js'
 import { registerExecuteApiTool } from '../../tools/execute-api.tool.js'
 import { TOOL, METRIC, OUTCOME, ERR, ENV } from '../../core/constants.js'
 import type { ServiceRegistry, ServiceResources } from '../../runtime/registry/service-registry.js'
@@ -285,7 +285,7 @@ describe('registerExecuteApiTool', () => {
     expect(typeof audit.durationMs).toBe('number')
   })
 
-  it('passes an AuditCollector and a deterministic idempotency key to the sandbox', async () => {
+  it('passes the run\'s call log (audit/progress source) and a deterministic idempotency key to the sandbox', async () => {
     const svc = makeResources({ name: 'tasks' })
     vi.mocked(runApiInSandbox).mockResolvedValue({ ok: true })
 
@@ -312,8 +312,8 @@ describe('registerExecuteApiTool', () => {
     const ctxA = vi.mocked(runApiInSandbox).mock.calls[0]![1]
     const ctxB = vi.mocked(runApiInSandbox).mock.calls[1]![1]
 
-    expect(ctxA.auditCollector).toBeInstanceOf(AuditCollector)
-    expect(ctxA.progressCollector).toBeInstanceOf(ProgressCollector)
+    expect(ctxA.callLog).toBeInstanceOf(CallLog)
+    expect(ctxB.callLog).not.toBe(ctxA.callLog) // one log per run
     expect(ctxA.idempotencyKey).toMatch(/^mcp-tasks-[0-9a-f]{12}-[0-9a-f]{16}$/)
     // Same user + same code ⇒ same idempotency key across calls
     expect(ctxA.idempotencyKey).toBe(ctxB.idempotencyKey)
@@ -325,11 +325,11 @@ describe('registerExecuteApiTool', () => {
     expect(ctxA.limits).toEqual(svc.sandboxLimits)
   })
 
-  it('records audit endpoints when the sandbox records them via AuditCollector', async () => {
+  it('audits the endpoints the sandbox recorded in the run\'s call log', async () => {
     const svc = makeResources({ name: 'tasks' })
     vi.mocked(runApiInSandbox).mockImplementation(async (_code, ctx) => {
-      ctx.auditCollector.record('GET', '/campaigns')
-      ctx.auditCollector.record('PATCH', '/orders/{id}')
+      await ctx.callLog!.recordResponse({ method: 'GET', endpoint: '/campaigns' }, { status: 200, ok: true, data: [] })
+      await ctx.callLog!.recordResponse({ method: 'PATCH', endpoint: '/orders/{id}' }, { status: 200, ok: true, data: {} })
       return { done: true }
     })
 
@@ -353,7 +353,7 @@ describe('registerExecuteApiTool', () => {
     expect(audit.endpointsAccessed).toEqual(['GET /campaigns', 'PATCH /orders/{id}'])
   })
 
-  it('hashes the raw access_token when metadata.userId is absent', async () => {
+  it('hashes the raw inbound bearer, not the rotating access_token, when metadata.userId is absent', async () => {
     const svc = makeResources({
       name: 'tasks',
       validate: async () => goodToken
@@ -375,8 +375,10 @@ describe('registerExecuteApiTool', () => {
     )
 
     const audit = vi.mocked(writeAuditRecord).mock.calls[0]![0]
-    const expected = createHash('sha256').update(goodToken.access_token).digest('hex')
-    expect(audit.userIdHash).toBe(expected)
+    // 'abc' is the raw bearer this tool was registered with. The middleware's
+    // `access_token` is deliberately not the identity — it rotates on refresh.
+    expect(audit.userIdHash).toBe(createHash('sha256').update('abc').digest('hex'))
+    expect(audit.userIdHash).not.toBe(createHash('sha256').update(goodToken.access_token).digest('hex'))
   })
 
   it('PermissionDeniedError ⇒ OUTCOME.PERMISSION_DENIED, audit with userIdHash="unknown", no CB_OPENS, no SANDBOX_ERRORS', async () => {
@@ -632,9 +634,9 @@ describe('registerExecuteApiTool', () => {
   it('attaches structured progress to the error payload when the sandbox recorded calls before failing', async () => {
     const svc = makeResources({ name: 'tasks' })
     vi.mocked(runApiInSandbox).mockImplementation(async (_code, ctx) => {
-      ctx.progressCollector!.recordSuccess('POST', '/campaigns', 201, true, { campaignId: 'C1' })
-      ctx.progressCollector!.recordSuccess('POST', '/placements', 201, true, { placementId: 'P9' })
-      ctx.progressCollector!.recordFailure('POST', '/ads', 'Upstream API returned 500', false)
+      await ctx.callLog!.recordResponse({ method: 'POST', endpoint: '/campaigns' }, { status: 201, ok: true, data: { campaignId: 'C1', name: 'x' } })
+      await ctx.callLog!.recordResponse({ method: 'POST', endpoint: '/placements' }, { status: 201, ok: true, data: { placementId: 'P9' } })
+      await ctx.callLog!.recordFailure({ method: 'POST', endpoint: '/ads' }, { code: 'API_ERROR', message: 'Upstream API returned 500', aborted: false })
       throw new SandboxRuntimeError('boom')
     })
 

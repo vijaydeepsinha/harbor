@@ -27,15 +27,19 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 | `OAuthIntrospectionStrategy` | `auth/strategies/oauth-introspection.strategy.ts` | Configurable auth call (GET/POST, flexible token passing, dot-path response/metadata mapping, proactive refresh via separate endpoint) |
 | `StaticTokenAuthStrategy` | `auth/strategies/static-token.strategy.ts` | Client-first: uses client's token as primary; falls back to the configured static token when none provided |
 | `toolHelpers` | `tools/tool-helpers.ts` | Shared utilities — `mcpError`, `mcpSuccess`, `resolveService`, `validateAuth`, `extractCorrelationId`, `extractSessionId`, `runSandboxTool` |
-| `AuditCollector` | `observability/audit.ts` | Collects which endpoints were called during a request |
+| `AuditCollector` | `observability/audit.ts` | Projection of the run's call log: which endpoints were called during a request |
+| `ProgressCollector` | `observability/progress.ts` | Projection of the run's call log: per-call status and created ids, returned on failure |
 | `runInSandbox` | `sandbox/sandbox-core.ts` | Shared base — creates V8 isolate, calls `setupContext` to inject data, runs user code, disposes isolate |
 | `runSpecSearchInSandbox` | `sandbox/spec-search-in-sandbox.ts` | Delegates to `runInSandbox`, injects `spec` |
 | `runSkillsSearchInSandbox` | `sandbox/skills-search-in-sandbox.ts` | Delegates to `runInSandbox`, injects `skills` array |
 | `runApiInSandbox` | `sandbox/execute-api-in-sandbox.ts` | Delegates to `runInSandbox`, injects `api.request()` bridge |
+| `BridgeRequestHandler` | `sandbox/bridge-request-handler.ts` | The host side of `api.request()`: the per-run pipeline behind the bridge |
+| `ActivityGate` | `execution/activity-gate.ts` | Governed runs: decides replay / execute / pause / stop for each call |
+| `CallLog` / `ActivityJournal` | `execution/activity-journal.ts` | The single record of each call's outcome (durable activity record when governed) |
 | `ApiClient.executeRequest` | `api-client/api-client.ts` | Makes the actual HTTP call to the backend API |
 | `CircuitBreakerStrategy` | `resilience/strategies/*.ts` | Tracks failures and opens/closes the circuit |
 | `IdempotencyStrategy` | `idempotency/strategies/*.ts` | Caches results to prevent duplicate writes |
-| `writeAuditRecord` | `observability/audit.ts` | Writes the final audit log entry |
+| `writeAuditRecord` | `observability/audit.ts` | Writes the final audit record to the audit pipeline (`AUDIT_SINKS`) |
 | `MetricsRegistry` | `observability/metrics.ts` | Increments counters |
 
 ---
@@ -269,7 +273,7 @@ runInSandbox() — shared V8 lifecycle
   createContext()                          ← empty global scope (no fetch, no require, nothing)
   |
   setupContext(jail, context, isolate)     ← execute-specific injection:
-  |   jail.set('__makeRequest', ...)        ← bridge to outer Node.js (auth, CB, API client)
+  |   jail.set('__makeRequest', ...)        ← bridge to outer Node.js: BridgeRequestHandler.handle
   |   isolate.compileScript(bootstrap)      ← defines `api = { request: ... }` inside sandbox
   |
   compile and run wrappedUserCode          ← user's async arrow function runs; can only call api.request()
@@ -287,27 +291,32 @@ Key: no `spec` is injected into the execute sandbox. The AI cannot access the Op
 
 For each `api.request()` call the AI's code makes:
 
-**File: `sandbox/execute-api-in-sandbox.ts` — the bridge function**
+**File: `sandbox/bridge-request-handler.ts` — `BridgeRequestHandler.handle()`**
 
 ```typescript
-async (configJson: string): Promise<string> => {
-  const config = JSON.parse(configJson)
-  const normalizedPath = normalizeEndpointPath(config.path)  // /orders/123 → /orders/{id}
+async handle(apiRequestJson: string): Promise<string> {
+  admit()                                        // run stopped? maxApiCalls / maxConcurrentCalls
+  const apiRequest = validate(JSON.parse(apiRequestJson))
+  const endpoint = resolve(apiRequest)           // OpenAPI template (governed) or /orders/123 → /orders/{id}
 
-  circuitBreaker.check(normalizedPath)          // ← throws CircuitOpenError if OPEN
+  // governed runs only: ActivityGate.admit → replay | execute | pause | stop
+  permissionGuard.canExecute(endpoint, ...)      // ← PermissionDeniedError
+  circuitBreaker.check(endpoint)                 // ← throws CircuitOpenError if OPEN
 
-  const result = await apiClient.executeRequest(config, tokenPayload, ...)
+  const result = await apiClient.request(apiRequest, ctx)   // idempotency strategy → executeRequest
 
-  circuitBreaker.recordSuccess(normalizedPath)  // ← only called on 2xx/3xx
-  auditCollector.record(config.method, normalizedPath)
-
+  await journal.recordResponse(call, result, sequence)      // the one record; audit + progress are projections
+  circuitBreaker.recordSuccess(endpoint)         // ← any returned status (5xx throw before this)
   return JSON.stringify(result)
 }
 ```
 
 **File: `api-client/api-client.ts` — `executeRequest()`**
 
-- Sets headers: `Authorization`, `X-Correlation-ID`, `X-Request-Source: mcp-agent`, `X-MCP-Session-ID`, `X-Idempotency-Key`
+- Sets headers: `Authorization`, `X-Request-Source: mcp-agent`, `X-MCP-Session-ID`, `X-Idempotency-Key`, then Harbor's own, which the sandboxed program cannot set or override (its copies, in any letter case, are dropped):
+  - `X-Correlation-ID` — the execution id under Code Mode governance (the same on every call of one script, across approval resumes), otherwise the MCP request id
+  - `X-Harbor-Server-ID` — the gateway's stamp (`HARBOR_SERVER_ID`, default `HARBOR_GATEWAY`)
+  - `X-Harbor-Client-ID` — the caller's own id, forwarded when the `/mcp` HTTP request carried one
 - Retries on 5xx with fixed 500ms backoff
 - Returns `{ data, status, ok: true }` for 2xx/3xx
 - Returns `{ data, status, ok: false }` for 4xx — never retries, never records circuit failure
@@ -360,10 +369,12 @@ writeAuditRecord({
   apiCallCount: 1,
   durationMs: 312,
   outcome: 'success'
-}, logger, globalConfig)
+}, logger, globalConfig, auditPipeline)
 ```
 
-Logged as structured JSON at `info` level. Skipped if `ENABLE_AUDIT=false`.
+Delivered to every `AUDIT_SINKS` sink — by default `console`, which logs it as
+structured JSON at `info` level on the service's logger. Skipped if
+`ENABLE_AUDIT=false`.
 
 ---
 

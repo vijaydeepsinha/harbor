@@ -14,6 +14,7 @@ import type { ConnectorAPI } from '../../spi/connector/connector-api.js'
 import {
   ERR,
   HTTP_HEADER,
+  DEFAULT_HARBOR_SERVER_ID,
   CONTENT_TYPE_JSON,
   AUTH_SCHEME,
   MCP_FRAMEWORK_VERSION,
@@ -42,7 +43,14 @@ export class ApiError extends Error {
 export interface ApiClientContext {
   serviceName: string
   agentName: string
+  /** Sent as X-Harbor-Server-ID on every call (HARBOR_SERVER_ID); absent ⇒ DEFAULT_HARBOR_SERVER_ID. */
+  serverId?: string
 }
+
+/** Harbor's own headers: set by Harbor on every call, never by the sandboxed program. */
+const HARBOR_OWNED_HEADERS: ReadonlySet<string> = new Set([
+  HTTP_HEADER.CORRELATION_ID, HTTP_HEADER.HARBOR_SERVER_ID, HTTP_HEADER.HARBOR_CLIENT_ID
+].map(h => h.toLowerCase()))
 
 export class ApiClient implements ConnectorAPI {
   private readonly axiosInstance: AxiosInstance
@@ -83,13 +91,19 @@ export class ApiClient implements ConnectorAPI {
   }
 
   async executeRequest(apiRequest: ApiRequest, ctx: ExecuteRequestContext): Promise<ApiResponse> {
-    const { tokenPayload, invalidate, idempotencyKey, correlationId, sessionId, signal } = ctx
+    const { tokenPayload, invalidate, idempotencyKey, correlationId, sessionId, clientId, signal } = ctx
     const { path: apiPath, method, params, body } = apiRequest
     const normalizedPath = normalizeEndpointPath(apiPath)
 
+    // The program may add headers, but not Harbor's own: they tell the backend
+    // which gateway made the call, which script (execution) it belongs to and
+    // who the caller is, and must not be forgeable from inside the sandbox.
+    // Program-supplied copies — in any letter case — are dropped.
+    const programHeaders = Object.fromEntries(
+      Object.entries(apiRequest.headers ?? {}).filter(([name]) => !HARBOR_OWNED_HEADERS.has(name.toLowerCase()))
+    )
     const headers: Record<string, string> = {
       [HTTP_HEADER.AUTHORIZATION]: `${AUTH_SCHEME} ${tokenPayload.access_token}`,
-      [HTTP_HEADER.CORRELATION_ID]: correlationId,
       [HTTP_HEADER.REQUEST_SOURCE]: this.context.agentName,
       [HTTP_HEADER.MCP_TOOL]: TOOL.API_EXECUTE,
       [HTTP_HEADER.MCP_SERVICE]: this.context.serviceName,
@@ -97,7 +111,10 @@ export class ApiClient implements ConnectorAPI {
       [HTTP_HEADER.SESSION_ID]: sessionId,
       [HTTP_HEADER.IDEMPOTENCY_KEY]: idempotencyKey,
       [HTTP_HEADER.CONTENT_TYPE]: CONTENT_TYPE_JSON,
-      ...apiRequest.headers
+      ...programHeaders,
+      [HTTP_HEADER.CORRELATION_ID]: correlationId,
+      [HTTP_HEADER.HARBOR_SERVER_ID]: this.context.serverId ?? DEFAULT_HARBOR_SERVER_ID,
+      ...(clientId !== undefined ? { [HTTP_HEADER.HARBOR_CLIENT_ID]: clientId } : {})
     }
 
     let lastError: Error | undefined
