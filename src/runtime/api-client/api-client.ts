@@ -68,6 +68,9 @@ const PROGRAM_FORBIDDEN_HEADERS: ReadonlySet<string> = new Set([
   'X-HTTP-Method-Override', 'X-HTTP-Method', 'X-Method-Override', 'X-Original-URL', 'X-Rewrite-URL', 'X-Original-Method'
 ].map(h => h.toLowerCase()))
 
+/** Methods whose repetition has the same effect as sending them once (RFC 9110 §9.2.2) — the only ones retried. */
+const IDEMPOTENT_METHODS: ReadonlySet<string> = new Set(['GET', 'PUT', 'DELETE'])
+
 export class ApiClient implements ConnectorAPI {
   private readonly axiosInstance: AxiosInstance
 
@@ -139,8 +142,14 @@ export class ApiClient implements ConnectorAPI {
     }
 
     let lastError: Error | undefined
+    // A POST or PATCH that timed out or got a 5xx may already have taken
+    // effect; sending it again could create a second order or charge twice,
+    // while the journal shows one activity. Only methods whose repetition is
+    // harmless (RFC 9110 §9.2.2) are retried; for the rest the outcome is
+    // unknown and the run stops (AGENTS.md §5 rule 2).
+    const maxRetries = IDEMPOTENT_METHODS.has(method) ? this.apiConfig.maxRetries : 0
 
-    for (let attempt = 0; attempt <= this.apiConfig.maxRetries; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         this.logger.debug(
           {
@@ -205,7 +214,7 @@ export class ApiClient implements ConnectorAPI {
           true
         )
 
-        if (attempt < this.apiConfig.maxRetries) {
+        if (attempt < maxRetries) {
           await sleep(backoffMs(attempt))
         }
       } catch (err) {
@@ -214,7 +223,7 @@ export class ApiClient implements ConnectorAPI {
         this.circuitBreaker.recordFailure(normalizedPath)
         lastError = ensureError(err)
 
-        if (attempt < this.apiConfig.maxRetries) {
+        if (attempt < maxRetries) {
           await sleep(backoffMs(attempt))
         }
       }

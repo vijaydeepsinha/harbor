@@ -28,13 +28,14 @@ describe('failure handling', () => {
     })
   }
 
-  it('should_retry_a_500_once_then_journal_the_activity_as_failed_with_unknown_outcome', async () => {
+  it('should_not_retry_a_post_that_got_a_500_and_journal_the_activity_as_failed_with_unknown_outcome', async () => {
     const out = expectToolError(await s().client('alice').apiExecute('commerce', programs.unstable('500')))
     s().track(out.meta.executionId)
     s().note('uncaught500Code', out.code)
     expect(out.message).toContain('500')
     expect(out.meta.executionStatus).toBe(EXECUTION_STATUS.FAILED)
-    expect(await s().mock.count('POST', '/unstable')).toBe(2) // maxRetries: 1 (pre-existing API-client behaviour)
+    // maxRetries: 1, but a POST is never re-sent: the first attempt may already have taken effect.
+    expect(await s().mock.count('POST', '/unstable')).toBe(1)
     const insp = await s().admin.inspect(out.meta.executionId!)
     expect(insp.execution.status).toBe(EXECUTION_STATUS.FAILED)
     expect(insp.activities[0]).toMatchObject({ status: ACTIVITY_STATUS.FAILED, failure: { outcomeKnown: false } })
@@ -52,7 +53,7 @@ describe('failure handling', () => {
     const insp = await s().admin.inspect(out.meta.executionId!)
     expect(insp.activities[0]).toMatchObject({ status: ACTIVITY_STATUS.FAILED, failure: { outcomeKnown: false } })
     const attempts = await s().mock.requests({ method: 'POST', path: '/unstable' })
-    expect(attempts.length).toBeGreaterThanOrEqual(1) // received (and held) by the backend — Harbor cannot know that
+    expect(attempts).toHaveLength(1) // received (and held) by the backend — Harbor cannot know that, so it never re-sends
   }, 30_000)
 
   it('should_keep_the_completed_first_step_when_a_middle_step_fails', async () => {
@@ -60,7 +61,7 @@ describe('failure handling', () => {
     s().track(out.meta.executionId)
     const insp = await s().admin.inspect(out.meta.executionId!)
     expect(insp.activities.map(a => [a.sequence, a.status])).toEqual([[1, ACTIVITY_STATUS.COMPLETED], [2, ACTIVITY_STATUS.FAILED]])
-    expect(await s().mock.calls()).toEqual(['GET /ping', 'POST /unstable', 'POST /unstable'])
+    expect(await s().mock.calls()).toEqual(['GET /ping', 'POST /unstable'])
     expectToolError(await s().client('alice').resumeByMeta('commerce', programs.pingThenUnstable('500'), out.meta.executionId!), ERR.EXECUTION_NOT_RESUMABLE)
   })
 

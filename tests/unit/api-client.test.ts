@@ -108,3 +108,23 @@ describe('ApiClient — headers the program may and may not set', () => {
     expect(h['content-type']).toBe('application/merge-patch+json')
   })
 })
+
+describe('ApiClient — retries never repeat a call whose effect may already have happened', () => {
+  it.each([
+    ['POST', 500], ['PATCH', 503], ['POST', 'timeout'], ['PATCH', 'timeout']
+  ] as const)('%s after %s is sent exactly once and fails with the outcome unknown', async (method, failure) => {
+    const backend = await listen(() => failure === 'timeout' ? { status: 201, delayMs: 400 } : { status: failure })
+    try {
+      await expect(client(backend.port, { maxRetries: 2, requestTimeoutMs: 150 }).executeRequest({ method, path: '/orders', body: { a: 1 } }, ctx)).rejects.toThrow()
+      expect(backend.seen).toHaveLength(1)
+    } finally { await backend.close() }
+  })
+
+  it.each([['GET', 500], ['PUT', 'timeout'], ['DELETE', 502]] as const)('%s after %s is retried up to maxRetries', async (method, failure) => {
+    const backend = await listen(() => failure === 'timeout' ? { status: 200, delayMs: 400 } : { status: failure })
+    try {
+      await expect(client(backend.port, { maxRetries: 1, requestTimeoutMs: 150 }).executeRequest({ method, path: '/orders/1' }, ctx)).rejects.toThrow()
+      expect(backend.seen).toHaveLength(2)
+    } finally { await backend.close() }
+  }, 10_000)
+})
