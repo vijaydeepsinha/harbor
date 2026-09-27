@@ -43,7 +43,8 @@ export async function buildServiceResources(
   )
 
   const authMiddleware = new AuthMiddleware(svc.auth, tokenCacheStrategy, svcLogger, svc.name, svcMetrics)
-  const idempotency = buildIdempotencyStrategy(svc.idempotencyBackend, svcLogger)
+  // A service without an `idempotency` block gets the gateway default (IDEMPOTENCY_TYPE, noop unless set).
+  const idempotency = buildIdempotencyStrategy(svc.idempotencyBackend ?? globalConfig.defaultIdempotency, svcLogger)
 
   // Service overrides take precedence over global defaults. Timeouts are
   // wall-clock (CPU + awaits), enforced inside the isolated-vm sandbox.

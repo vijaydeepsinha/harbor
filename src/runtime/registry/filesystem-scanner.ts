@@ -87,7 +87,8 @@ export interface ServiceDefinition {
   auth: AuthStrategy
   circuitBreaker: CircuitBreakerStrategy
   permissionGuard: PermissionGuard
-  idempotencyBackend: IdempotencyBackendConfig
+  /** From config.json's `idempotency` block; absent ⇒ the gateway default (IDEMPOTENCY_TYPE). */
+  idempotencyBackend?: IdempotencyBackendConfig
   idempotencyKeyTtlMs: number
   sandboxOverride: SandboxOverride
 }
@@ -224,7 +225,7 @@ async function scanSingleService(
     auth,
     circuitBreaker,
     permissionGuard,
-    idempotencyBackend,
+    ...(idempotencyBackend !== undefined ? { idempotencyBackend } : {}),
     idempotencyKeyTtlMs,
     sandboxOverride
   }
@@ -334,9 +335,9 @@ function resolveApiConfig(
   return { protocol: 'http', host: 'localhost', port: 8080, basePath: '', requestTimeoutMs: 30_000, maxRetries: 1 }
 }
 
-function resolveIdempotencyBackend(config: ServiceConfig): IdempotencyBackendConfig {
+function resolveIdempotencyBackend(config: ServiceConfig): IdempotencyBackendConfig | undefined {
   const idem = config.idempotency
-  if (!idem) return { type: STORE_TYPE.NOOP }
+  if (!idem) return undefined
 
   switch (idem.type) {
     case STORE_TYPE.NOOP:      return { type: STORE_TYPE.NOOP }

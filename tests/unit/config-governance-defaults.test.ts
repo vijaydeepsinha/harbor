@@ -11,7 +11,7 @@ import { GOVERNANCE_DECISION } from '../../src/core/constants.js'
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
 describe('governance configuration defaults', () => {
-  const KEYS = ['ENABLE_AUDIT', 'AUDIT_SINKS', 'GOVERNANCE_RULES_DIR', 'GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
+  const KEYS = ['TOKEN_CACHE_TYPE', 'IDEMPOTENCY_TYPE', 'ENABLE_AUDIT', 'AUDIT_SINKS', 'GOVERNANCE_RULES_DIR', 'GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
     'EXECUTION_STORE_TYPE', 'EXECUTION_STORE_MEMCACHE_HOST', 'EXECUTION_STORE_MEMCACHE_PORT', 'EXECUTION_STORE_MEMCACHE_TIMEOUT_MS',
     'EXECUTION_STORE_MEMCACHE_KEY_PREFIX', 'EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC', 'HARBOR_SERVER_ID'] as const
   let saved: Record<string, string | undefined> = {}
@@ -160,5 +160,19 @@ describe('governance configuration defaults', () => {
     process.env['EXECUTION_STORE_MEMCACHE_PORT'] = '11211'
     delete process.env['EXECUTION_STORE_MEMCACHE_TIMEOUT_MS']
     expect(validateGlobalConfig().codeMode.store).toMatchObject({ type: 'memcache', host: 'cache', port: 11211, kvTimeoutMs: 2000 })
+  })
+
+  it('a backend registered in code can be selected by name; a malformed name still stops the gateway', () => {
+    process.env['TOKEN_CACHE_TYPE'] = 'redis'
+    process.env['IDEMPOTENCY_TYPE'] = 'postgres'
+    process.env['EXECUTION_STORE_TYPE'] = 'dynamo-db'
+    const config = validateGlobalConfig()
+    expect(config.defaultIdempotency).toEqual({ type: 'postgres' })
+    expect(config.codeMode.store).toEqual({ type: 'dynamo-db' }) // resolved by buildExecutionStore, or refused there
+    for (const [key, bad] of [['TOKEN_CACHE_TYPE', 'Redis Cluster'], ['EXECUTION_STORE_TYPE', 'my_store!']] as const) {
+      process.env[key] = bad
+      expectBootRefused(key)
+      delete process.env[key]
+    }
   })
 })

@@ -142,6 +142,9 @@ function prefixedSpecs(prefix: string, suffixes: ReadonlyArray<{ suffix: string;
 }
 
 /** Options for resolving a `STORE_TYPE` store from `process.env` plus Memcache/Couchbase connection prefixes. */
+/** How a registered backend may be named: kebab-case, like the built-in ones. */
+const REGISTERED_TYPE_NAME = /^[a-z][a-z0-9-]*$/
+
 interface StoreTypeEnvOptions {
   /** `process.env` key whose value is the store type id (`STORE_TYPE`, e.g. `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE`). */
   storeTypeEnvKey: string
@@ -158,13 +161,16 @@ interface StoreTypeEnvOptions {
  */
 function resolveStoreTypeConfig(env: NodeJS.ProcessEnv, opts: StoreTypeEnvOptions) {
   const raw = (env[opts.storeTypeEnvKey] ?? opts.defaultType) as string
-  const parsed = z.enum(opts.allowedTypes).safeParse(raw)
-  if (!parsed.success) {
-    console.error(`${opts.storeTypeEnvKey} must be one of: ${opts.allowedTypes.join(' | ')}. Got: "${raw}"`)
+  // A built-in type, or the name of a backend registered in code
+  // (registerTokenCacheBackend / registerIdempotencyBackend). The builder
+  // resolves the latter and refuses a name nothing registered — a closed enum
+  // here made the documented "register it, then set the env var" impossible.
+  if (!(opts.allowedTypes as readonly string[]).includes(raw) && !REGISTERED_TYPE_NAME.test(raw)) {
+    console.error(`${opts.storeTypeEnvKey} must be one of: ${opts.allowedTypes.join(' | ')}, or the name of a registered backend. Got: "${raw}"`)
     process.exit(1)
   }
 
-  const type = parsed.data
+  const type = raw
   switch (type) {
     case STORE_TYPE.MEMCACHE:
       requireEnvVars(
@@ -217,7 +223,8 @@ const GlobalConfigSchema = z.object({
   HARBOR_AUTH_SERVERS: z.string().optional(),
   HARBOR_SCOPES_SUPPORTED: z.string().optional(),
   // ── Code Mode governance layer ──
-  EXECUTION_STORE_TYPE: z.enum([EXECUTION_STORE_TYPE.IN_MEMORY, EXECUTION_STORE_TYPE.FILE, EXECUTION_STORE_TYPE.MEMCACHE]).default(EXECUTION_STORE_TYPE.IN_MEMORY),
+  // in-memory | file | memcache, or the name of a backend registered with registerExecutionStoreBackend.
+  EXECUTION_STORE_TYPE: z.string().regex(REGISTERED_TYPE_NAME, 'a store type name (in-memory, file, memcache, or a registered backend)').default(EXECUTION_STORE_TYPE.IN_MEMORY),
   // memcache store only (EXECUTION_STORE_MEMCACHE_HOST / _PORT are required with it, _TIMEOUT_MS optional — same shape as TOKEN_CACHE_MEMCACHE_*).
   EXECUTION_STORE_MEMCACHE_KEY_PREFIX: z.string().min(1).optional(),
   // Must exceed the longest sandbox run: a crashed pod's run lock is released only when this expires.
@@ -265,8 +272,11 @@ function resolveExecutionStoreConfig(env: z.infer<typeof GlobalConfigSchema>): E
         ...(env.EXECUTION_STORE_MEMCACHE_KEY_PREFIX ? { keyPrefix: env.EXECUTION_STORE_MEMCACHE_KEY_PREFIX } : {}),
         ...(env.EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC ? { lockTtlSec: env.EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC } : {})
       }
-    default:
+    case EXECUTION_STORE_TYPE.IN_MEMORY:
       return { type: EXECUTION_STORE_TYPE.IN_MEMORY }
+    default:
+      // A registered backend: buildExecutionStore resolves it, or refuses an unknown name at boot.
+      return { type: env.EXECUTION_STORE_TYPE } as unknown as ExecutionStoreBackendConfig
   }
 }
 

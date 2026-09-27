@@ -8,6 +8,9 @@ import { join } from 'node:path'
 import pino from 'pino'
 import { scanServicesDirectory, scanSkills } from '../../src/runtime/registry/filesystem-scanner.js'
 import { buildIdempotencyStrategy } from '../../src/wiring/strategy-builders.js'
+import { buildServiceResources } from '../../src/runtime/gateway/service-resources-factory.js'
+import { InMemoryTokenCache } from '../../src/adapters/auth/strategies/in-memory-token-cache.strategy.js'
+import { globalConfig } from './code-mode-harness.js'
 
 const silent = pino({ level: 'silent' })
 const SPEC = 'openapi: 3.0.0\ninfo: { title: t, version: "1" }\npaths: {}\n'
@@ -74,5 +77,24 @@ describe('scanServicesDirectory — one bad entry never takes the others down', 
     const [scanned] = await scanServicesDirectory(root, silent)
     expect(scanned?.idempotencyBackend).toEqual({ type: 'postgres' })
     expect(() => buildIdempotencyStrategy(scanned!.idempotencyBackend)).toThrow('Unknown idempotency type: "postgres"')
+  })
+
+  it('a service without an idempotency block gets the gateway default (IDEMPOTENCY_TYPE); its own block wins', async () => {
+    root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
+    service(root, 'inherits')
+    service(root, 'own', { idempotency: { type: 'noop' } })
+    const scanned = await scanServicesDirectory(root, silent)
+    const cache = new InMemoryTokenCache(60_000)
+    try {
+      const config = { ...globalConfig, defaultIdempotency: { type: 'in-memory' as const } }
+      const byName = Object.fromEntries(await Promise.all(scanned.map(async svc => {
+        const r = await buildServiceResources(svc, config, cache)
+        r.refresher.stop()
+        return [svc.name, r.idempotencyStrategyName]
+      })))
+      expect(byName).toEqual({ inherits: 'in-memory', own: 'noop' })
+    } finally {
+      cache.destroy()
+    }
   })
 })
