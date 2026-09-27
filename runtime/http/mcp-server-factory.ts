@@ -11,9 +11,11 @@ import { registerDiscoverSkillsTool } from '../../tools/discover-skills.tool.js'
 import { registerGetSkillDetailsTool } from '../../tools/get-skill-details.tool.js'
 import { registerSearchCodeTool } from '../../tools/search-code.tool.js'
 import { registerExecuteApiTool } from '../../tools/execute-api.tool.js'
-import { GATEWAY_NAME, GATEWAY_VERSION, TOOL } from '../../core/constants.js'
+import { GATEWAY_NAME, GATEWAY_VERSION, TOOL, HTTP_HEADER } from '../../core/constants.js'
+import { safeHeaderValue } from '../../core/utils/header-value.js'
 import { errorMessage } from '../../core/utils/errors.js'
 import type { CodeModeRuntime } from '../execution/code-mode-runtime.js'
+import type { AuditPipeline } from '../observability/audit-pipeline.js'
 
 /** Options accepted by the `McpServer` constructor's second argument. */
 type McpServerOptions = NonNullable<ConstructorParameters<typeof McpServer>[1]>
@@ -74,6 +76,8 @@ export interface BuildMcpServerFactoryOptions {
   stdioToken?: string
   /** Code Mode governance layer; absent ⇒ legacy api_execute. */
   codeMode?: CodeModeRuntime
+  /** Audit sinks for api_execute records; absent ⇒ the service logger. */
+  auditPipeline?: AuditPipeline
 }
 
 /**
@@ -81,10 +85,12 @@ export interface BuildMcpServerFactoryOptions {
  * from `ctx.authInfo`; stdio mode falls back to the pre-configured token.
  */
 export function buildMcpServerFactory(opts: BuildMcpServerFactoryOptions): GatewayMcpServerFactory {
-  const { registry, globalConfig, logger, metrics, stdioToken = '', codeMode } = opts
+  const { registry, globalConfig, logger, metrics, stdioToken = '', codeMode, auditPipeline } = opts
 
   return (ctx: McpRequestContext) => {
     const clientToken = ctx.authInfo?.token ?? stdioToken
+    // Optional: the caller's own id, forwarded to backends as-is when it is a safe header value (HTTP only).
+    const callerClientId = safeHeaderValue(ctx.requestInfo?.headers.get(HTTP_HEADER.HARBOR_CLIENT_ID))
     const mcpServer = new McpServer({ name: GATEWAY_NAME, version: GATEWAY_VERSION }, buildMcpServerOptions(codeMode))
 
     // Each tool is registered in its own try/catch: a construction-time throw
@@ -96,7 +102,7 @@ export function buildMcpServerFactory(opts: BuildMcpServerFactoryOptions): Gatew
       [TOOL.DISCOVER_SKILLS, () => registerDiscoverSkillsTool(mcpServer, registry, logger, metrics, clientToken)],
       [TOOL.GET_SKILL_DETAILS, () => registerGetSkillDetailsTool(mcpServer, registry, logger, metrics, clientToken)],
       [TOOL.SEARCH_CODE, () => registerSearchCodeTool(mcpServer, registry, logger, metrics, clientToken)],
-      [TOOL.API_EXECUTE, () => registerExecuteApiTool(mcpServer, registry, globalConfig, logger, metrics, clientToken, codeMode)]
+      [TOOL.API_EXECUTE, () => registerExecuteApiTool(mcpServer, registry, globalConfig, logger, metrics, clientToken, codeMode, auditPipeline, callerClientId)]
     ]
 
     for (const [toolName, register] of registrations) {

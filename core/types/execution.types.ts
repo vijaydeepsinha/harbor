@@ -24,8 +24,12 @@ import {
 export interface ExecutionRecord {
   executionId: string
   service: string
-  /** The program as first submitted. Authoritative for every resume (Invariant 2). */
-  originalCode: string
+  /**
+   * The program as first submitted. Authoritative for every resume (Invariant 2).
+   * Stored before the first run — an interrupted or crashed run resumes from it —
+   * and removed once the execution is terminal unless EXECUTION_CODE_RETENTION=KEEP.
+   */
+  originalCode?: string
   status: ExecutionStatus
   /** sha256 of the caller's user id (or token) — never the raw principal. */
   userIdHash: string
@@ -41,6 +45,10 @@ export interface ExecutionRecord {
   pendingApprovalId?: string
   /** Value the program returned when it COMPLETED. */
   result?: unknown
+  /** When the execution became terminal (COMPLETED / FAILED / DENIED / CANCELLED). */
+  finishedAt?: string
+  /** When the retention sweep may delete it with all its records (EXECUTION_RETENTION_SEC after `finishedAt`; absent ⇒ kept). */
+  expiresAt?: string
 }
 
 /** What the program asked the bridge to do. Volatile headers are never recorded. */
@@ -52,8 +60,11 @@ export interface ActivityRequestRecord {
   specPath: string
   /** OpenAPI `operationId` when the spec declares one. */
   operationId?: string
+  /** `{param}` path segments — always strings (see ResolvedOperation.pathParams). */
   pathParams?: Record<string, string>
+  /** Query parameters as the program passed them; values may be nested objects/arrays. */
   query?: Record<string, unknown>
+  /** Request body as the program passed it — any JSON shape, including nested DTOs. */
   body?: unknown
 }
 
@@ -160,6 +171,22 @@ export class ApprovalRequiredError extends ExecutionError {
       ERR.APPROVAL_REQUIRED, false
     )
     this.name = 'ApprovalRequiredError'
+  }
+}
+
+/**
+ * A resume arrived before the human decided the approval the execution is
+ * waiting on. This is the same pause signal as {@link ApprovalRequiredError},
+ * not a termination: nothing ran, no lock was taken, and the execution stays
+ * WAITING_APPROVAL — it resumes once the approval is decided.
+ */
+export class ApprovalPendingError extends ApprovalRequiredError {
+  constructor(executionId: string, activitySequence: number, approvalId: string, summary: ApprovalSummary) {
+    super(executionId, activitySequence, approvalId, summary)
+    this.message =
+      `Approval ${approvalId} for activity #${activitySequence} (${summary.method} ${summary.specPath}) is still pending. ` +
+      `The execution is paused; it resumes after a human decision.`
+    this.name = 'ApprovalPendingError'
   }
 }
 

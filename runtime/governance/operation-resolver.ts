@@ -10,6 +10,12 @@ export interface ResolvedOperation {
   /** Path template from `spec.paths` (e.g. `/campaigns/{id}/activate`), or the normalized path when nothing matched. */
   specPath: string
   operationId?: string
+  /**
+   * Values captured by `{param}` segments of the URL path, percent-decoded.
+   * Always strings: a path segment cannot carry a nested DTO. Nested request
+   * data travels in `query` (`Record<string, unknown>`) and `body` (`unknown`),
+   * which keep their full shape and which rules read with dotted paths (`body.a.b`).
+   */
   pathParams: Record<string, string>
   /** `false` when the spec has no template for this method+path; governance then sees the fallback `specPath`. */
   matched: boolean

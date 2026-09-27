@@ -6,11 +6,12 @@ import { createLogger } from './observability/logger.js'
 import { MetricsRegistry } from './observability/metrics.js'
 import { ServiceRegistry } from './registry/service-registry.js'
 import { scanServicesDirectory } from './registry/filesystem-scanner.js'
-import { buildTokenCacheStrategy } from './gateway/strategy-builders.js'
+import { buildTokenCacheStrategy, buildAuditSinks } from './gateway/strategy-builders.js'
 import { buildServiceResources } from './gateway/service-resources-factory.js'
 import { startHttpGateway } from './http/http-gateway.js'
 import { buildMcpServerFactory } from './http/mcp-server-factory.js'
 import { buildCodeModeRuntime } from './execution/code-mode-runtime.js'
+import { AuditPipeline } from './observability/audit-pipeline.js'
 import { startStdioGateway } from './transport/stdio-gateway.js'
 import { GATEWAY_NAME, STORE_TYPE } from '../core/constants.js'
 import { errorMessage } from '../core/utils/errors.js'
@@ -68,8 +69,20 @@ export async function createMcpGateway(
   const transportMode = globalConfig.mcp.transport
   const stdioPat = globalConfig.mcp.token ?? ''
 
+  // Audit trail: every api_execute record and every execution state change goes
+  // to each AUDIT_SINKS sink, written with the owning service's logger.
+  const auditPipeline = new AuditPipeline(
+    globalConfig.observability.enableAudit
+      ? buildAuditSinks(globalConfig.observability.auditSinks ?? ['console'], {
+          loggerFor: service => registry.get(service)?.logger ?? gatewayLogger
+        })
+      : [],
+    gatewayLogger
+  )
+  gatewayLogger.info({ sinks: auditPipeline.sinkNames }, 'Audit pipeline ready')
+
   // Process-wide Code Mode governance layer: executions outlive requests and isolates.
-  const codeMode = buildCodeModeRuntime(globalConfig.codeMode, gatewayLogger)
+  const codeMode = await buildCodeModeRuntime(globalConfig.codeMode, gatewayLogger, auditPipeline)
 
   const createMcpServer = buildMcpServerFactory({
     registry,
@@ -77,7 +90,8 @@ export async function createMcpGateway(
     logger: gatewayLogger,
     metrics: gatewayMetrics,
     stdioToken: transportMode === 'stdio' ? stdioPat : undefined,
-    codeMode
+    codeMode,
+    auditPipeline
   })
 
   // Shared shutdown tail. Both transports must tear down cache, registry,
@@ -85,6 +99,7 @@ export async function createMcpGateway(
   // closing the HTTP listener) runs *before* this.
   const shutdownShared = () => {
     void codeMode.shutdown().catch(err => gatewayLogger.warn({ error: errorMessage(err) }, 'Code Mode store shutdown failed'))
+    void auditPipeline.close()
     tokenCacheStrategy.destroy()
     registry.shutdownAll()
     gatewayMetrics.stop()

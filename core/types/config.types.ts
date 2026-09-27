@@ -6,7 +6,7 @@ import type { CircuitBreakerStrategy } from './circuit-breaker.types.js'
 import type { IdempotencyStrategy } from './idempotency.types.js'
 import type { PermissionGuard } from './permission.types.js'
 import type { SpecLoaderStrategy } from './spec.types.js'
-import type { Environment, GovernanceDecisionType } from '../constants.js'
+import type { Environment, GovernanceDecisionType, ExecutionCodeRetention } from '../constants.js'
 import type { OAuthResourceConfig } from './oauth.types.js'
 
 /** Pino log levels. Narrowed from `string` so typos are caught at compile time. */
@@ -42,14 +42,34 @@ export type IdempotencyBackendConfig =
 export type ExecutionStoreBackendConfig =
   | { type: 'in-memory' }
   | { type: 'file'; dir: string }
+  | ({ type: 'memcache'; keyPrefix?: string; lockTtlSec?: number } & MemcacheConnectionConfig)
 
 /** Code Mode governance layer settings (see docs/code-mode-governance.md). */
 export interface CodeModeConfig {
   store: ExecutionStoreBackendConfig
+  /** What is kept once an execution is terminal. */
+  retention?: {
+    /** `DROP` (default) removes the program text; `KEEP` keeps it against the executionId. */
+    code?: ExecutionCodeRetention
+    /** Seconds after it finished that a terminal execution and all its records are deleted; 0 / absent ⇒ kept. */
+    executionSec?: number
+  }
   governance: {
-    /** Directory of Governance Rule files (`*.yaml` / `*.yml` / `*.json`). Missing dir ⇒ no rules. */
+    /** Directory of Governance Rule files (`*.yaml` / `*.yml` / `*.json`) for the `dir` source. Missing dir ⇒ no rules. */
     rulesDir: string
-    /** Decision when no rule matches. `ALLOW` preserves pre-governance behaviour. */
+    /** Where rules come from: `dir` (default), `url`, or a type registered with registerGovernanceRuleSourceBackend. */
+    rulesSource?: string
+    /** Rule document URL for the `url` source. */
+    rulesUrl?: string
+    /** Fetch timeout for the `url` source. */
+    rulesUrlTimeoutMs?: number
+    /** Re-read the source every N seconds (0 / absent ⇒ load once at boot). A failed refresh keeps the last valid set. */
+    rulesRefreshSec?: number
+    /**
+     * Decision for a call that some rule targets (its `match` fits) but no rule
+     * matches. A call no rule targets is ungoverned and always allowed
+     * (`NO_GOVERNANCE`), so deployments without rules behave as before.
+     */
     defaultDecision: GovernanceDecisionType
     /** HMAC key for MRTR `requestState`; ≥32 chars. Absent ⇒ a per-process random key (single-instance only). */
     requestStateKey?: string
@@ -102,6 +122,10 @@ export interface GlobalConfig {
     agentName: string
     environment: Environment
     enableAudit: boolean
+    /** Audit sinks every event goes to (AUDIT_SINKS): `console` (built in) or registered types. Absent ⇒ `['console']`. */
+    auditSinks?: string[]
+    /** Sent as X-Harbor-Server-ID on every backend call (HARBOR_SERVER_ID). Absent ⇒ `HARBOR_GATEWAY`. */
+    serverId?: string
   }
   defaultIdempotency: IdempotencyBackendConfig
   oauth?: OAuthResourceConfig

@@ -105,6 +105,9 @@ export const ERR = {
  *  type something as `code: string`. */
 export type ErrCode = (typeof ERR)[keyof typeof ERR]
 
+/** `X-Harbor-Server-ID` when HARBOR_SERVER_ID is not configured. */
+export const DEFAULT_HARBOR_SERVER_ID = 'HARBOR_GATEWAY'
+
 /** HTTP methods accepted by `api.request` from sandboxed user code. */
 export const ALLOWED_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 export type AllowedHttpMethod = (typeof ALLOWED_HTTP_METHODS)[number]
@@ -121,6 +124,10 @@ export const HTTP_HEADER = {
   MCP_SERVICE: 'X-MCP-Service',
   MCP_VERSION: 'X-MCP-Version',
   IDEMPOTENCY_KEY: 'X-Idempotency-Key',
+  /** Harbor's stamp on every backend call: which gateway made it (HARBOR_SERVER_ID). */
+  HARBOR_SERVER_ID: 'X-Harbor-Server-ID',
+  /** The external caller's own id, forwarded from the inbound `/mcp` request when it sent one. */
+  HARBOR_CLIENT_ID: 'X-Harbor-Client-ID',
   /** MCP 2026-07-28 protocol headers (spec §13/§14). Validated by the SDK;
    *  Harbor only reads them for routing/authorization/observability. */
   MCP_PROTOCOL_VERSION: 'MCP-Protocol-Version',
@@ -310,11 +317,31 @@ export const GOVERNANCE_DECISION = {
 } as const
 export type GovernanceDecisionType = (typeof GOVERNANCE_DECISION)[keyof typeof GOVERNANCE_DECISION]
 
-/** Precedence among matched rules (higher wins). Documented in docs/code-mode-governance.md. */
+/** Precedence among matched rules of the deciding level (higher wins). Documented in docs/code-mode-governance.md. */
 export const GOVERNANCE_PRECEDENCE: Record<GovernanceDecisionType, number> = {
   [GOVERNANCE_DECISION.DENY]: 3,
   [GOVERNANCE_DECISION.REQUIRE_APPROVAL]: 2,
   [GOVERNANCE_DECISION.ALLOW]: 1,
+}
+
+/**
+ * How broadly a Governance Rule applies, derived from what its `match` names:
+ * an operation or path ⇒ endpoint; a service only ⇒ service; neither ⇒
+ * gateway. The most specific level with a matching rule decides, unless a
+ * broader matching rule is `final`.
+ */
+export const RULE_LEVEL = {
+  GATEWAY: 'gateway',
+  SERVICE: 'service',
+  ENDPOINT: 'endpoint',
+} as const
+export type RuleLevel = (typeof RULE_LEVEL)[keyof typeof RULE_LEVEL]
+
+/** Specificity of each level (higher is more specific). */
+export const RULE_LEVEL_SPECIFICITY: Record<RuleLevel, number> = {
+  [RULE_LEVEL.GATEWAY]: 1,
+  [RULE_LEVEL.SERVICE]: 2,
+  [RULE_LEVEL.ENDPOINT]: 3,
 }
 
 export const APPROVAL_STATUS = {
@@ -328,11 +355,35 @@ export type ApprovalStatus = (typeof APPROVAL_STATUS)[keyof typeof APPROVAL_STAT
 export const EXECUTION_STORE_TYPE = {
   IN_MEMORY: 'in-memory',
   FILE: 'file',
+  /** Shared across pods: executions, journal, approvals and the run lock live in memcache. */
+  MEMCACHE: 'memcache',
+} as const
+
+/**
+ * What happens to an execution's program text once it is terminal
+ * (`EXECUTION_CODE_RETENTION`). The code is needed only to resume, and a
+ * terminal execution never resumes.
+ */
+export const EXECUTION_CODE_RETENTION = {
+  /** Remove it from the execution record (default). */
+  DROP: 'DROP',
+  /** Keep it stored against the executionId. */
+  KEEP: 'KEEP',
+} as const
+export type ExecutionCodeRetention = (typeof EXECUTION_CODE_RETENTION)[keyof typeof EXECUTION_CODE_RETENTION]
+
+/** Built-in Governance Rule sources (`GOVERNANCE_RULES_SOURCE`); others via registerGovernanceRuleSourceBackend. */
+export const GOVERNANCE_RULE_SOURCE_TYPE = {
+  DIR: 'dir',
+  URL: 'url',
 } as const
 
 /** Reason codes attached to governance decisions and execution failures. */
 export const GOVERNANCE_REASON = {
+  /** Some rule targets the call, none matched ⇒ the configured default decision. */
   NO_MATCHING_RULE: 'NO_MATCHING_RULE',
+  /** No rule targets the call at all ⇒ it is ungoverned and allowed. */
+  NO_GOVERNANCE: 'NO_GOVERNANCE',
   RULE_MATCHED: 'RULE_MATCHED',
   EVALUATION_FAILED: 'GOVERNANCE_EVALUATION_FAILED',
   APPROVAL_REJECTED: 'APPROVAL_REJECTED',

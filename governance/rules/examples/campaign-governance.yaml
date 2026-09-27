@@ -23,5 +23,50 @@ rules:
     action: { type: ALLOW }
 
   - name: never-delete-campaigns
-    match: { service: trafficking, method: DELETE, path: /campaigns/{id} }
+    match: { service: trafficking, method: DELETE, path: '/campaigns/{id}' }
     action: { type: DENY, reason: Campaign deletion is not permitted through agents }
+
+  # Condition trees: allOf (AND), anyOf (OR), not (NOT), and computed operands.
+  - name: large-share-or-long-flight
+    description: A campaign taking more than 20% of the total budget, or flighting longer than 30 days, is reviewed — unless it is a dry run
+    match: { service: trafficking, operation: createCampaign }
+    conditions:
+      allOf:
+        - anyOf:
+            - percent_of: { part: body.budget, whole: body.totalBudget }
+              greater_than: 20
+            - days_between: { from: body.startDate, to: body.endDate }
+              greater_than: 30
+        - not: { field: query.dryRun, equals: true }
+    action: { type: REQUIRE_APPROVAL, reason: Large share of the total budget or a long flight }
+
+  - name: bid-jump
+    description: Raising a bid by more than 30% at once is reviewed
+    match: { service: trafficking, operation: updateCampaign }
+    conditions:
+      ratio: { numerator: body.bid, denominator: body.currentBid }
+      greater_than: 1.3
+    action: { type: REQUIRE_APPROVAL, reason: Bid raised by more than 30% }
+
+  # Levels. A gateway rule (no service, operation or path) covers every service;
+  # `final: true` stops service and endpoint rules from overriding it.
+  - name: no-bulk-deletes-anywhere
+    description: No agent may delete through a collection endpoint, on any service
+    match: { method: DELETE, path: '*' }
+    conditions: { 'query.all': { equals: true } }
+    final: true
+    action: { type: DENY, reason: Bulk deletes are not permitted through agents }
+
+  # A service rule covers every endpoint of the service; the endpoint rules above
+  # override it wherever they match. Without this baseline the default decision
+  # (DENY) would refuse every trafficking call that an endpoint rule targets but
+  # does not match — e.g. a small createCampaign.
+  - name: trafficking-baseline
+    match: { service: trafficking }
+    action: { type: ALLOW }
+
+  # A subtree covers a template and every template beneath it.
+  - name: campaign-writes-need-an-owner
+    match: { service: trafficking, method: [POST, PUT, PATCH], path: '/campaigns/**' }
+    conditions: { not: { field: body.owner, exists: true } }
+    action: { type: DENY, reason: Campaign writes must name an owner }

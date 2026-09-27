@@ -16,8 +16,12 @@ documents it links to are the source of truth for details.
   `get_skill_details`, `search_code`, `api_execute` (`tools/`). Do not add
   tools or change their input schemas.
 - **Execution path:** `tools/execute-api.tool.ts` → `runtime/sandbox/execute-api-in-sandbox.ts`
-  (the *host bridge*, the only door out of the isolate) → `ConnectorAPI`
-  (`runtime/api-client/api-client.ts`). Never give the isolate network access.
+  (runs the program) → `runtime/sandbox/bridge-request-handler.ts` (the *host
+  bridge*, the only door out of the isolate; it asks
+  `runtime/execution/activity-gate.ts` whether to replay, execute, pause or
+  stop) → `ConnectorAPI` (`runtime/api-client/api-client.ts`). Every call
+  outcome is recorded once, in the activity journal; audit and progress are
+  projections of it. Never give the isolate network access.
 - **Services** are folders under `services/<name>/` with `config.json`, an
   OpenAPI `spec.yaml|json`, and agent-facing **Skills** (`skills/*.md`).
 - **Code Mode governance layer** (this branch): durable executions, activity
@@ -32,7 +36,8 @@ spi/           contracts: connector, auth, idempotency, permissions, resilience,
 adapters/      pluggable implementations (auth strategies, idempotency, resilience, execution stores)
 wiring/        env → strategy builders and backend registries (registerExecutionStoreBackend, …)
 runtime/       gateway boot (server-factory.ts), http (http-gateway.ts, execution-routes.ts, mcp-server-factory.ts),
-               sandbox (bridge), execution (manager, journal, approvals, request-state, code-mode-runtime),
+               sandbox (runner, bridge-request-handler), execution (manager, activity-gate, journal, approvals,
+               request-state, code-mode-runtime),
                governance (operation-resolver, rule-schema, rule-loader, rule-store, rule-evaluator),
                registry, spec, observability, transport (stdio)
 tools/         the five MCP tools + tool-helpers (response _meta, request _meta reader)
@@ -74,7 +79,7 @@ plus `npm run test:governance` when anything on the governance path changed
   (from `ERR`) and `retryable` (see `core/types/sandbox-error.types.ts`,
   `core/types/execution.types.ts`).
 - Comments explain *why*, not *what* — copy the register of
-  `execute-api-in-sandbox.ts`.
+  `bridge-request-handler.ts`.
 - Tests: vitest, table-driven where natural; mock `axios` or supply a fake
   `ConnectorAPI`; `tests/unit/code-mode-harness.ts` builds a governed
   `api_execute` with a counting connector and fake `ServerContext`s.
@@ -112,11 +117,14 @@ plus `npm run test:governance` when anything on the governance path changed
 - **A Governance Rule:** drop a YAML file in `governance/rules/` (format in
   `governance/rules/README.md`); boot validates it. Test with the evaluator
   directly (`tests/unit/governance-rules.test.ts` shows the shape).
+- **A rule source:** implement `GovernanceRuleSource` (`spi/governance/rule-source.ts`;
+  `load()` throws rather than return part of a set) and register it with
+  `registerGovernanceRuleSourceBackend`; `GOVERNANCE_RULES_SOURCE=<type>` selects it.
 - **A store backend:** implement `CodeModeStore` (`spi/execution/execution-store.ts`),
   run the contract suite in `tests/unit/execution-store.test.ts` against it,
   register with `registerExecutionStoreBackend`.
-- **A new activity state or verdict:** update `core/constants.ts`, the bridge
-  switch in `execute-api-in-sandbox.ts`, and the docs table in
+- **A new activity state or verdict:** update `core/constants.ts`, the replay
+  switch in `runtime/execution/activity-gate.ts`, and the docs table in
   `docs/code-mode-governance.md` together.
 - **A demo service:** `services/<name>/{config.json,spec.yaml,skills/}` plus a
   mock backend under `examples/demo/`; the E2E script boots what `start.sh` boots.

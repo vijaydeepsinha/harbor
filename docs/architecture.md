@@ -149,23 +149,32 @@ runtime/
 ├── gateway/
 │   ├── service-resources-factory.ts   wires ServiceDefinition → ServiceResources
 │   └── strategy-builders.ts           thin re-export of wiring/strategy-builders.ts
+├── execution/                     Code Mode governance layer (see docs/code-mode-governance.md)
+│   ├── execution-manager.ts       execution lifecycle, run lock, history
+│   ├── activity-gate.ts           replay / governance decision for each call of a governed run
+│   ├── activity-journal.ts        CallLog (the run's call outcomes) + ActivityJournal (durable activity record)
+│   ├── approval-service.ts        human approvals bound to one activity
+│   ├── request-state.ts           HMAC-sealed MRTR requestState codec
+│   └── code-mode-runtime.ts       process-wide wiring of store, manager, approvals, rules
 ├── http/
 │   ├── http-gateway.ts            Streamable HTTP server (node:http); /mcp + /health endpoints
 │   ├── http-error.ts              typed HTTP error
 │   ├── oauth-metadata-handler.ts  RFC 9728 protected resource metadata
 │   └── send-response.ts           SSE response writer
 ├── observability/
-│   ├── audit.ts                   AuditCollector — per-request record; flushed via pino on completion
+│   ├── audit.ts                   AuditCollector — projection of the run's call log (endpoints called); writeAuditRecord
+│   ├── audit-pipeline.ts          fans audit records and execution-state events out to the AUDIT_SINKS sinks
 │   ├── logger.ts                  pino factory; pino-caller adds source location in non-prod
 │   ├── metrics.ts                 MetricsRegistry — in-memory counters (no push endpoint yet)
-│   └── progress.ts                ProgressCollector — intermediate api.request() call log
+│   └── progress.ts                ProgressCollector — projection of the run's call log (per-call status, created ids)
 ├── registry/
 │   ├── filesystem-scanner.ts      scans services/*; parses spec + config.json + skills/*.md
 │   ├── service-registry.ts        in-memory map of service name → ServiceResources
 │   └── skill-store.ts             in-memory map of skill id → SkillDocument; atomic swap on refresh
 ├── sandbox/
 │   ├── sandbox-core.ts            isolated-vm isolate lifecycle; dual-timeout fence; JSON bridge
-│   ├── execute-api-in-sandbox.ts  skill execution; ConnectorAPI bridge; violation capture + promotion
+│   ├── execute-api-in-sandbox.ts  runs one program: wires the bridge into the isolate; violation promotion
+│   ├── bridge-request-handler.ts  per-run api.request() pipeline (ConnectorAPI bridge); violation capture
 │   ├── skills-search-in-sandbox.ts  skill relevance filter inside sandbox
 │   └── spec-search-in-sandbox.ts    OpenAPI endpoint search inside sandbox
 ├── spec/
@@ -183,7 +192,7 @@ The only layer that imports from both `adapters/` and `spi/`. Keeps the layer in
 
 | File | Responsibility |
 |------|----------------|
-| `strategy-builders.ts` | Factory registry for token-cache and idempotency backends; `buildTokenCacheStrategy`, `buildIdempotencyStrategy`, `buildSpecLoader`; external `registerTokenCacheBackend` / `registerIdempotencyBackend` registration points |
+| `strategy-builders.ts` | Factory registry for token-cache and idempotency backends; `buildTokenCacheStrategy`, `buildIdempotencyStrategy`, `buildSpecLoader`, `buildGovernanceRuleSource`, `buildAuditSinks`; external `registerTokenCacheBackend` / `registerIdempotencyBackend` / `registerGovernanceRuleSourceBackend` / `registerAuditSinkBackend` registration points |
 | `service-wiring.ts` | `resolveAuth` — instantiates the correct `AuthStrategy` from a `ServiceAuthConfig` descriptor; `resolveCircuitBreaker` — instantiates `CircuitBreakerStrategy` from config |
 
 `runtime/gateway/strategy-builders.ts` is a thin re-export shell (`export * from '../../wiring/strategy-builders.js'`) so existing import paths stay valid.
@@ -240,8 +249,8 @@ execute-api.tool.ts
   ├─ 5.  IdempotencyStrategy.checkAndExecute(key, fn, ttl)
   │         cached result (return early) | null (proceed to sandbox)
   │
-  ├─ 6.  AuditCollector.start()
-  │       ProgressCollector.start()
+  ├─ 6.  CallLog for the run (the execution's ActivityJournal when governed);
+  │       AuditCollector / ProgressCollector are read-only projections of it
   │
   ├─ 7.  runApiInSandbox(userCode, sandboxCtx)
   │       │
@@ -251,19 +260,21 @@ execute-api.tool.ts
   │            ├─ inject __makeRequest bridge into isolate global
   │            ├─ compile + run userCode as async function
   │            │    │
-  │            │    └─ api.request(opts)
+  │            │    └─ api.request(opts) → BridgeRequestHandler.handle
+  │            │         ├─ enforce maxApiCalls + maxConcurrentCalls
   │            │         ├─ validate opts (path, method)
+  │            │         ├─ ActivityGate.admit (governed runs): replay | execute | pause | stop
   │            │         ├─ PermissionGuard.canExecute(path, method, tokenPayload)
   │            │         ├─ CircuitBreakerStrategy.check(path)
-  │            │         ├─ enforce maxApiCalls + maxConcurrentCalls
-  │            │         └─ ConnectorAPI.request(apiRequest, ctx, ttlMs)
-  │            │                └─ ApiClient → HTTP → backend service
+  │            │         ├─ ConnectorAPI.request(apiRequest, ctx, ttlMs)
+  │            │         │      └─ ApiClient → HTTP → backend service
+  │            │         └─ journal: one record of the outcome (durable activity when governed)
   │            │
   │            └─ enforce: V8 CPU timeout (script.run) + wall-clock (setTimeout)
   │
   ├─ 8.  CircuitBreakerStrategy.recordSuccess(endpoint)
   ├─ 9.  MetricsRegistry.increment(TOOL_CALLS, {outcome: success})
-  └─ 10. AuditCollector.finish() → writeAuditRecord() via pino
+  └─ 10. writeAuditRecord() → audit pipeline → each AUDIT_SINKS sink (console: pino line; endpoints from AuditCollector)
           └─ mcpSuccess(result) → SSE event → AI Agent
 ```
 
@@ -418,20 +429,24 @@ export interface ToolResolver {
 
 ---
 
-### ⚠️ `StorageProvider`   NOT YET IMPLEMENTED
+### ✅ `AuditSink`
 
-**File that needs it:** `runtime/observability/audit.ts`
+**Where:** `spi/observability/audit-sink.ts`, fanned out by `runtime/observability/audit-pipeline.ts`.
 
-**Problem:** audit records go to pino log only. No structured export to S3, PostgreSQL, or SIEM.
+Every `api_execute` audit record and every execution state change (statuses,
+approvals, decisions — no request/response bodies) goes to each sink listed
+in `AUDIT_SINKS`. Built in: `console` (the structured log line, as before).
+Register others — S3, PostgreSQL, a SIEM — without forking:
 
-**Proposed interface:**
 ```typescript
-// spi/observability/storage-provider.ts
-export interface StorageProvider {
-  write(record: AuditRecord): Promise<void>
-  flush?(): Promise<void>
-}
+import { registerAuditSinkBackend } from './runtime/gateway/strategy-builders.js'
+
+registerAuditSinkBackend('s3', ({ loggerFor }) => new S3AuditSink(/* bucket, prefix */))
+// AUDIT_SINKS=console,s3
 ```
+
+A sink that throws is logged and skipped; the other sinks and the request are
+unaffected. An unknown name in `AUDIT_SINKS` stops boot.
 
 ---
 
@@ -478,7 +493,7 @@ Bootstrap, tool wiring, transport selection, and shutdown handling are one funct
 - `ProtocolAdapter` — when a third transport is added
 - `SkillProvider` — when skills need a DB or remote source
 - `ToolResolver` — when custom tools are needed
-- `StorageProvider` — when audit export to S3 / SIEM is needed
+- Built-in S3 / GCS audit sinks — the `AuditSink` interface exists; `console` is the only built-in
 - Remote service registry (etcd / Consul) — replace filesystem scanner
 - Multi-tenant namespacing — isolated registries per tenant within one gateway
 

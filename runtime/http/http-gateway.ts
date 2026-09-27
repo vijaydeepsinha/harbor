@@ -116,7 +116,7 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
       }
 
       if (codeMode && url.startsWith(HTTP_ROUTES.EXECUTIONS)) {
-        if (await handleExecutionRoutes(req, res, url, codeMode, logger, oauthConfig)) return
+        if (await handleExecutionRoutes(req, res, url, codeMode, registry, logger, oauthConfig)) return
       }
 
       throw new HttpError(404, ERR.NOT_FOUND, 'Not found', undefined, { url })

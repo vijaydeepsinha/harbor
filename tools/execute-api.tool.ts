@@ -12,6 +12,7 @@ import type { GlobalConfig } from '../core/types/config.types.js'
 import type { Logger } from '../runtime/observability/logger.js'
 import type { MetricsCollector } from '../core/types/metrics.types.js'
 import { AuditCollector, writeAuditRecord } from '../runtime/observability/audit.js'
+import type { AuditPipeline } from '../runtime/observability/audit-pipeline.js'
 import { ProgressCollector } from '../runtime/observability/progress.js'
 import {
   runApiInSandbox,
@@ -28,12 +29,11 @@ import {
   ReplayDivergedError,
   ExecutionCancelledError,
   ActivityOutcomeUnknownError,
-  ExecutionError,
   ApprovalAlreadyDecidedError
 } from '../core/types/execution.types.js'
 import type { CodeModeRuntime } from '../runtime/execution/code-mode-runtime.js'
 import type { ResumeState } from '../runtime/execution/request-state.js'
-import { ActivityJournal } from '../runtime/execution/activity-journal.js'
+import { ActivityJournal, CallLog, type CallLogSource } from '../runtime/execution/activity-journal.js'
 import { resolveOperation } from '../runtime/governance/operation-resolver.js'
 import { evaluateGovernance } from '../runtime/governance/rule-evaluator.js'
 import {
@@ -50,6 +50,7 @@ import {
 } from '../core/constants.js'
 import type { AuditOutcome, ExecutionStatus } from '../core/constants.js'
 import { ensureError, errorCode as getErrorCode, errorRetryable } from '../core/utils/errors.js'
+import { hashAuthenticatedPrincipal } from '../core/utils/user-id-hash.js'
 
 export function registerExecuteApiTool(
   server: McpServer,
@@ -59,7 +60,11 @@ export function registerExecuteApiTool(
   metrics: MetricsCollector,
   clientToken?: string,
   /** Absent ⇒ legacy behaviour: no durable execution, no governance. */
-  codeMode?: CodeModeRuntime
+  codeMode?: CodeModeRuntime,
+  /** Where audit records go (AUDIT_SINKS). Absent ⇒ written to the service logger, as before. */
+  auditPipeline?: AuditPipeline,
+  /** The caller's X-Harbor-Client-ID from the inbound request, forwarded on every backend call. */
+  callerClientId?: string
 ): void {
   const serviceNames = registry.serviceNames()
 
@@ -182,10 +187,17 @@ async () => {
       let outcome: AuditOutcome = OUTCOME.SUCCESS
       let errorType: string | undefined
       let errorCode: string | undefined
-      const auditCollector = new AuditCollector()
-      const progressCollector = new ProgressCollector(sandboxLimits.maxApiCalls)
+      // Every call's outcome is recorded once, in the run's CallLog — the
+      // execution's durable activity journal once a governed run starts.
+      // Audit and progress are read-only projections of it.
+      let callLog: CallLog = new CallLog()
+      const runCalls: CallLogSource = { entries: () => callLog.entries() }
+      const auditCollector = new AuditCollector(runCalls)
+      const progressCollector = new ProgressCollector(runCalls, sandboxLimits.maxApiCalls)
       // Set once the execution is known so every audit line and error carries it.
       let executionId: string | undefined
+      // True once beginRun took the run lock — only then is there a run to end.
+      let runStarted = false
       let userIdHash = 'unknown'
 
       const audit = (extra: Partial<Parameters<typeof writeAuditRecord>[0]>, codeSubmitted: string): void => {
@@ -209,7 +221,8 @@ async () => {
             ...extra
           },
           svcResources.logger,
-          globalConfig
+          globalConfig,
+          auditPipeline
         )
       }
 
@@ -220,10 +233,7 @@ async () => {
         )
         if (isToolError(authResult)) return authResult
         const { payload: tokenPayload, invalidate } = authResult
-        const rawUserId = tokenPayload.metadata?.userId
-        userIdHash = rawUserId
-          ? createHash('sha256').update(String(rawUserId)).digest('hex')
-          : createHash('sha256').update(tokenPayload.access_token).digest('hex')
+        userIdHash = hashAuthenticatedPrincipal(tokenPayload)
 
         logger.info({ correlationId, service, step: '2/4 code' }, `${LOG_PREFIX.MCP} JavaScript code received from AI client`)
         logger.debug({ correlationId, service, codeReceived: code }, `${LOG_PREFIX.MCP} code payload`)
@@ -240,7 +250,9 @@ async () => {
           executionId = execution.executionId
           if (pendingRetry) return pendingRetry
           execution = await codeMode.manager.beginRun(execution.executionId)
+          runStarted = true
           bridge = makeBridge(codeMode, execution, svcResources, userIdHash)
+          callLog = bridge.journal
         }
         const program = execution?.originalCode ?? code
 
@@ -250,10 +262,14 @@ async () => {
 
         const sandboxCtx: SandboxExecutionContext = {
           tokenPayload, invalidate, apiClient, circuitBreaker, permissionGuard,
-          idempotencyKey, idempotencyKeyTtlMs, correlationId,
-          sessionId, auditCollector, progressCollector,
+          idempotencyKey, idempotencyKeyTtlMs,
+          // Backends correlate every call of one script by its execution id — it
+          // survives the new isolate (and new MCP request) of each approval resume.
+          correlationId: executionId ?? correlationId,
+          sessionId,
+          ...(callerClientId !== undefined ? { clientId: callerClientId } : {}),
           limits: sandboxLimits,
-          ...(bridge ? { execution: bridge } : {})
+          ...(bridge ? { executionBridge: bridge } : { callLog })
         }
         const result = await runApiInSandbox(program, sandboxCtx)
 
@@ -342,9 +358,10 @@ async () => {
             : status === EXECUTION_STATUS.CANCELLED ? { kind: 'cancelled' as const, code: errorCode, message: errObj.message }
             : status === EXECUTION_STATUS.INTERRUPTED ? { kind: 'interrupted' as const, code: errorCode, message: errObj.message }
             : { kind: 'failed' as const, code: errorCode, message: errObj.message }
-          // beginRun may itself have thrown (locked / not resumable) — then there is no lock to release.
-          if (!(err instanceof ExecutionError && !(err instanceof ApprovalRequiredError) && !(err instanceof GovernanceDeniedError)
-                && !(err instanceof ExecutionCancelledError) && !(err instanceof ReplayDivergedError) && !(err instanceof ActivityOutcomeUnknownError))) {
+          // beginRun may itself have thrown (locked, not resumable, approval still
+          // pending) — then no run started, there is no lock to release and the
+          // stored execution must stay exactly as it was.
+          if (runStarted) {
             await codeMode.manager.endRun(executionId, outcomeForStore).catch(e =>
               logger.error({ correlationId, executionId, error: ensureError(e).message }, 'Failed to persist run outcome'))
           }
@@ -442,7 +459,7 @@ async function resolveExecution(
   if (execution.service !== input.service) {
     return { error: mcpError(`Execution ${resumeId} runs against service "${execution.service}", not "${input.service}"`, ERR.EXECUTION_NOT_RESUMABLE, false) }
   }
-  if (input.code !== execution.originalCode) {
+  if (execution.originalCode !== undefined && input.code !== execution.originalCode) {
     logger.warn({ correlationId, executionId: resumeId }, 'Resume carried different code — ignored; the persisted original program is authoritative')
   }
 

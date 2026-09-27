@@ -59,7 +59,11 @@ export async function buildServiceResources(
   const apiBaseUrl = buildApiBaseUrl(svc.apiConfig)
   const apiClient = new ApiClient(
     apiBaseUrl, svc.apiConfig, svc.circuitBreaker, idempotency, svcLogger,
-    { serviceName: svc.name, agentName: globalConfig.observability.agentName }
+    {
+      serviceName: svc.name,
+      agentName: globalConfig.observability.agentName,
+      ...(globalConfig.observability.serverId !== undefined ? { serverId: globalConfig.observability.serverId } : {})
+    }
   )
 
   return {

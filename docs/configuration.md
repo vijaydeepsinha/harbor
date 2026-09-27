@@ -15,7 +15,7 @@ These apply to the **whole gateway process**: bind address, shared token cache, 
 Read at process entry (`index.ts`): `SERVICES_DIR`.
 
 Parsed on every startup (`GlobalConfigSchema` in `config.ts`):  
-`MCP_HOST`, `MCP_PORT`, `MCP_TRANSPORT`, `MCP_TOKEN` (optional unless `MCP_TRANSPORT=stdio`), `AUTH_TOKEN_CACHE_TTL_MS`, `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE`, `SANDBOX_MEMORY_MB`, `SANDBOX_EXECUTE_TIMEOUT_MS`, `SANDBOX_SEARCH_TIMEOUT_MS`, `SANDBOX_MAX_API_CALLS`, `SANDBOX_MAX_CONCURRENT_CALLS`, `LOG_LEVEL`, `SERVICE_NAME`, `MCP_AGENT_NAME`, `ENVIRONMENT`, `ENABLE_AUDIT`, `HARBOR_RESOURCE_URI`, `HARBOR_AUTH_SERVERS`, `HARBOR_SCOPES_SUPPORTED`.
+`MCP_HOST`, `MCP_PORT`, `MCP_TRANSPORT`, `MCP_TOKEN` (optional unless `MCP_TRANSPORT=stdio`), `AUTH_TOKEN_CACHE_TTL_MS`, `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE`, `SANDBOX_MEMORY_MB`, `SANDBOX_EXECUTE_TIMEOUT_MS`, `SANDBOX_SEARCH_TIMEOUT_MS`, `SANDBOX_MAX_API_CALLS`, `SANDBOX_MAX_CONCURRENT_CALLS`, `LOG_LEVEL`, `SERVICE_NAME`, `MCP_AGENT_NAME`, `HARBOR_SERVER_ID`, `ENVIRONMENT`, `ENABLE_AUDIT`, `AUDIT_SINKS`, `HARBOR_RESOURCE_URI`, `HARBOR_AUTH_SERVERS`, `HARBOR_SCOPES_SUPPORTED`.
 
 Read only when the matching backend is active:
 
@@ -127,8 +127,10 @@ One backend for the entire gateway. Token entries are keyed per-service internal
 | `LOG_LEVEL`      | `info`          | `fatal` … `trace`.                                                                                       |
 | `SERVICE_NAME`   | `harbor-gateway` | Service label in logs.                                                                                   |
 | `MCP_AGENT_NAME` | `mcp-agent`     | Sent as `X-Request-Source` header to backends.                                                           |
+| `HARBOR_SERVER_ID` | `HARBOR_GATEWAY` | Harbor's stamp on every backend call, sent as `X-Harbor-Server-ID`. Printable ASCII, ≤128 characters; anything else fails boot. |
 | `ENVIRONMENT`    | `dev`           | `dev`, `staging`, `staging-secondary`, `canary`, `prod`. Non-prod includes caller file:line in logs. |
 | `ENABLE_AUDIT`   | `true`          | Audit records for `api_execute`. Set `false` in dev to reduce noise.                                     |
+| `AUDIT_SINKS`    | `console`       | Comma list of audit sinks every record and execution-state event goes to: `console` (built in) or types registered with `registerAuditSinkBackend`. An unknown name fails boot. |
 
 ### OAuth 2.1 resource server (HTTP transport only)
 
@@ -146,10 +148,19 @@ When `HARBOR_RESOURCE_URI` is not set the gateway behaves identically to before 
 
 | Variable | Default | Description |
 |---|---|---|
-| `EXECUTION_STORE_TYPE` | `in-memory` | Where executions, activities, approvals and decisions live: `in-memory` or `file` |
+| `EXECUTION_STORE_TYPE` | `in-memory` | Where executions, activities, approvals, decisions and the run lock live: `in-memory`, `file`, or `memcache` (shared across pods) |
+| `EXECUTION_STORE_MEMCACHE_HOST` / `EXECUTION_STORE_MEMCACHE_PORT` | — | Memcached for `EXECUTION_STORE_TYPE=memcache` (required with it); `EXECUTION_STORE_MEMCACHE_TIMEOUT_MS` optional, default `2000` |
+| `EXECUTION_STORE_MEMCACHE_KEY_PREFIX` | `harbor:exec:` | Key namespace, so several gateways or environments can share one memcache |
+| `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC` | `300` | How long the run lock of a pod that died mid-run survives; must exceed the longest `SANDBOX_EXECUTE_TIMEOUT_MS` |
 | `EXECUTION_STORE_DIR` | `./var/executions` | Directory for the `file` store (one JSON document per execution) |
-| `GOVERNANCE_RULES_DIR` | `./governance/rules` | Governance Rule files (`*.yaml`/`*.yml`/`*.json`, top level only). Invalid files fail boot |
-| `GOVERNANCE_DEFAULT_DECISION` | `ALLOW` | Decision when no rule matches: `ALLOW`, `DENY`, `REQUIRE_APPROVAL` |
+| `EXECUTION_CODE_RETENTION` | `DROP` | `DROP`: remove a terminal execution's program text · `KEEP`: keep it stored against the `executionId` |
+| `EXECUTION_RETENTION_SEC` | `86400` | Seconds a finished execution and all its records (activities, approvals, decisions) are kept before deletion; `0` = keep forever. Paused and interrupted executions are never deleted |
+| `GOVERNANCE_RULES_SOURCE` | `dir` | Where Governance Rules come from: `dir`, `url`, or a type registered with `registerGovernanceRuleSourceBackend` |
+| `GOVERNANCE_RULES_DIR` | `./governance/rules` | Governance Rule files for the `dir` source (`*.yaml`/`*.yml`/`*.json`, top level only). Invalid files fail boot |
+| `GOVERNANCE_RULES_URL` | — | Rule document for the `url` source (required with it) |
+| `GOVERNANCE_RULES_URL_TIMEOUT_MS` | `5000` | Fetch timeout for the `url` source |
+| `GOVERNANCE_RULES_REFRESH_SEC` | `0` | Re-read the rule source every N seconds (`0` = once, at boot). An unreachable source or an invalid set keeps the last valid set |
+| `GOVERNANCE_DEFAULT_DECISION` | `DENY` | Decision for a call that some rule targets but no rule matches: `ALLOW`, `DENY`, `REQUIRE_APPROVAL`. A call no rule targets is always allowed (`NO_GOVERNANCE`) |
 | `GOVERNANCE_REQUEST_STATE_KEY` | *(random per process)* | ≥32-character HMAC key sealing the MRTR `requestState`; set it for multi-instance deployments |
 | `GOVERNANCE_APPROVAL_TTL_SEC` | `600` | Seconds a paused execution's `requestState` stays redeemable |
 

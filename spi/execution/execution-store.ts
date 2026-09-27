@@ -21,6 +21,14 @@ export interface ExecutionStore {
   createExecution(record: ExecutionRecord): Promise<void>
   getExecution(executionId: string): Promise<ExecutionRecord | undefined>
   updateExecution(record: ExecutionRecord): Promise<void>
+  /** Removes the execution and everything recorded for it — activities, approvals, decisions, its lock. Unknown id ⇒ no-op. */
+  deleteExecution(executionId: string): Promise<void>
+  /**
+   * Ids of executions whose `expiresAt` is at or before `now`, oldest first,
+   * at most `limit` — what the retention sweep deletes. A store that expires
+   * records natively (item TTLs) may return none.
+   */
+  listExpiredExecutions(now: string, limit: number): Promise<string[]>
 }
 
 export interface ActivityStore {

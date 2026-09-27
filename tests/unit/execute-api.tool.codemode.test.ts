@@ -3,10 +3,15 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  makeConnector, makeResources, makeRuntime, registerGoverned, makeCtx, retryCtx, parseContent
+  makeConnector, makeResources, makeRuntime, registerGoverned, makeCtx, retryCtx, parseContent,
+  makeFakeServer, makeRegistry, globalConfig, silentLogger
 } from './code-mode-harness.js'
+import { registerExecuteApiTool } from '../../tools/execute-api.tool.js'
+import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
+import { MemcacheCodeModeStore } from '../../adapters/execution/memcache-execution-store.js'
+import { FakeMemcache } from './fake-memcache.js'
 import {
-  ERR, EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS,
+  ERR, EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS, GOVERNANCE_DECISION, GOVERNANCE_REASON, TOOL,
   EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY, APPROVAL_ID_META_KEY, APPROVAL_INPUT_KEY
 } from '../../core/constants.js'
 
@@ -43,7 +48,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(meta[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
     expect(calls.length).toBe(2)
     const exec = await rt.manager.load(executionId)
-    expect(exec.originalCode).toBe(PROGRAM)
+    expect(exec.originalCode).toBeUndefined() // a COMPLETED execution keeps no program text (EXECUTION_CODE_RETENTION=DROP)
     expect(exec.currentActivity).toBe(2)
     expect((await rt.store.listDecisions(executionId)).map(d => d.decision)).toEqual(['ALLOW', 'ALLOW'])
   })
@@ -134,12 +139,160 @@ describe('api_execute under the Code Mode governance layer', () => {
     const meta = paused['_meta'] as Record<string, unknown>
     expect(meta[APPROVAL_ID_META_KEY]).toBe(body.approvalId)
 
+    expect((await rt.manager.load(body.executionId)).originalCode).toBe(PROGRAM_FINALIZE) // persisted while paused
+
     await rt.approvals.decide(body.approvalId, { action: 'accept', via: 'http' })
     const done = await handler({ service: 'trafficking', code: 'async () => "REPLACEMENT CODE IS IGNORED"' }, makeCtx({ elicitation: false, executionIdMeta: body.executionId }))
     expect(done['isError']).toBeUndefined()
-    expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' })
+    expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' }) // the persisted program ran
     expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
-    expect((await rt.manager.load(body.executionId)).originalCode).toBe(PROGRAM_FINALIZE)
+    expect((await rt.manager.load(body.executionId)).originalCode).toBeUndefined() // dropped once COMPLETED (default DROP)
+  })
+
+  it('resuming before the approval is decided pauses again — it does not report the execution as FAILED', async () => {
+    const rt = makeRuntime([FINALIZE_RULE])
+    const { connector, count } = makeConnector()
+    const handler = registerGoverned(rt, makeResources('trafficking', connector))
+    const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false }))
+    const { executionId, approvalId } = parseContent(paused) as { executionId: string; approvalId: string }
+
+    // Fallback client resumes via _meta while the approval is still PENDING.
+    const early = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false, executionIdMeta: executionId }))
+    expect(early['isError']).toBe(true)
+    const body = parseContent(early) as { code: string; approvalId: string; activitySequence: number }
+    expect(body.code).toBe(ERR.APPROVAL_REQUIRED)
+    expect(body.approvalId).toBe(approvalId)
+    expect(body.activitySequence).toBe(2)
+    const meta = early['_meta'] as Record<string, unknown>
+    expect(meta[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect(meta[APPROVAL_ID_META_KEY]).toBe(approvalId)
+
+    // An elicitation-capable client that lost its requestState is simply asked again.
+    const reasked = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ executionIdMeta: executionId }))
+    expect(reasked['resultType']).toBe('input_required')
+    expect((reasked['_meta'] as Record<string, unknown>)[APPROVAL_ID_META_KEY]).toBe(approvalId)
+
+    // Nothing ran and nothing changed: still paused on the same approval, one run so far.
+    const exec = await rt.manager.load(executionId)
+    expect(exec.status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect(exec.pendingApprovalId).toBe(approvalId)
+    expect(exec.runCount).toBe(1)
+    expect(count('GET', '/campaigns')).toBe(1)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
+    expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+
+    // Still resumable once decided.
+    await rt.approvals.decide(approvalId, { action: 'accept', via: 'http' })
+    const done = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false, executionIdMeta: executionId }))
+    expect(done['isError']).toBeUndefined()
+    expect((done['_meta'] as Record<string, unknown>)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
+  })
+
+  it('nested request DTOs (body and query) reach the rules, the journal and the backend with their full shape', async () => {
+    const NESTED_RULE = {
+      name: 'nested-budget', match: { service: 'trafficking', operation: 'createCampaign' },
+      conditions: {
+        'body.campaign.budget.amount': { greater_than: 1_000_000 },
+        'body.campaign.flights.0.start': { starts_with: '2026-' },
+        'query.filter.status': { equals: 'draft' }
+      },
+      action: { type: 'REQUIRE_APPROVAL', reason: 'Large nested budget' }
+    }
+    const body = (amount: number) => ({ campaign: { name: 'Q4', budget: { amount, currency: 'USD' }, flights: [{ start: '2026-10-01', end: '2026-12-31' }] } })
+    const params = { filter: { status: 'draft', owner: { team: 'growth' } }, ids: ['a', 'b'] }
+    const program = (amount: number) => `async () => {
+      const r = await api.request({ method: 'POST', path: '/campaigns', params: ${JSON.stringify(params)}, body: ${JSON.stringify(body(amount))} })
+      return r.data.did
+    }`
+    const rt = makeRuntime([NESTED_RULE])
+    const { connector, calls, count } = makeConnector()
+    const handler = registerGoverned(rt, makeResources('trafficking', connector))
+
+    // A deep field over the threshold triggers the rule …
+    const paused = await handler({ service: 'trafficking', code: program(2_000_000) }, makeCtx())
+    expect(paused['resultType']).toBe('input_required')
+    expect(count('POST', '/campaigns')).toBe(0)
+    const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+    const activity = await rt.store.getActivity(executionId, 1)
+    expect(activity?.request.body).toEqual(body(2_000_000))
+    expect(activity?.request.query).toEqual(params)
+    expect(activity?.request.pathParams).toBeUndefined()
+    const approvalId = (paused['_meta'] as Record<string, unknown>)[APPROVAL_ID_META_KEY] as string
+    expect((await rt.approvals.get(approvalId)).summary.body).toEqual(body(2_000_000))
+
+    // … and below it the same nested DTOs pass through to the backend unchanged.
+    const done = await handler({ service: 'trafficking', code: program(500) }, makeCtx())
+    expect(done['isError']).toBeUndefined()
+    expect(calls.at(-1)?.req.body).toEqual(body(500))
+    expect(calls.at(-1)?.req.params).toEqual(params)
+  })
+
+  it('a /campaigns/** rule governs endpoints it never names (resolved OpenAPI template → subtree match)', async () => {
+    const rt = makeRuntime([{ name: 'campaign-writes', match: { method: 'POST', path: '/campaigns/**' }, action: { type: 'REQUIRE_APPROVAL', reason: 'writes under /campaigns' } }])
+    const { connector, count } = makeConnector()
+    const handler = registerGoverned(rt, makeResources('trafficking', connector))
+    const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+    expect(paused['resultType']).toBe('input_required')
+    expect(count('GET', '/campaigns')).toBe(1)                // GET is not a POST: allowed
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)   // /campaigns/{id}/finalize is under /campaigns/**
+    const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+    expect((await rt.store.listDecisions(executionId)).map(d => [d.decision, d.decidingRule])).toEqual([['ALLOW', undefined], ['REQUIRE_APPROVAL', 'campaign-writes']])
+  })
+
+  it('default DENY applies only where governance applies: untargeted calls run, a targeted unmatched call is denied', async () => {
+    const FORCE_ONLY = {
+      name: 'finalize-with-force', match: { service: 'trafficking', operation: 'finalizeCampaign' },
+      conditions: { 'body.force': { equals: true } }, action: { type: 'ALLOW' }
+    }
+    const rt = makeRuntime([FORCE_ONLY], GOVERNANCE_DECISION.DENY)
+    const { connector, count } = makeConnector()
+    const handler = registerGoverned(rt, makeResources('trafficking', connector))
+    const r = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+    expect((parseContent(r) as { code: string }).code).toBe(ERR.GOVERNANCE_DENIED)
+    expect(count('GET', '/campaigns')).toBe(1)               // no rule targets it: ungoverned
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)  // targeted, condition false: default DENY
+    const executionId = (r['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+    expect((await rt.store.listDecisions(executionId)).map(d => [d.decision, d.reason])).toEqual([
+      ['ALLOW', GOVERNANCE_REASON.NO_GOVERNANCE],
+      ['DENY', GOVERNANCE_REASON.NO_MATCHING_RULE]
+    ])
+    expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.DENIED)
+  })
+
+  it('multi-pod on the memcache store: paused on pod A, approved and resumed on pod B, every call made once', async () => {
+    const memcache = new FakeMemcache()
+    const podA = makeRuntime([FINALIZE_RULE], GOVERNANCE_DECISION.ALLOW, new MemcacheCodeModeStore(memcache))
+    const podB = makeRuntime([FINALIZE_RULE], GOVERNANCE_DECISION.ALLOW, new MemcacheCodeModeStore(memcache))
+    const { connector, count } = makeConnector()
+    const onA = registerGoverned(podA, makeResources('trafficking', connector))
+    const onB = registerGoverned(podB, makeResources('trafficking', connector))
+
+    const paused = await onA({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+    expect(paused['resultType']).toBe('input_required')
+    // the client's retry lands on another pod (same GOVERNANCE_REQUEST_STATE_KEY)
+    const done = await onB({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(podB, paused, { action: 'accept', approve: true }))
+    expect(done['isError']).toBeUndefined()
+    expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' })
+    expect(count('GET', '/campaigns')).toBe(1)                // replayed on pod B from the shared journal
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(1)   // executed exactly once
+    const executionId = (done['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+    expect((await podA.manager.load(executionId)).status).toBe(EXECUTION_STATUS.COMPLETED) // pod A sees pod B's outcome
+  })
+
+  it('X-Correlation-ID is the execution id on every call of one script, across approval resumes; the client id is forwarded', async () => {
+    const rt = makeRuntime([FINALIZE_RULE])
+    const { connector, calls } = makeConnector()
+    const { handlers, server } = makeFakeServer()
+    registerExecuteApiTool(server, makeRegistry({ trafficking: makeResources('trafficking', connector) }), globalConfig, silentLogger,
+      { increment() {}, stop() {} } as unknown as MetricsRegistry, 'tok', rt, undefined, 'agent-7')
+    const handler = handlers[TOOL.API_EXECUTE]!
+    const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ requestId: 'rpc-1' }))
+    await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'accept', approve: true }, 'rpc-2'))
+    const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+    expect(calls.map(c => `${c.req.method} ${c.req.path}`)).toEqual(['GET /campaigns', 'POST /campaigns/C1/finalize']) // two runs, two MCP requests
+    expect(calls.map(c => c.ctx.correlationId)).toEqual([executionId, executionId])
+    expect(calls.map(c => c.ctx.clientId)).toEqual(['agent-7', 'agent-7'])
   })
 
   it('a DENY rule stops the execution before the call and records the decision', async () => {

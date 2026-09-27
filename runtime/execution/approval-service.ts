@@ -9,7 +9,8 @@ import {
   type ApprovalRecord,
   type ApprovalSummary,
   ApprovalNotFoundError,
-  ApprovalAlreadyDecidedError
+  ApprovalAlreadyDecidedError,
+  ExecutionLockedError
 } from '../../core/types/execution.types.js'
 import { APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR, GOVERNANCE_REASON, type ApprovalStatus } from '../../core/constants.js'
 
@@ -69,9 +70,26 @@ export class ApprovalService {
   }
 
   async decide(approvalId: string, input: ApprovalDecisionInput): Promise<ApprovalDecisionResult> {
-    const approval = await this.get(approvalId)
-    if (approval.status !== APPROVAL_STATUS.PENDING) throw new ApprovalAlreadyDecidedError(approvalId, approval.status)
+    const observed = await this.get(approvalId)
+    if (observed.status !== APPROVAL_STATUS.PENDING) {
+      throw new ApprovalAlreadyDecidedError(approvalId, observed.status)
+    }
+    if (!await this.store.acquireLock(observed.executionId)) {
+      throw new ExecutionLockedError(observed.executionId)
+    }
 
+    try {
+      const approval = await this.get(approvalId)
+      if (approval.status !== APPROVAL_STATUS.PENDING) {
+        throw new ApprovalAlreadyDecidedError(approvalId, approval.status)
+      }
+      return await this.applyDecision(approval, input)
+    } finally {
+      await this.store.releaseLock(observed.executionId)
+    }
+  }
+
+  private async applyDecision(approval: ApprovalRecord, input: ApprovalDecisionInput): Promise<ApprovalDecisionResult> {
     const outcome = mapDecision(input)
     const status: ApprovalStatus =
       outcome === 'APPROVED' ? APPROVAL_STATUS.APPROVED

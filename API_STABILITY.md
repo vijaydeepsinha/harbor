@@ -119,7 +119,8 @@ These work in v0.1.0 but may change in a MINOR release. Third parties should not
 | File | Status | Risk |
 |------|--------|------|
 | `sandbox-core.ts` | 🟡 Experimental | Depends on `isolated-vm` native addon. If `isolated-vm` changes its API or is replaced, the bridge changes. |
-| `execute-api-in-sandbox.ts` | 🟡 Experimental | Internal bridge between sandbox and ConnectorAPI — may change shape if sandbox model changes. |
+| `execute-api-in-sandbox.ts` | 🟡 Experimental | Runs one program: wires the bridge into the isolate and promotes recorded violations — may change shape if the sandbox model changes. |
+| `bridge-request-handler.ts` | 🟡 Experimental | Internal bridge between sandbox and ConnectorAPI (the per-run `api.request()` pipeline) — may change shape if the sandbox or execution model changes. |
 | `skills-search-in-sandbox.ts` | 🟡 Experimental | Relevance filter algorithm may improve — output shape stable, implementation may change. |
 | `spec-search-in-sandbox.ts` | 🟡 Experimental | Same as above. |
 
@@ -135,7 +136,7 @@ In-memory counters only. No push endpoint, no Prometheus format yet. Counter nam
 
 ### `AuditRecord` shape
 
-Audit records are logged via pino. The JSON field names are not yet frozen — Prometheus/SIEM integrations built on these field names may break in v0.2.0 when the StorageProvider SPI is added.
+Audit records go to every `AUDIT_SINKS` sink (`spi/observability/audit-sink.ts`; the built-in `console` sink logs them via pino). The JSON field names are not yet frozen — Prometheus/SIEM integrations built on these field names may break in a MINOR release.
 
 ---
 
@@ -163,9 +164,9 @@ These are planned interfaces, not yet shipped. Do not build against them.
 | `ProtocolAdapter` | v1.1 | Pluggable MCP transport — HTTP, stdio, WebSocket |
 | `SkillProvider` | v1.1 | Load skills from database or remote CMS |
 | `ToolResolver` | v1.x | Dynamic tool registration beyond the five defaults |
-| `StorageProvider` | v1.x | Structured audit export to S3, GCS, SIEM |
 
-See `docs/architecture.md` section 5 for proposed interface shapes.
+See `docs/architecture.md` section 5 for proposed interface shapes. (The
+planned `StorageProvider` shipped as `AuditSink`, `spi/observability/audit-sink.ts`.)
 
 ---
 

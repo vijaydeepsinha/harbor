@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
+import type { CallLogSource, JournalEntry } from '../execution/activity-journal.js'
+
 /**
- * Per-tool-invocation progress tracker for `api_execute`. Lives on the host
- * side so progress is preserved even if the sandbox isolate is disposed
- * (timeout / OOM / runtime error). Append-only; entries are recorded in
- * completion order which is acceptable for v1 even when user code issues
- * concurrent api.request() calls.
+ * Per-tool-invocation progress for `api_execute`: a read-only projection of
+ * the run's CallLog (the execution's activity journal when governed). The
+ * log lives on the host side, so progress survives the sandbox isolate being
+ * disposed (timeout / OOM / runtime error). Entries are in completion order,
+ * which is acceptable for v1 even when user code issues concurrent
+ * api.request() calls.
  *
  * Returned to the caller alongside the standard `mcpError` payload so a
  * failing multi-step workflow can be resumed without recreating already-
@@ -51,54 +54,40 @@ export interface ProgressSummary {
 }
 
 export class ProgressCollector {
-  private readonly entries: ProgressCallEntry[] = []
-  private counter = 0
-
   /**
-   * @param maxEntries — upper bound on stored rows; must match the same
+   * @param calls — the run's call outcomes (see CallLog).
+   * @param maxEntries — upper bound on reported rows; must match the same
    *   `maxApiCalls` limit enforced for this `api_execute` run (global default
    *   ∪ per-service `config.json` override) so progress cannot outlive the
    *   sandbox call budget.
    */
-  constructor(private readonly maxEntries: number) {}
-
-  /** Record a completed HTTP call (any status). For successful POSTs the
-   *  caller may pass `ids` extracted from the response body. */
-  recordSuccess(
-    method: string,
-    endpoint: string,
-    status: number,
-    ok: boolean,
-    ids?: Record<string, string>
-  ): void {
-    if (this.entries.length >= this.maxEntries) return
-    this.counter++
-    const entry: ProgressCallEntry = { i: this.counter, method, endpoint, status, ok }
-    if (ids && Object.keys(ids).length > 0) entry.ids = ids
-    this.entries.push(entry)
-  }
-
-  /** Record a failed HTTP call (request threw, e.g. network error or abort). */
-  recordFailure(method: string, endpoint: string, error: string, aborted: boolean): void {
-    if (this.entries.length >= this.maxEntries) return
-    this.counter++
-    this.entries.push({
-      i: this.counter,
-      method,
-      endpoint,
-      error: truncate(error, MAX_ERROR_MESSAGE_LENGTH),
-      aborted
-    })
-  }
+  constructor(private readonly calls: CallLogSource, private readonly maxEntries: number) {}
 
   summary(): ProgressSummary {
-    const completedCalls = this.entries.reduce((n, e) => n + (e.status !== undefined ? 1 : 0), 0)
-    return { completedCalls, calls: [...this.entries] }
+    const calls = this.calls.entries().slice(0, this.maxEntries).map((e, index) => toProgressEntry(e, index + 1))
+    const completedCalls = calls.reduce((n, e) => n + (e.status !== undefined ? 1 : 0), 0)
+    return { completedCalls, calls }
   }
 
   hasAny(): boolean {
-    return this.entries.length > 0
+    return this.maxEntries > 0 && this.calls.entries().length > 0
   }
+}
+
+/**
+ * Replayed and executed calls report their HTTP status; failed ones a
+ * truncated error and whether the sandbox abort caused it. Only create-like
+ * calls (POST + ok) carry ids — avoids leaking arbitrary response fields and
+ * matches the v1 scope.
+ */
+function toProgressEntry(e: JournalEntry, i: number): ProgressCallEntry {
+  if (e.outcome === 'FAILED') {
+    return { i, method: e.method, endpoint: e.endpoint, error: truncate(e.error, MAX_ERROR_MESSAGE_LENGTH), aborted: e.aborted }
+  }
+  const entry: ProgressCallEntry = { i, method: e.method, endpoint: e.endpoint, status: e.response.status, ok: e.response.ok }
+  const ids = e.method === 'POST' && e.response.ok ? extractTopLevelIds(e.response.data) : undefined
+  if (ids) entry.ids = ids
+  return entry
 }
 
 /**
