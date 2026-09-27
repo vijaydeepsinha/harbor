@@ -172,9 +172,18 @@ describe('ExecutionManager', () => {
 
   it('recordProgress only ever raises the activity high-water mark', async () => {
     await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await manager.beginRun('exec-1') // progress is recorded by a live run
     await manager.recordProgress('exec-1', 3)
     await manager.recordProgress('exec-1', 2)
     expect((await manager.load('exec-1')).currentActivity).toBe(3)
+  })
+
+  it('recordProgress never writes over a run that has finished (a stale copy would resurrect it)', async () => {
+    await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await manager.beginRun('exec-1')
+    const finished = await manager.endRun('exec-1', { kind: 'completed', result: 1 })
+    await manager.recordProgress('exec-1', 9)
+    expect(await manager.load('exec-1')).toEqual(finished)
   })
 
   it('inspect assembles a chronological history from the records', async () => {

@@ -46,6 +46,9 @@ const RUN_STOPPING_KINDS: ReadonlySet<BridgeViolation['kind']> = new Set([
   'approvalRequired', 'governanceDenied', 'replayDiverged', 'cancelled', 'outcomeUnknown'
 ])
 
+/** How long aborted calls get to wind down before the run stops waiting for them. */
+const ABORT_GRACE_MS = 1_000
+
 function bridgeError(code: string, message: string): string {
   return JSON.stringify({ __bridgeError: true, code, message })
 }
@@ -116,13 +119,21 @@ export class BridgeRequestHandler {
   private violation: BridgeViolation | null = null
   private totalCalls = 0
   private inFlight = 0
+  /** Every reply not yet delivered — including calls the program started without awaiting. */
+  private readonly pending = new Set<Promise<string>>()
+  /** Set once the program settled: see {@link drain}. */
+  private closed = false
+  /** Set when calls were still in flight after the abort grace: see {@link drain}. */
+  private abandoned = false
+  /** Tail of the admission chain (see {@link exclusive}). */
+  private admission: Promise<void> = Promise.resolve()
   private readonly gate: ActivityGate | undefined
   /** Where every call outcome is recorded, once: the execution's journal when governed. */
   private readonly calls: CallLog
 
   constructor(
     private readonly ctx: SandboxExecutionContext,
-    /** Aborted when the isolate is disposed (timeout) so in-flight HTTP calls are cancelled. */
+    /** Aborted when the isolate is disposed (timeout), or when calls outlive the program's time budget (see {@link drain}). */
     private readonly signal: AbortSignal
   ) {
     this.gate = ctx.executionBridge ? new ActivityGate(ctx.executionBridge) : undefined
@@ -130,7 +141,50 @@ export class BridgeRequestHandler {
   }
 
   /** One `api.request()` from the isolate → one JSON reply: the response, or a bridge error the isolate rethrows. */
-  async handle(apiRequestJson: string): Promise<string> {
+  handle(apiRequestJson: string): Promise<string> {
+    if (this.closed) {
+      return Promise.resolve(bridgeError(ERR.INVALID_API_REQUEST, 'The program has already returned; no further api.request() calls are executed'))
+    }
+    const reply = this.process(apiRequestJson)
+    this.pending.add(reply)
+    const done = (): void => { this.pending.delete(reply) }
+    reply.then(done, done)
+    return reply
+  }
+
+  /**
+   * The program has settled. Calls it started without awaiting them are
+   * still its calls: they finish — and are journaled — before the run's
+   * outcome is recorded, so nothing reaches the backend or the store after
+   * the execution is marked finished. They get `graceMs` (the rest of the
+   * run's time budget); whatever is still in flight then is aborted, and
+   * journaled as an unknown outcome. No new call is accepted after this.
+   */
+  async drain(graceMs: number, abort: () => void): Promise<void> {
+    this.closed = true
+    if (this.pending.size === 0) return
+    const all = Promise.allSettled([...this.pending])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = await Promise.race([
+      all.then(() => false),
+      new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(true), graceMs) })
+    ])
+    clearTimeout(timer)
+    if (!expired) return
+    abort()
+    // A connector that ignores the abort must not hold the run open forever.
+    // Past this point a straggler may still record its own outcome, but it
+    // can no longer be admitted, journal a new activity or touch governance.
+    let straggle: ReturnType<typeof setTimeout> | undefined
+    const stuck = await Promise.race([
+      all.then(() => false),
+      new Promise<boolean>(resolve => { straggle = setTimeout(() => resolve(true), ABORT_GRACE_MS) })
+    ])
+    clearTimeout(straggle)
+    if (stuck) this.abandoned = true
+  }
+
+  private async process(apiRequestJson: string): Promise<string> {
     const refusal = this.admit()
     if (refusal !== undefined) return refusal
 
@@ -145,7 +199,7 @@ export class BridgeRequestHandler {
     try {
       const validation = validateApiRequest(JSON.parse(apiRequestJson))
       if (!validation.ok) {
-        this.violation = { kind: 'invalidApiRequest', reason: validation.reason, detail: validation.detail }
+        this.flag({ kind: 'invalidApiRequest', reason: validation.reason, detail: validation.detail })
         return bridgeError(ERR.INVALID_API_REQUEST, validation.detail)
       }
       const { apiRequest } = validation
@@ -153,34 +207,86 @@ export class BridgeRequestHandler {
       // present, the digit heuristic otherwise (legacy path).
       const resolved = this.gate?.resolve(apiRequest.method, apiRequest.path)
       const endpoint = resolved ? resolved.specPath : normalizeEndpointPath(apiRequest.path)
-      attempted = { method: apiRequest.method, endpoint }
+      const call: CallIdentity = { method: apiRequest.method, endpoint }
+      attempted = call
 
       let admission: Extract<ActivityAdmission, { kind: 'execute' }> | undefined
-      if (this.gate && resolved) {
-        const decision = await this.gate.admit(apiRequest, resolved)
-        if (decision.kind === 'replay') return this.replay(attempted, decision.sequence, decision.response)
-        if (decision.kind === 'stop') {
-          this.violation = decision.stop
-          return bridgeError(decision.code, decision.message)
-        }
-        admission = decision
-      }
-
-      const unauthorized = this.authorize(apiRequest.method, endpoint)
-      if (unauthorized !== undefined) return unauthorized
-      if (this.gate && admission) {
-        await this.gate.begin(admission)
+      const gate = this.gate
+      if (gate && resolved) {
+        // Admission — journal lookup, governance, the stop check, journaling
+        // EXECUTING — is one critical section per run. Concurrent calls
+        // (Promise.all) are admitted one at a time in arrival order, so a
+        // call admitted after a sibling paused or denied the run sees that
+        // stop and is refused: it can neither execute nor open an approval
+        // on a run that already ended. The external calls still overlap.
+        const gated = await this.exclusive(async (): Promise<{ reply: string } | { admitted: Extract<ActivityAdmission, { kind: 'execute' }> }> => {
+          if (this.abandoned) return { reply: bridgeError(ERR.INVALID_API_REQUEST, 'The program has already returned; no further api.request() calls are executed') }
+          if (this.stopped()) return { reply: this.stopRefusal() }
+          const decision = await gate.admit(apiRequest, resolved)
+          if (decision.kind === 'replay') return { reply: this.replay(call, decision.sequence, decision.response) }
+          if (decision.kind === 'stop') {
+            this.flag(decision.stop)
+            return { reply: bridgeError(decision.code, decision.message) }
+          }
+          const unauthorized = this.authorize(apiRequest.method, endpoint)
+          if (unauthorized !== undefined) return { reply: unauthorized }
+          await gate.begin(decision)
+          return { admitted: decision }
+        })
+        if ('reply' in gated) return gated.reply
+        admission = gated.admitted
         executing = admission.sequence
+      } else {
+        const unauthorized = this.authorize(apiRequest.method, endpoint)
+        if (unauthorized !== undefined) return unauthorized
       }
 
       const response = await this.execute(apiRequest, endpoint, admission?.sequence ?? `c${callIndex}`)
-      await this.record(attempted, response, admission?.sequence)
+      await this.record(call, response, admission?.sequence)
       return JSON.stringify(response)
     } catch (err) {
       return this.fail(err, attempted, executing)
     } finally {
       this.inFlight--
     }
+  }
+
+  /** Runs `fn` after every earlier admission of this run has finished (a promise-chain mutex). */
+  private async exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.admission
+    let release!: () => void
+    this.admission = new Promise<void>(resolve => { release = resolve })
+    await previous
+    try {
+      return await fn()
+    } finally {
+      release()
+    }
+  }
+
+  /**
+   * Records a violation. The first run-stopping one stands: a sibling call
+   * that fails later (a pause, a permission error, an open circuit) must not
+   * turn a DENY into a pause — or a pause into something the human never saw.
+   */
+  private flag(violation: BridgeViolation): void {
+    if (this.stopped()) return
+    this.violation = violation
+  }
+
+  private stopped(): boolean {
+    return this.violation !== null && RUN_STOPPING_KINDS.has(this.violation.kind)
+  }
+
+  /** What a call refused because the run already stopped sees — the code names why it stopped. */
+  private stopRefusal(): string {
+    const code =
+      this.violation?.kind === 'governanceDenied' ? ERR.GOVERNANCE_DENIED
+      : this.violation?.kind === 'replayDiverged' ? ERR.REPLAY_DIVERGED
+      : this.violation?.kind === 'cancelled' ? ERR.EXECUTION_CANCELLED
+      : this.violation?.kind === 'outcomeUnknown' ? ERR.ACTIVITY_OUTCOME_UNKNOWN
+      : ERR.APPROVAL_REQUIRED
+    return bridgeError(code, 'Execution is paused or stopped; no further api.request() calls are executed in this run')
   }
 
   /** Promotes the recorded violation, if any, to its typed error. Call after the isolate settled. */
@@ -209,19 +315,17 @@ export class BridgeRequestHandler {
     // unknown outcome) no further external call may proceed — user code
     // that caught the bridge error and kept going is refused here so the
     // journal and the real world stay in step (Invariant 8/9).
-    if (this.violation && RUN_STOPPING_KINDS.has(this.violation.kind)) {
-      return bridgeError(ERR.APPROVAL_REQUIRED, 'Execution is paused or stopped; no further api.request() calls are executed in this run')
-    }
+    if (this.stopped()) return this.stopRefusal()
     this.totalCalls++
     if (this.totalCalls > this.ctx.limits.maxApiCalls) {
-      this.violation = { kind: 'call' }
+      this.flag({ kind: 'call' })
       return bridgeError(
         ERR.CALL_LIMIT_EXCEEDED,
         `Sandbox API call limit of ${this.ctx.limits.maxApiCalls} exceeded`
       )
     }
     if (this.inFlight >= this.ctx.limits.maxConcurrentCalls) {
-      this.violation = { kind: 'concurrent' }
+      this.flag({ kind: 'concurrent' })
       return bridgeError(
         ERR.CONCURRENT_LIMIT_EXCEEDED,
         `Concurrent API call limit of ${this.ctx.limits.maxConcurrentCalls} exceeded`
@@ -234,7 +338,7 @@ export class BridgeRequestHandler {
   private authorize(method: AllowedHttpMethod, endpoint: string): string | undefined {
     if (!this.ctx.permissionGuard.canExecute(endpoint, method, this.ctx.tokenPayload)) {
       const denied = new PermissionDeniedError(endpoint, method)
-      this.violation = { kind: 'permission', endpoint, method }
+      this.flag({ kind: 'permission', endpoint, method })
       return bridgeError(denied.code, denied.message)
     }
     this.ctx.circuitBreaker.check(endpoint)
@@ -290,7 +394,7 @@ export class BridgeRequestHandler {
   private async fail(err: unknown, attempted: CallIdentity | undefined, executing: number | undefined): Promise<string> {
     // Replay divergence is terminal for the run: record it and stop.
     if (err instanceof ReplayDivergedError) {
-      this.violation = { kind: 'replayDiverged', error: err }
+      this.flag({ kind: 'replayDiverged', error: err })
       return bridgeError(err.code, err.message)
     }
     // CircuitOpenError is a control-plane signal that must bubble up
@@ -300,7 +404,7 @@ export class BridgeRequestHandler {
     // settles — user code still sees a bridge error and cannot mask
     // the promotion by catching it.
     if (err instanceof CircuitOpenError) {
-      this.violation = { kind: 'circuitOpen', endpoint: err.endpoint, retryAfterMs: err.retryAfterMs }
+      this.flag({ kind: 'circuitOpen', endpoint: err.endpoint, retryAfterMs: err.retryAfterMs })
     }
     // Record the attempt as a failure — the journal marks an EXECUTING
     // activity FAILED (outcome unknown), and the caller's progress shows the

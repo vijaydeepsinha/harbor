@@ -13,7 +13,7 @@ import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-cir
 import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
 import { ERR, ACTIVITY_STATUS } from '../../src/core/constants.js'
 import { SandboxCallLimitError, SandboxInvalidApiRequestError } from '../../src/core/types/sandbox-error.types.js'
-import { ApprovalRequiredError } from '../../src/core/types/execution.types.js'
+import { ApprovalRequiredError, GovernanceDeniedError } from '../../src/core/types/execution.types.js'
 import { makeConnector, campaignSpec } from './code-mode-harness.js'
 
 function makeCtx(overrides: Partial<SandboxExecutionContext> = {}) {
@@ -154,6 +154,63 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
       const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
       expect(parse(await handler.handle(call({ method: 'GET', path: 'http://169.254.169.254/latest' }))).code).toBe(ERR.INVALID_API_REQUEST)
       expect(calls).toHaveLength(0)
+    })
+  })
+
+  describe('concurrent calls of one run', () => {
+    it('admits them one at a time: after a sibling is denied, a call that would need approval is refused and opens nothing', async () => {
+      const store = new InMemoryCodeModeStore()
+      const asked: string[] = []
+      const { ctx, calls } = makeCtx({
+        limits: { memoryLimitMb: 64, executeTimeoutMs: 1000, searchTimeoutMs: 1000, maxApiCalls: 10, maxConcurrentCalls: 5 },
+        executionBridge: {
+          journal: new ActivityJournal(store, 'exec-1', 'trafficking', 1),
+          resolve: (m, p) => resolveOperation(campaignSpec, m, p),
+          decide: async (_seq, req) => {
+            asked.push(req.specPath)
+            await new Promise(r => setTimeout(r, 20)) // a store round-trip
+            return req.specPath === '/campaigns'
+              ? { decision: 'DENY', reason: 'no', matchedRules: ['r'] }
+              : { decision: 'REQUIRE_APPROVAL', approvalId: 'ap-1', summary: { service: 'trafficking', method: 'POST', specPath: req.specPath, reason: 'r', matchedRules: [] } }
+          }
+        }
+      })
+      const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
+      const [denied, second] = await Promise.all([
+        handler.handle(call({ method: 'POST', path: '/campaigns', body: {} })),
+        handler.handle(call({ method: 'POST', path: '/campaigns/C1/finalize' }))
+      ])
+      expect(parse(denied).code).toBe(ERR.GOVERNANCE_DENIED)
+      expect(parse(second).code).toBe(ERR.GOVERNANCE_DENIED) // refused, naming why the run stopped
+      expect(asked).toEqual(['/campaigns']) // governance never saw the sibling
+      expect(await store.getActivity('exec-1', 2)).toBeUndefined()
+      expect(calls).toHaveLength(0)
+      expect(() => handler.throwIfViolated()).toThrow(GovernanceDeniedError)
+    })
+
+    it('drain lets an un-awaited call finish and be journaled before the run is reported', async () => {
+      const store = new InMemoryCodeModeStore()
+      const slow = makeConnector()
+      const { ctx } = makeCtx({
+        apiClient: { request: async (req, c) => { await new Promise(r => setTimeout(r, 50)); return slow.connector.request(req, c) } },
+        executionBridge: { journal: new ActivityJournal(store, 'exec-1', 'trafficking', 1), resolve: (m, p) => resolveOperation(campaignSpec, m, p) }
+      })
+      const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
+      void handler.handle(call({ method: 'POST', path: '/campaigns', body: {} })) // never awaited by the "program"
+      await handler.drain(1000, () => { throw new Error('should not need to abort') })
+      expect((await store.getActivity('exec-1', 1))?.status).toBe(ACTIVITY_STATUS.COMPLETED)
+      expect(parse(await handler.handle(call({ method: 'GET', path: '/campaigns' }))).message).toContain('already returned')
+    })
+
+    it('drain aborts calls that outlive the budget, and stops waiting for a connector that ignores the abort', async () => {
+      const { ctx } = makeCtx({ apiClient: { request: () => new Promise(() => {}) } })
+      const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
+      void handler.handle(call({ method: 'GET', path: '/campaigns' }))
+      let aborted = 0
+      const started = Date.now()
+      await handler.drain(10, () => { aborted++ })
+      expect(aborted).toBe(1)
+      expect(Date.now() - started).toBeLessThan(3000)
     })
   })
 })

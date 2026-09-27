@@ -170,9 +170,14 @@ export class ExecutionManager {
     }
   }
 
-  /** Advances the high-water mark of assigned activity sequences. */
+  /**
+   * Advances the high-water mark of assigned activity sequences. Only a live
+   * run moves it: this is a whole-record write, and writing back a copy read
+   * while RUNNING over a record that has since finished would resurrect it.
+   */
   async recordProgress(executionId: string, sequence: number): Promise<void> {
     const record = await this.load(executionId)
+    if (record.status !== EXECUTION_STATUS.RUNNING) return
     if (sequence > record.currentActivity) {
       record.currentActivity = sequence
       record.updatedAt = this.now()
