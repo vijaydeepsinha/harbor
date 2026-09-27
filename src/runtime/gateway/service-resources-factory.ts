@@ -41,7 +41,6 @@ export async function buildServiceResources(
     { serviceRefreshIntervalMs: svc.serviceRefreshIntervalMs, serviceRefreshTimeoutMs: svc.serviceRefreshTimeoutMs },
     svcLogger
   )
-  refresher.start()
 
   const authMiddleware = new AuthMiddleware(svc.auth, tokenCacheStrategy, svcLogger, svc.name, svcMetrics)
   const idempotency = buildIdempotencyStrategy(svc.idempotencyBackend, svcLogger)
@@ -65,6 +64,11 @@ export async function buildServiceResources(
       ...(globalConfig.observability.serverId !== undefined ? { serverId: globalConfig.observability.serverId } : {})
     }
   )
+
+  // Started last: anything above can throw (an unknown idempotency type, an
+  // unreadable TLS file) and the service is then skipped — its refresher must
+  // not keep polling for a service that was never registered.
+  refresher.start()
 
   return {
     name: svc.name,

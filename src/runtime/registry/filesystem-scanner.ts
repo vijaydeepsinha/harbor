@@ -110,7 +110,14 @@ export async function scanServicesDirectory(
 
   for (const entry of entries) {
     const serviceDir = join(servicesDir, entry)
-    if (!statSync(serviceDir).isDirectory()) continue
+    try {
+      // Inside the try: a dangling symlink (or an entry removed mid-scan)
+      // makes statSync throw, and one bad entry must not stop the gateway.
+      if (!statSync(serviceDir).isDirectory()) continue
+    } catch (err) {
+      logger.warn({ service: entry, error: errorMessage(err) }, `Cannot read "${entry}" in the services directory — skipping`)
+      continue
+    }
 
     try {
       const service = await scanSingleService(serviceDir, entry, logger)
@@ -186,9 +193,17 @@ async function scanSingleService(
   // ── 5d. Service-level refresh (applies to both spec and skills) ───────
   const serviceRefreshIntervalMs = config.serviceRefreshIntervalMs ?? 0
   const serviceRefreshTimeoutMs = config.serviceRefreshTimeoutMs ?? 10_000
+  // setInterval clamps a negative, NaN or > 2^31-1 delay to 1 ms: a typo would
+  // re-read the spec and every skill file a thousand times a second.
+  if (serviceRefreshIntervalMs !== 0 && !(Number.isInteger(serviceRefreshIntervalMs) && serviceRefreshIntervalMs >= MIN_REFRESH_INTERVAL_MS && serviceRefreshIntervalMs <= MAX_TIMER_MS)) {
+    throw new Error(`service "${name}": serviceRefreshIntervalMs must be 0 (off) or an integer from ${MIN_REFRESH_INTERVAL_MS} to ${MAX_TIMER_MS}, got ${String(serviceRefreshIntervalMs)}`)
+  }
+  if (!(Number.isInteger(serviceRefreshTimeoutMs) && serviceRefreshTimeoutMs > 0 && serviceRefreshTimeoutMs <= MAX_TIMER_MS)) {
+    throw new Error(`service "${name}": serviceRefreshTimeoutMs must be a positive integer ≤ ${MAX_TIMER_MS}, got ${String(serviceRefreshTimeoutMs)}`)
+  }
 
   // ── 6. Scan skills directory ─────────────────────────────────────────────
-  const skills = scanSkills(serviceDir)
+  const skills = scanSkills(serviceDir, logger)
 
   // ── 7. Build description ─────────────────────────────────────────────────
   const description = config.description
@@ -217,6 +232,11 @@ async function scanSingleService(
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+/** Shortest spec/skill refresh interval a service may ask for. */
+const MIN_REFRESH_INTERVAL_MS = 1_000
+/** Longest delay setInterval/setTimeout honour; beyond it Node fires after 1 ms. */
+const MAX_TIMER_MS = 2_147_483_647
+
 function findSpecFile(dir: string): string | undefined {
   for (const candidate of ['spec.json', 'spec.yaml', 'spec.yml']) {
     const p = join(dir, candidate)
@@ -225,25 +245,40 @@ function findSpecFile(dir: string): string | undefined {
   return undefined
 }
 
-export function scanSkills(serviceDir: string): SkillMetadata[] {
+/**
+ * Every readable `*.md` file in `skills/`. A file that cannot be read or
+ * parsed (bad frontmatter, a directory or a dangling editor symlink named
+ * `*.md`) is skipped with a warning — it must not take the whole service,
+ * and every other skill, offline.
+ */
+export function scanSkills(serviceDir: string, logger?: Logger): SkillMetadata[] {
   const skillsDir = join(serviceDir, 'skills')
   if (!existsSync(skillsDir) || !statSync(skillsDir).isDirectory()) return []
 
-  return readdirSync(skillsDir)
-    .filter(f => extname(f) === '.md')
-    .map(filename => {
-      const raw = readFileSync(join(skillsDir, filename), 'utf-8')
-      const parsed = matter(raw)
+  const skills: SkillMetadata[] = []
+  for (const filename of readdirSync(skillsDir).filter(f => extname(f) === '.md')) {
+    try {
+      const file = join(skillsDir, filename)
+      if (!statSync(file).isFile()) continue
+      const raw = readFileSync(file, 'utf-8')
+      // An options object turns off gray-matter's parse cache: a file that
+      // failed once must fail again (the cache returned a blank parse for it).
+      const parsed = matter(raw, {})
       const id = basename(filename, '.md')
       const titleMatch = parsed.content.match(/^#\s+(.+)$/m)
-      const title = (parsed.data['title'] as string | undefined)?.trim()
-        ?? titleMatch?.[1]?.trim()
-        ?? id.replace(/-/g, ' ')
+      const frontmatterTitle = parsed.data['title']
+      const title = (typeof frontmatterTitle === 'string' || typeof frontmatterTitle === 'number' ? String(frontmatterTitle).trim() : undefined)
+        || titleMatch?.[1]?.trim()
+        || id.replace(/-/g, ' ')
       const tags: string[] = Array.isArray(parsed.data['tags'])
         ? (parsed.data['tags'] as unknown[]).map(String)
         : []
-      return { id, filename, title, tags, content: raw }
-    })
+      skills.push({ id, filename, title, tags, content: raw })
+    } catch (err) {
+      logger?.warn({ skillsDir, file: filename, error: errorMessage(err) }, `Skipping skill "${filename}" — it cannot be read or parsed`)
+    }
+  }
+  return skills
 }
 
 function resolveApiConfig(
@@ -271,7 +306,8 @@ function resolveApiConfig(
     const rawUrl = servers[0].url
     try {
       const url = new URL(rawUrl)
-      const defaultPort = url.protocol === 'https:' ? 443 : 8080
+      // A URL without a port means the scheme's port — 80 for http, not 8080.
+      const defaultPort = url.protocol === 'https:' ? 443 : 80
       return {
         protocol: url.protocol === 'https:' ? 'https' : 'http',
         host: url.hostname,
@@ -322,5 +358,10 @@ function resolveIdempotencyBackend(config: ServiceConfig): IdempotencyBackendCon
         password: idem['password'] as string ?? '',
         kvTimeoutMs: idem['kvTimeoutMs'] as number ?? 3000
       }
+    default:
+      // A registered backend (registerIdempotencyBackend) or a typo: hand the
+      // block to the builder, which uses the registered factory or refuses the
+      // service. Returning nothing here silently meant "no deduplication".
+      return idem as unknown as IdempotencyBackendConfig
   }
 }

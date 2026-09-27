@@ -86,7 +86,7 @@ export class ServiceRefresher {
 
   private loadSkills(): SkillMetadata[] {
     try {
-      const skills = scanSkills(this.serviceDir)
+      const skills = scanSkills(this.serviceDir, this.logger)
       this.logger.info({ count: skills.length }, 'Skills refreshed successfully')
       return skills
     } catch (err) {
