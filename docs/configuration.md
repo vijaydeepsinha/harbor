@@ -1,6 +1,6 @@
 # Harbor configuration
 
-Configuration is split into **server (process) level** — environment variables validated once at startup — and **per-service** JSON beside each service's OpenAPI file. Code: `core/config/config.ts` (global) and `runtime/registry/filesystem-scanner.ts` (`ServiceConfig`).
+Configuration is split into **server (process) level** — environment variables validated once at startup — and **per-service** JSON beside each service's OpenAPI file. Code: `src/core/config/config.ts` (global) and `src/runtime/registry/filesystem-scanner.ts` (`ServiceConfig`).
 
 The OpenAPI file is always `spec.json` | `spec.yaml` | `spec.yml` in the service folder. There is no `spec.path` in code.
 
@@ -12,7 +12,7 @@ These apply to the **whole gateway process**: bind address, shared token cache, 
 
 ### Complete index (grep-friendly)
 
-Read at process entry (`index.ts`): `SERVICES_DIR`.
+Read at process entry (`src/index.ts`): `SERVICES_DIR`.
 
 Parsed on every startup (`GlobalConfigSchema` in `config.ts`):  
 `MCP_HOST`, `MCP_PORT`, `MCP_TRANSPORT`, `MCP_TOKEN` (optional unless `MCP_TRANSPORT=stdio`), `AUTH_TOKEN_CACHE_TTL_MS`, `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE`, `SANDBOX_MEMORY_MB`, `SANDBOX_EXECUTE_TIMEOUT_MS`, `SANDBOX_SEARCH_TIMEOUT_MS`, `SANDBOX_MAX_API_CALLS`, `SANDBOX_MAX_CONCURRENT_CALLS`, `LOG_LEVEL`, `SERVICE_NAME`, `MCP_AGENT_NAME`, `HARBOR_SERVER_ID`, `ENVIRONMENT`, `ENABLE_AUDIT`, `AUDIT_SINKS`, `HARBOR_RESOURCE_URI`, `HARBOR_AUTH_SERVERS`, `HARBOR_SCOPES_SUPPORTED`.

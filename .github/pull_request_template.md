@@ -22,7 +22,7 @@
 - [ ] Apache-2.0 SPDX header on every new `.ts` file
 - [ ] No internal company names, hostnames, or credentials introduced
 - [ ] CHANGELOG.md updated if this is a user-visible change
-- [ ] Layer discipline respected (`runtime/` does not import `adapters/` directly)
+- [ ] Layer discipline respected (`src/runtime/` does not import `src/adapters/` directly)
 
 ## Related issues
 

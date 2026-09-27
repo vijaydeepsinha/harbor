@@ -135,20 +135,20 @@ capability compliant:
 
 Application-facing changes owned by Harbor:
 
-- `core/constants.ts` — gateway version, reserved `_meta` key names, MCP HTTP
+- `src/core/constants.ts` — gateway version, reserved `_meta` key names, MCP HTTP
   header names, single `MCP_PROTOCOL_VERSION`.
-- `tools/tool-helpers.ts` — response `_meta` builder, `serverInfo`,
+- `src/tools/tool-helpers.ts` — response `_meta` builder, `serverInfo`,
   application-metadata channel, advisory request-`_meta` reader.
-- `runtime/http/mcp-server-factory.ts` — `server/discover` options
+- `src/runtime/http/mcp-server-factory.ts` — `server/discover` options
   (capabilities, instructions, cache hints).
-- `runtime/http/mcp-request-identity.ts` — advisory MCP HTTP header reader.
-- `runtime/http/http-gateway.ts` — request-identity logging; `/health`
+- `src/runtime/http/mcp-request-identity.ts` — advisory MCP HTTP header reader.
+- `src/runtime/http/http-gateway.ts` — request-identity logging; `/health`
   advertises the supported protocol version.
-- `runtime/transport/stdio-gateway.ts` — SDK v2 `serveStdio`, `legacy: 'reject'`.
-- `spi/auth/bearer-authorization.ts`, `runtime/http/oauth-metadata-handler.ts`,
-  `core/types/oauth.types.ts` — `WWW-Authenticate` + RFC 9728 PRM.
-- `adapters/auth/strategies/oauth-discovery.strategy.ts`,
-  `wiring/service-wiring.ts`, `core/types/config.types.ts` — required token
+- `src/runtime/transport/stdio-gateway.ts` — SDK v2 `serveStdio`, `legacy: 'reject'`.
+- `src/spi/auth/bearer-authorization.ts`, `src/runtime/http/oauth-metadata-handler.ts`,
+  `src/core/types/oauth.types.ts` — `WWW-Authenticate` + RFC 9728 PRM.
+- `src/adapters/auth/strategies/oauth-discovery.strategy.ts`,
+  `src/wiring/service-wiring.ts`, `src/core/types/config.types.ts` — required token
   resource binding on `oauth-2.1`.
 
 Each area has matching unit/integration tests under `tests/`.

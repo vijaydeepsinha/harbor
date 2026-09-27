@@ -13,13 +13,13 @@ documents it links to are the source of truth for details.
   carries its `_meta` envelope; there are no sessions. See
   `docs/mcp-2026-07-28-compatibility.md`.
 - **Five tools, frozen:** `discover_services`, `discover_skills`,
-  `get_skill_details`, `search_code`, `api_execute` (`tools/`). Do not add
+  `get_skill_details`, `search_code`, `api_execute` (`src/tools/`). Do not add
   tools or change their input schemas.
-- **Execution path:** `tools/execute-api.tool.ts` → `runtime/sandbox/execute-api-in-sandbox.ts`
-  (runs the program) → `runtime/sandbox/bridge-request-handler.ts` (the *host
+- **Execution path:** `src/tools/execute-api.tool.ts` → `src/runtime/sandbox/execute-api-in-sandbox.ts`
+  (runs the program) → `src/runtime/sandbox/bridge-request-handler.ts` (the *host
   bridge*, the only door out of the isolate; it asks
-  `runtime/execution/activity-gate.ts` whether to replay, execute, pause or
-  stop) → `ConnectorAPI` (`runtime/api-client/api-client.ts`). Every call
+  `src/runtime/execution/activity-gate.ts` whether to replay, execute, pause or
+  stop) → `ConnectorAPI` (`src/runtime/api-client/api-client.ts`). Every call
   outcome is recorded once, in the activity journal; audit and progress are
   projections of it. Never give the isolate network access.
 - **Services** are folders under `services/<name>/` with `config.json`, an
@@ -31,16 +31,18 @@ documents it links to are the source of truth for details.
 ## 2. Map
 
 ```
-core/          constants (ERR, OUTCOME, EXECUTION_STATUS, …), types, config loader (core/config/config.ts), utils
-spi/           contracts: connector, auth, idempotency, permissions, resilience, spec, execution (CodeModeStore)
-adapters/      pluggable implementations (auth strategies, idempotency, resilience, execution stores)
-wiring/        env → strategy builders and backend registries (registerExecutionStoreBackend, …)
-runtime/       gateway boot (server-factory.ts), http (http-gateway.ts, execution-routes.ts, mcp-server-factory.ts),
+src/           all gateway source (tsconfig rootDir; builds to dist/)
+  index.ts     process entry — SERVICES_DIR defaults to ../services (repo root from src/ and dist/)
+  core/        constants (ERR, OUTCOME, EXECUTION_STATUS, …), types, config loader (core/config/config.ts), utils
+  spi/         contracts: connector, auth, idempotency, permissions, resilience, spec, execution (CodeModeStore)
+  adapters/    pluggable implementations (auth strategies, idempotency, resilience, execution stores)
+  wiring/      env → strategy builders and backend registries (registerExecutionStoreBackend, …)
+  runtime/     gateway boot (server-factory.ts), http (http-gateway.ts, execution-routes.ts, mcp-server-factory.ts),
                sandbox (runner, bridge-request-handler), execution (manager, activity-gate, journal, approvals,
                request-state, code-mode-runtime),
                governance (operation-resolver, rule-schema, rule-loader, rule-store, rule-evaluator),
                registry, spec, observability, transport (stdio)
-tools/         the five MCP tools + tool-helpers (response _meta, request _meta reader)
+  tools/       the five MCP tools + tool-helpers (response _meta, request _meta reader)
 governance/    Governance Rule files (rules/*.yaml active; rules/examples/ documentation)
 services/      demo services (product, order, tasks, irctc, billing)
 examples/demo/ mock backends + start.sh
@@ -61,7 +63,7 @@ npx vitest run tests/unit/x.test.ts   # targeted
 python3 tests/demo_e2e.py --start-services   # boots mock backends + gateway on :3333, 61 assertions
 npm run test:governance        # governance E2E: Docker Compose (production image) + real MCP calls + Postman; add -- --local for host processes
 npm run governance:up / down   # keep the E2E environment running; then npm run test:e2e / npm run test:postman
-npm run dev                    # tsx watch index.ts (env from .env; see .env.example)
+npm run dev                    # tsx watch src/index.ts (env from .env; see .env.example)
 ```
 
 The verification gate before any commit: **typecheck + lint + full `npm test`
@@ -73,11 +75,14 @@ plus `npm run test:governance` when anything on the governance path changed
 ## 4. Conventions (match them exactly)
 
 - Every `.ts` file starts with the two SPDX/copyright lines.
+- Gateway code goes under `src/`, tests under `tests/`. Docs cite repository
+  paths from the repo root (`src/runtime/…`, not `runtime/…`);
+  `tests/unit/doc-paths.test.ts` fails on any cited path that does not exist.
 - ESM with explicit `.js` suffixes on relative imports; kebab-case filenames;
   strategy files end `.strategy.ts`.
-- String constants live in `core/constants.ts`; domain errors carry `code`
-  (from `ERR`) and `retryable` (see `core/types/sandbox-error.types.ts`,
-  `core/types/execution.types.ts`).
+- String constants live in `src/core/constants.ts`; domain errors carry `code`
+  (from `ERR`) and `retryable` (see `src/core/types/sandbox-error.types.ts`,
+  `src/core/types/execution.types.ts`).
 - Comments explain *why*, not *what* — copy the register of
   `bridge-request-handler.ts`.
 - Tests: vitest, table-driven where natural; mock `axios` or supply a fake
@@ -117,14 +122,14 @@ plus `npm run test:governance` when anything on the governance path changed
 - **A Governance Rule:** drop a YAML file in `governance/rules/` (format in
   `governance/rules/README.md`); boot validates it. Test with the evaluator
   directly (`tests/unit/governance-rules.test.ts` shows the shape).
-- **A rule source:** implement `GovernanceRuleSource` (`spi/governance/rule-source.ts`;
+- **A rule source:** implement `GovernanceRuleSource` (`src/spi/governance/rule-source.ts`;
   `load()` throws rather than return part of a set) and register it with
   `registerGovernanceRuleSourceBackend`; `GOVERNANCE_RULES_SOURCE=<type>` selects it.
-- **A store backend:** implement `CodeModeStore` (`spi/execution/execution-store.ts`),
+- **A store backend:** implement `CodeModeStore` (`src/spi/execution/execution-store.ts`),
   run the contract suite in `tests/unit/execution-store.test.ts` against it,
   register with `registerExecutionStoreBackend`.
-- **A new activity state or verdict:** update `core/constants.ts`, the replay
-  switch in `runtime/execution/activity-gate.ts`, and the docs table in
+- **A new activity state or verdict:** update `src/core/constants.ts`, the replay
+  switch in `src/runtime/execution/activity-gate.ts`, and the docs table in
   `docs/code-mode-governance.md` together.
 - **A demo service:** `services/<name>/{config.json,spec.yaml,skills/}` plus a
   mock backend under `examples/demo/`; the E2E script boots what `start.sh` boots.

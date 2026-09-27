@@ -273,7 +273,7 @@ See [`adapter-guide.md`](adapter-guide.md) for complete walkthroughs.
 
 **Can I replace the HTTP client with gRPC?**
 
-Yes. Implement `ConnectorAPI` from `spi/connector/connector-api.ts` and pass your implementation to `ServiceResources.apiClient`.
+Yes. Implement `ConnectorAPI` from `src/spi/connector/connector-api.ts` and pass your implementation to `ServiceResources.apiClient`.
 
 See `adapter-guide.md → Writing a Custom Outbound Transport`.
 
@@ -299,7 +299,7 @@ ENABLE_AUDIT=false npm run dev
 
 **Log output is numeric levels (30, 40, 50) instead of info/warn/error**
 
-The gateway configures pino with `formatters: { level: (label) => ({ level: label }) }` for human-readable levels. If you're seeing numeric levels, you may be running a custom build without this config. Check `runtime/observability/logger.ts`.
+The gateway configures pino with `formatters: { level: (label) => ({ level: label }) }` for human-readable levels. If you're seeing numeric levels, you may be running a custom build without this config. Check `src/runtime/observability/logger.ts`.
 
 ---
 

@@ -56,7 +56,7 @@ vitest against any gateway you like):
 | `MCP_STRICT_BASE_URL` | fail-closed gateway (default DENY, 3 s requestState TTL); absent ⇒ `defaults.test.ts` is skipped with a reason |
 | `MOCK_API_URL` | mock backend + control plane, e.g. `http://127.0.0.1:4010` |
 | `HARBOR_RESTART_CMD`, `HARBOR_KILL_CMD`, `HARBOR_START_CMD` | shell commands the lifecycle tests run to restart / SIGKILL / start the main gateway; absent ⇒ those three tests are skipped with a reason |
-| `HARBOR_IMAGE` | gateway image (compose mode) used by the boot-refusal test; absent ⇒ the test boots `index.ts` with tsx |
+| `HARBOR_IMAGE` | gateway image (compose mode) used by the boot-refusal test; absent ⇒ the test boots `src/index.ts` with tsx |
 | `E2E_HARBOR_PORT`, `E2E_HARBOR_STRICT_PORT`, `E2E_MOCK_API_PORT` | override the default ports 3333 / 3334 / 4010 |
 | `DEBUG_GOVERNANCE=true` | keep the environment running after a failure, and write diagnostics for passing tests too |
 | `POSTMAN_RUNNER=newman` | run the collection through `npx newman` instead of the built-in runner |
@@ -126,8 +126,7 @@ support `pm.sendRequest`, `postman.setNextRequest`, iterations or data files.
 ## CI
 
 `.github/workflows/governance-e2e.yml` runs on every push and pull request
-that touches governance-relevant paths (`core/`, `runtime/`, `tools/`,
-`spi/`, `adapters/`, `wiring/`, `governance/`, `index.ts`, the Dockerfile,
+that touches governance-relevant paths (`src/`, `governance/`, the Dockerfile,
 `docker/governance-e2e/`, `tests/e2e/`, `tests/postman/`, the Postman files
 and the workflow itself). Pipeline: `npm ci` → typecheck (gateway + E2E) →
 lint → build the production image with buildx (GHA layer cache) →
@@ -155,9 +154,9 @@ governance path.
 
 | Defect introduced | Where | Detected by |
 |---|---|---|
-| DENY evaluated as ALLOW | `runtime/governance/rule-evaluator.ts` | `deny.test.ts` |
-| REQUIRE_APPROVAL does not pause (executes immediately) | `runtime/sandbox/execute-api-in-sandbox.ts` | `approval.test.ts`, `multi-step.test.ts` |
-| Resume does not count as a new run (no fresh isolate observable) | `runtime/execution/execution-manager.ts` (`runCount`) | `lifecycle.test.ts`, `approval.test.ts` |
+| DENY evaluated as ALLOW | `src/runtime/governance/rule-evaluator.ts` | `deny.test.ts` |
+| REQUIRE_APPROVAL does not pause (executes immediately) | `src/runtime/sandbox/execute-api-in-sandbox.ts` | `approval.test.ts`, `multi-step.test.ts` |
+| Resume does not count as a new run (no fresh isolate observable) | `src/runtime/execution/execution-manager.ts` (`runCount`) | `lifecycle.test.ts`, `approval.test.ts` |
 | A COMPLETED activity is executed again on resume instead of replayed | bridge replay switch | `replay.test.ts`, `multi-step.test.ts` |
 | Later calls proceed after a denial / pause stopped the run | bridge run-stopping guard | `bypass.test.ts`, `lifecycle.test.ts` |
 | A DENIED / COMPLETED execution can be resumed | `ExecutionManager.assertNotTerminal` | `multi-step.test.ts`, `deny.test.ts`, `replay.test.ts` |
