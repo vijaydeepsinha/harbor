@@ -131,7 +131,7 @@ describe('failure handling', () => {
 
   it('should_reject_an_unknown_service_without_creating_an_execution', async () => {
     const out = expectToolError(await s().client('alice').apiExecute('warehouse', programs.ping()), ERR.UNKNOWN_SERVICE)
-    expect(out.retryable).toBe(true)
+    expect(out.retryable).toBe(false) // the registry is fixed at boot: the same name can never succeed
     expect(out.message).toContain('commerce')
     expect(out.meta.executionId).toBeUndefined()
     expect(await s().mock.requests()).toHaveLength(0)
