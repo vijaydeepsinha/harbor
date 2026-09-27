@@ -133,6 +133,23 @@ const T = {
 }
 
 const highValue = programs.createOrder(RESOURCES.customerAllowed, AMOUNTS.highValue)
+
+/** Programs for folder 15 — the same shapes the E2E bypass/approval tests submit. */
+const HARDENING = {
+  deleteOrderAt: (path: string) => `async () => (await api.request({ method: 'DELETE', path: ${JSON.stringify(path)} })).status`,
+  absoluteUrls: (targets: string[]) => `async () => {
+  const out = []
+  for (const path of ${JSON.stringify(targets)}) {
+    try { out.push((await api.request({ method: 'GET', path })).status) } catch (e) { out.push(e.message.split(':')[0]) }
+  }
+  return out
+}`,
+  pingWithForgedHeaders: (forgedBearer: string) => `async () => {
+  const r = await api.request({ method: 'GET', path: '/ping', headers: { Authorization: 'Bearer ${forgedBearer}', 'X-HTTP-Method-Override': 'DELETE', 'X-Idempotency-Key': 'forged' } })
+  return { status: r.status, identity: r.data && r.data.identity }
+}`,
+  createOrderJsonStringBody: (amount: number) => `async () => (await api.request({ method: 'POST', path: '/orders', body: JSON.stringify({ customerId: '${RESOURCES.customerAllowed}', amount: ${amount} }) })).status`
+}
 const fourStep = programs.fourStepWorkflow(RESOURCES.customerAllowed, AMOUNTS.highValue)
 const orderThenPayment = programs.orderThenPayment(RESOURCES.customerAllowed, AMOUNTS.normal)
 
@@ -404,6 +421,66 @@ const collection = {
         "pm.test('approvals record who/when/how', () => insp.approvals.forEach(a => { pm.expect(a.decidedVia).to.eql('mcp-elicitation'); pm.expect(a.decidedAt).to.be.a('string'); }));",
         "pm.test('history is chronological and complete', () => { const ev = insp.history.map(h => h.kind + ':' + h.event + (h.sequence ? '#' + h.sequence : '')); pm.expect(ev[0]).to.eql('EXECUTION:CREATED'); pm.expect(ev).to.include('APPROVAL:APPROVED#2'); pm.expect(ev).to.include('APPROVAL:APPROVED#3'); pm.expect(ev[ev.length - 1]).to.eql('EXECUTION:COMPLETED'); const at = insp.history.map(h => h.at); pm.expect([...at].sort()).to.eql(at); });",
         "pm.test('no bearer token is persisted', () => pm.expect(JSON.stringify(insp)).to.not.include(pm.environment.get('tokenAlice')));"
+      ])
+    ]),
+
+    folder('15 - Review Hardening', 'Corner cases from the 2026-09-27 review of main: path spellings, outbound headers, JSON-string bodies, malformed and conflicting approval answers, no silent POST retry, error classification, per-execution idempotency keys.', [
+      resetMock(),
+      apiExecute('Equivalent spelling of a denied DELETE (/%6frders/…) → GOVERNANCE_DENIED', 'commerce', HARDENING.deleteOrderAt('/%6frders/order-001'), [
+        T.toolError('GOVERNANCE_DENIED'), T.status('DENIED'), T.capture('hardAliasExecutionId', "meta['harbor/execution-id']")
+      ]),
+      inspect('Inspect — the rule that denied the canonical DELETE is the one that decided', 'hardAliasExecutionId', [
+        "pm.test('deny-delete-order decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('deny-delete-order'));"
+      ]),
+      apiExecute('Dot-segment spelling (/orders/./…) → INVALID_API_REQUEST before governance', 'commerce', HARDENING.deleteOrderAt('/orders/./order-001'), [T.toolError('INVALID_API_REQUEST')]),
+      apiExecute('Encoded-slash spelling (/orders%2F…) → INVALID_API_REQUEST', 'commerce', HARDENING.deleteOrderAt('/orders%2Forder-001'), [T.toolError('INVALID_API_REQUEST')]),
+      apiExecute('Absolute URL as the path → INVALID_API_REQUEST (the bearer never leaves the service)', 'commerce', HARDENING.absoluteUrls(['http://mock-api:4010/ping', '{{mockApiUrl}}/ping', '//mock-api:4010/ping']), [T.toolError('INVALID_API_REQUEST')]),
+      downstream('Downstream — none of the above reached the backend', '', ["pm.test('0 requests', () => pm.expect(calls).to.have.length(0));"]),
+      apiExecute('Program-supplied Authorization / method-override / idempotency headers are dropped', 'commerce', HARDENING.pingWithForgedHeaders('{{tokenBob}}'), [
+        T.complete, "pm.test('the backend saw the caller, not the forged bearer', () => pm.expect(payload.identity).to.eql('alice'));"
+      ]),
+      downstream('Downstream — identity alice, Harbor\'s own idempotency key', '?method=GET&path=/ping', [
+        "pm.test('one call as alice', () => { pm.expect(calls).to.have.length(1); pm.expect(calls[0].identity).to.eql('alice'); });",
+        "pm.test('the idempotency key is the gateway one, not the forged one', () => pm.expect(calls[0].headers['x-idempotency-key']).to.not.eql('forged'));"
+      ]),
+      apiExecute('Body as a JSON string is governed like the object → high-value order pauses', 'commerce', HARDENING.createOrderJsonStringBody(AMOUNTS.highValue), [
+        T.paused, "pm.test('the high-value rule matched', () => pm.expect(result.inputRequests.approval.params.message).to.include('high-value-order-requires-approval'));"
+      ]),
+      downstream('Downstream — the order was not sent', '?method=POST&path=/orders', ["pm.test('0 orders', () => pm.expect(calls).to.have.length(0));"]),
+
+      resetMock(),
+      apiExecute('Start a high-value order (pauses)', 'commerce', highValue, [
+        T.paused, T.capture('hardExecutionId', "meta['harbor/execution-id']"), T.capture('hardApprovalId', "meta['harbor/approval-id']"), T.capture('hardRequestState', 'result.requestState')
+      ]),
+      mrtrAnswer('accept without content → INVALID_API_REQUEST (not a yes)', 'commerce', highValue, 'hardRequestState', { action: 'accept' }, [T.toolError('INVALID_API_REQUEST')]),
+      mrtrAnswer('accept with approve: "false" (a string) → INVALID_API_REQUEST', 'commerce', highValue, 'hardRequestState', { action: 'accept', content: { approve: 'false' } }, [T.toolError('INVALID_API_REQUEST')]),
+      httpItem({ name: 'POST accept over HTTP without approve → 400', method: 'POST', url: '{{mcpBaseUrl}}/executions/{{hardExecutionId}}/approvals/{{hardApprovalId}}', token: '{{tokenAlice}}', body: { action: 'accept' }, tests: [
+        "pm.test('400 INVALID_API_REQUEST', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().code).to.eql('INVALID_API_REQUEST'); });"
+      ] }),
+      inspect('Inspect — still waiting, approval still PENDING', 'hardExecutionId', [
+        "pm.test('WAITING_APPROVAL / PENDING', () => { pm.expect(insp.execution.status).to.eql('WAITING_APPROVAL'); pm.expect(insp.approvals[0].status).to.eql('PENDING'); });"
+      ]),
+      httpItem({ name: 'POST accept over HTTP with approve: true → 200', method: 'POST', url: '{{mcpBaseUrl}}/executions/{{hardExecutionId}}/approvals/{{hardApprovalId}}', token: '{{tokenAlice}}', body: { action: 'accept', approve: true }, tests: [
+        "pm.test('APPROVED', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().outcome).to.eql('APPROVED'); });"
+      ] }),
+      mrtrAnswer('A conflicting MRTR decline after the HTTP approve → APPROVAL_ALREADY_DECIDED, nothing runs', 'commerce', highValue, 'hardRequestState', { action: 'decline' }, [T.toolError('APPROVAL_ALREADY_DECIDED')]),
+      downstream('Downstream — the decliner did not run the approved call', '?method=POST&path=/orders', ["pm.test('0 orders', () => pm.expect(calls).to.have.length(0));"]),
+      mrtrAnswer('The matching answer resumes and executes once', 'commerce', highValue, 'hardRequestState', { action: 'accept', content: { approve: true } }, [T.complete, T.status('COMPLETED')]),
+      downstream('Downstream — exactly one order', '?method=POST&path=/orders', ["pm.test('1 order', () => pm.expect(calls).to.have.length(1));"]),
+
+      resetMock(),
+      apiExecute('A POST that gets a 500 is sent once — its outcome is unknown, so it is never retried', 'commerce', programs.unstable('500'), [T.status('FAILED'), "pm.test('tool error', () => pm.expect(result.isError).to.eql(true));"]),
+      downstream('Downstream — one attempt', '?method=POST&path=/unstable', ["pm.test('exactly 1 POST', () => pm.expect(calls).to.have.length(1));"]),
+      apiExecute('An uncaught backend timeout is SANDBOX_RUNTIME, not a retryable SANDBOX_TIMEOUT', 'commerce', programs.unstable('timeout'), [
+        T.toolError('SANDBOX_RUNTIME'), T.status('FAILED'), "pm.test('not retryable', () => pm.expect(payload.retryable).to.eql(false));"
+      ]),
+
+      resetMock(),
+      apiExecute('Fresh submission #1 of a create', 'commerce', programs.createOrder(RESOURCES.customerAllowed, AMOUNTS.normal), [T.complete]),
+      apiExecute('Fresh submission #2 of the same create', 'commerce', programs.createOrder(RESOURCES.customerAllowed, AMOUNTS.normal), [T.complete]),
+      downstream('Downstream — two orders with two different idempotency keys', '?method=POST&path=/orders', [
+        "pm.test('two orders', () => pm.expect(calls).to.have.length(2));",
+        "pm.test('keys differ: two executions are two intents', () => pm.expect(calls[0].headers['x-idempotency-key']).to.not.eql(calls[1].headers['x-idempotency-key']));"
       ])
     ])
   ]

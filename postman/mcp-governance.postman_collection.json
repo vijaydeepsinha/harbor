@@ -4916,6 +4916,1694 @@
       "auth": {
         "type": "noauth"
       }
+    },
+    {
+      "name": "15 - Review Hardening",
+      "description": "Corner cases from the 2026-09-27 review of main: path spellings, outbound headers, JSON-string bodies, malformed and conflicting approval answers, no silent POST retry, error classification, per-execution idempotency keys.",
+      "item": [
+        {
+          "name": "Mock API — reset request log and state",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/reset",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "reset"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mock API reset', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Equivalent spelling of a denied DELETE (/%6frders/…) → GOVERNANCE_DENIED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => (await api.request({ method: 'DELETE', path: \\\"/%6frders/order-001\\\" })).status\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool error code is GOVERNANCE_DENIED', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('GOVERNANCE_DENIED'); });",
+                  "pm.test('execution status is DENIED', () => pm.expect(meta['harbor/execution-status']).to.eql('DENIED'));",
+                  "pm.collectionVariables.set('hardAliasExecutionId', meta['harbor/execution-id']);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inspect — the rule that denied the canonical DELETE is the one that decided",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/executions/{{hardAliasExecutionId}}",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "executions",
+                "{{hardAliasExecutionId}}"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('inspection is 200', () => pm.response.to.have.status(200));",
+                  "const insp = pm.response.json();",
+                  "pm.test('deny-delete-order decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('deny-delete-order'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dot-segment spelling (/orders/./…) → INVALID_API_REQUEST before governance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => (await api.request({ method: 'DELETE', path: \\\"/orders/./order-001\\\" })).status\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool error code is INVALID_API_REQUEST', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('INVALID_API_REQUEST'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Encoded-slash spelling (/orders%2F…) → INVALID_API_REQUEST",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => (await api.request({ method: 'DELETE', path: \\\"/orders%2Forder-001\\\" })).status\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool error code is INVALID_API_REQUEST', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('INVALID_API_REQUEST'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Absolute URL as the path → INVALID_API_REQUEST (the bearer never leaves the service)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const out = []\\n  for (const path of [\\\"http://mock-api:4010/ping\\\",\\\"{{mockApiUrl}}/ping\\\",\\\"//mock-api:4010/ping\\\"]) {\\n    try { out.push((await api.request({ method: 'GET', path })).status) } catch (e) { out.push(e.message.split(':')[0]) }\\n  }\\n  return out\\n}\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool error code is INVALID_API_REQUEST', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('INVALID_API_REQUEST'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Downstream — none of the above reached the backend",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/requests",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "requests"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const calls = pm.response.json();",
+                  "pm.test('0 requests', () => pm.expect(calls).to.have.length(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Program-supplied Authorization / method-override / idempotency headers are dropped",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const r = await api.request({ method: 'GET', path: '/ping', headers: { Authorization: 'Bearer {{tokenBob}}', 'X-HTTP-Method-Override': 'DELETE', 'X-Idempotency-Key': 'forged' } })\\n  return { status: r.status, identity: r.data && r.data.identity }\\n}\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool result is complete (not paused)', () => pm.expect(result.resultType).to.eql('complete'));",
+                  "pm.test('the backend saw the caller, not the forged bearer', () => pm.expect(payload.identity).to.eql('alice'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Downstream — identity alice, Harbor's own idempotency key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/requests?method=GET&path=/ping",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "requests"
+              ],
+              "query": [
+                {
+                  "key": "method",
+                  "value": "GET"
+                },
+                {
+                  "key": "path",
+                  "value": "/ping"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const calls = pm.response.json();",
+                  "pm.test('one call as alice', () => { pm.expect(calls).to.have.length(1); pm.expect(calls[0].identity).to.eql('alice'); });",
+                  "pm.test('the idempotency key is the gateway one, not the forged one', () => pm.expect(calls[0].headers['x-idempotency-key']).to.not.eql('forged'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Body as a JSON string is governed like the object → high-value order pauses",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => (await api.request({ method: 'POST', path: '/orders', body: JSON.stringify({ customerId: 'customer-001', amount: 10001 }) })).status\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('execution paused: resultType is input_required', () => pm.expect(result.resultType).to.eql('input_required'));",
+                  "pm.test('the high-value rule matched', () => pm.expect(result.inputRequests.approval.params.message).to.include('high-value-order-requires-approval'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Downstream — the order was not sent",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/requests?method=POST&path=/orders",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "requests"
+              ],
+              "query": [
+                {
+                  "key": "method",
+                  "value": "POST"
+                },
+                {
+                  "key": "path",
+                  "value": "/orders"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const calls = pm.response.json();",
+                  "pm.test('0 orders', () => pm.expect(calls).to.have.length(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mock API — reset request log and state",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/reset",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "reset"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mock API reset', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start a high-value order (pauses)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const o = await api.request({ method: 'POST', path: '/orders', body: { customerId: 'customer-001', amount: 10001, items: ['sku-1'] } })\\n  return { status: o.status, ok: o.ok, order: o.data }\\n}\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('execution paused: resultType is input_required', () => pm.expect(result.resultType).to.eql('input_required'));",
+                  "pm.collectionVariables.set('hardExecutionId', meta['harbor/execution-id']);",
+                  "pm.collectionVariables.set('hardApprovalId', meta['harbor/approval-id']);",
+                  "pm.collectionVariables.set('hardRequestState', result.requestState);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "accept without content → INVALID_API_REQUEST (not a yes)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const o = await api.request({ method: 'POST', path: '/orders', body: { customerId: 'customer-001', amount: 10001, items: ['sku-1'] } })\\n  return { status: o.status, ok: o.ok, order: o.data }\\n}\"\n    },\n    \"requestState\": \"{{hardRequestState}}\",\n    \"inputResponses\": {\n      \"approval\": {\n        \"action\": \"accept\"\n      }\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool error code is INVALID_API_REQUEST', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('INVALID_API_REQUEST'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "accept with approve: \"false\" (a string) → INVALID_API_REQUEST",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const o = await api.request({ method: 'POST', path: '/orders', body: { customerId: 'customer-001', amount: 10001, items: ['sku-1'] } })\\n  return { status: o.status, ok: o.ok, order: o.data }\\n}\"\n    },\n    \"requestState\": \"{{hardRequestState}}\",\n    \"inputResponses\": {\n      \"approval\": {\n        \"action\": \"accept\",\n        \"content\": {\n          \"approve\": \"false\"\n        }\n      }\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool error code is INVALID_API_REQUEST', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('INVALID_API_REQUEST'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST accept over HTTP without approve → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/executions/{{hardExecutionId}}/approvals/{{hardApprovalId}}",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "executions",
+                "{{hardExecutionId}}",
+                "approvals",
+                "{{hardApprovalId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"accept\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 INVALID_API_REQUEST', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().code).to.eql('INVALID_API_REQUEST'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inspect — still waiting, approval still PENDING",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/executions/{{hardExecutionId}}",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "executions",
+                "{{hardExecutionId}}"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('inspection is 200', () => pm.response.to.have.status(200));",
+                  "const insp = pm.response.json();",
+                  "pm.test('WAITING_APPROVAL / PENDING', () => { pm.expect(insp.execution.status).to.eql('WAITING_APPROVAL'); pm.expect(insp.approvals[0].status).to.eql('PENDING'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST accept over HTTP with approve: true → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/executions/{{hardExecutionId}}/approvals/{{hardApprovalId}}",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "executions",
+                "{{hardExecutionId}}",
+                "approvals",
+                "{{hardApprovalId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"accept\",\n  \"approve\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('APPROVED', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().outcome).to.eql('APPROVED'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A conflicting MRTR decline after the HTTP approve → APPROVAL_ALREADY_DECIDED, nothing runs",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const o = await api.request({ method: 'POST', path: '/orders', body: { customerId: 'customer-001', amount: 10001, items: ['sku-1'] } })\\n  return { status: o.status, ok: o.ok, order: o.data }\\n}\"\n    },\n    \"requestState\": \"{{hardRequestState}}\",\n    \"inputResponses\": {\n      \"approval\": {\n        \"action\": \"decline\"\n      }\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool error code is APPROVAL_ALREADY_DECIDED', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('APPROVAL_ALREADY_DECIDED'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Downstream — the decliner did not run the approved call",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/requests?method=POST&path=/orders",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "requests"
+              ],
+              "query": [
+                {
+                  "key": "method",
+                  "value": "POST"
+                },
+                {
+                  "key": "path",
+                  "value": "/orders"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const calls = pm.response.json();",
+                  "pm.test('0 orders', () => pm.expect(calls).to.have.length(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The matching answer resumes and executes once",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const o = await api.request({ method: 'POST', path: '/orders', body: { customerId: 'customer-001', amount: 10001, items: ['sku-1'] } })\\n  return { status: o.status, ok: o.ok, order: o.data }\\n}\"\n    },\n    \"requestState\": \"{{hardRequestState}}\",\n    \"inputResponses\": {\n      \"approval\": {\n        \"action\": \"accept\",\n        \"content\": {\n          \"approve\": true\n        }\n      }\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool result is complete (not paused)', () => pm.expect(result.resultType).to.eql('complete'));",
+                  "pm.test('execution status is COMPLETED', () => pm.expect(meta['harbor/execution-status']).to.eql('COMPLETED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Downstream — exactly one order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/requests?method=POST&path=/orders",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "requests"
+              ],
+              "query": [
+                {
+                  "key": "method",
+                  "value": "POST"
+                },
+                {
+                  "key": "path",
+                  "value": "/orders"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const calls = pm.response.json();",
+                  "pm.test('1 order', () => pm.expect(calls).to.have.length(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mock API — reset request log and state",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/reset",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "reset"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mock API reset', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A POST that gets a 500 is sent once — its outcome is unknown, so it is never retried",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const r = await api.request({ method: 'POST', path: '/unstable', body: { mode: '500' } })\\n  return { status: r.status, ok: r.ok, data: r.data }\\n}\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('execution status is FAILED', () => pm.expect(meta['harbor/execution-status']).to.eql('FAILED'));",
+                  "pm.test('tool error', () => pm.expect(result.isError).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Downstream — one attempt",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/requests?method=POST&path=/unstable",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "requests"
+              ],
+              "query": [
+                {
+                  "key": "method",
+                  "value": "POST"
+                },
+                {
+                  "key": "path",
+                  "value": "/unstable"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const calls = pm.response.json();",
+                  "pm.test('exactly 1 POST', () => pm.expect(calls).to.have.length(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "An uncaught backend timeout is SANDBOX_RUNTIME, not a retryable SANDBOX_TIMEOUT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const r = await api.request({ method: 'POST', path: '/unstable', body: { mode: 'timeout' } })\\n  return { status: r.status, ok: r.ok, data: r.data }\\n}\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool error code is SANDBOX_RUNTIME', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('SANDBOX_RUNTIME'); });",
+                  "pm.test('execution status is FAILED', () => pm.expect(meta['harbor/execution-status']).to.eql('FAILED'));",
+                  "pm.test('not retryable', () => pm.expect(payload.retryable).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mock API — reset request log and state",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/reset",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "reset"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mock API reset', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fresh submission #1 of a create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const o = await api.request({ method: 'POST', path: '/orders', body: { customerId: 'customer-001', amount: 250, items: ['sku-1'] } })\\n  return { status: o.status, ok: o.ok, order: o.data }\\n}\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool result is complete (not paused)', () => pm.expect(result.resultType).to.eql('complete'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fresh submission #2 of the same create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2026-07-28"
+              },
+              {
+                "key": "Mcp-Method",
+                "value": "tools/call"
+              },
+              {
+                "key": "Mcp-Name",
+                "value": "api_execute"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{tokenAlice}}"
+              }
+            ],
+            "url": {
+              "raw": "{{mcpBaseUrl}}/mcp",
+              "host": [
+                "{{mcpBaseUrl}}"
+              ],
+              "path": [
+                "mcp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const o = await api.request({ method: 'POST', path: '/orders', body: { customerId: 'customer-001', amount: 250, items: ['sku-1'] } })\\n  return { status: o.status, ok: o.ok, order: o.data }\\n}\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Shared helper: MCP responses are JSON-RPC envelopes; tool payloads are JSON in content[0].text.",
+                  "const rpc = pm.response.json();",
+                  "const result = rpc.result;",
+                  "const text = result && result.content && result.content[0] && result.content[0].text;",
+                  "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
+                  "const meta = (result && result._meta) || {};",
+                  "pm.test('tool result is complete (not paused)', () => pm.expect(result.resultType).to.eql('complete'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Downstream — two orders with two different idempotency keys",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{mockApiUrl}}/__admin/requests?method=POST&path=/orders",
+              "host": [
+                "{{mockApiUrl}}"
+              ],
+              "path": [
+                "__admin",
+                "requests"
+              ],
+              "query": [
+                {
+                  "key": "method",
+                  "value": "POST"
+                },
+                {
+                  "key": "path",
+                  "value": "/orders"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const calls = pm.response.json();",
+                  "pm.test('two orders', () => pm.expect(calls).to.have.length(2));",
+                  "pm.test('keys differ: two executions are two intents', () => pm.expect(calls[0].headers['x-idempotency-key']).to.not.eql(calls[1].headers['x-idempotency-key']));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "auth": {
+        "type": "noauth"
+      }
     }
   ]
 }
