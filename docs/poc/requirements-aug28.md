@@ -1,10 +1,48 @@
 # Harbor — Production Code Mode Governance Layer
 
+> **Historical requirements (2026-08-28).** Implemented on `main` via PR #4;
+> kept below as the brief the work started from (only the repository link
+> has been corrected).
+> [`docs/code-mode-governance.md`](../code-mode-governance.md) (design and
+> behaviour) and [`tests/REQUIREMENT_COVERAGE.md`](../../tests/REQUIREMENT_COVERAGE.md)
+> (requirement → test) are authoritative. Where the implementation deviates:
+>
+> - **Examples:** the isolate has no `fetch`; `fetch(path, …)` below maps to
+>   `api.request({ method, path, params, body, headers })`.
+> - **§3:** MCP request cancellation is not propagated into a running sandbox.
+> - **§6:** an execution survives a restart only with the `file` or `memcache`
+>   store (the default is `in-memory`).
+> - **§8:** adds `INTERRUPTED` (a retryable failure — resumable). `CANCELLED`
+>   comes only from a `cancel` answer to an approval; there is no cancel API.
+> - **§15 / §40:** a GET between two approval rounds has no dedicated test.
+> - **§17:** rules see no principal and no schema information beyond the
+>   resolved operation.
+> - **§22:** extended — rule levels (endpoint > service > gateway) and `final`
+>   decide first, then DENY > REQUIRE_APPROVAL > ALLOW. The configured default
+>   (`DENY`) applies only to calls some rule targets; a call no rule targets
+>   is allowed (`NO_GOVERNANCE`).
+> - **§24:** the HTTP fallback approver must be the execution's owner
+>   (self-approval); there is no approver role.
+> - **§29:** identity stays `executionId + activitySequence`. The divergence
+>   check binds method, template and concrete path on every record, and query
+>   and body on approved, waiting and in-flight ones — a key-order-independent
+>   comparison, not a hash.
+> - **§31:** the run lock is process-local with the `in-memory` and `file`
+>   stores; `memcache` holds it across pods.
+> - **§32:** conforms. A POST or PATCH that timed out or got a 5xx is never
+>   re-sent; GET, PUT and DELETE (idempotent per RFC 9110) are retried inside
+>   one activity before it is marked `FAILED` with an unknown outcome.
+> - **§35:** with `GOVERNANCE_RULES_REFRESH_SEC` above 0 a resume evaluates
+>   new activities under the rules then in force; an approved activity is not
+>   re-evaluated.
+> - **§39:** stores are `in-memory`, `file` and `memcache`; a registered
+>   backend is selected by name with `EXECUTION_STORE_TYPE`.
+
 ## Detailed Implementation Requirements and Autonomous Development Workflow
 
-You are working on the existing **Harbor-governance** repository:
+You are working on the existing **Harbor** repository:
 
-**Repository:** https://github.com/vijaydeepsinha/harbor-governance
+**Repository:** https://github.com/vijaydeepsinha/harbor
 
 You must first inspect and understand the existing repository before modifying anything.
 
