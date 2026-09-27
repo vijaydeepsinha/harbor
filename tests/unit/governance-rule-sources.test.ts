@@ -84,6 +84,21 @@ describe('Governance Rule sources', () => {
     expect(store.getRules().map(r => r.rule.name)).toEqual(['a', 'b'])
   })
 
+  it('a refresh never replaces rules in force with an empty set (file renamed aside, URL answering rules: [])', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'harbor-src-'))
+    writeFileSync(join(dir, '10-a.yaml'), ruleYaml('a'))
+    const source = new DirectoryRuleSourceStrategy(dir)
+    const store = new GovernanceRuleStore()
+    store.swap(parseRuleDocuments(await source.load()))
+    const refresher = new GovernanceRuleRefresher(source, store, 60, silent)
+    rmSync(join(dir, '10-a.yaml')) // e.g. a deploy that moves the file aside before writing the new one
+    expect(await refresher.refresh()).toBe('failed')
+    expect(store.getRules().map(r => r.rule.name)).toEqual(['a'])
+    // From nothing to nothing is fine (boot with no rules, still none).
+    const empty = new GovernanceRuleStore()
+    expect(await new GovernanceRuleRefresher(source, empty, 60, silent).refresh()).toBe('unchanged')
+  })
+
   it('dir: boot tolerates a directory that does not exist yet — no rules, and says so', async () => {
     const warnings: string[] = []
     const logger = { ...silent, warn: (_o: unknown, msg: string) => { warnings.push(msg) }, info: () => {}, error: () => {}, debug: () => {}, child: () => logger } as unknown as Logger
