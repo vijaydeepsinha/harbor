@@ -29,3 +29,19 @@ export function normalizeEndpointPath(path: string): string {
     })
     .join('/')
 }
+
+/**
+ * A URL as it may appear in logs and error messages: credentials and the
+ * query string (where tokens and signatures usually ride) removed.
+ */
+export function redactUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    u.username = ''
+    u.password = ''
+    u.search = ''
+    return u.toString()
+  } catch {
+    return '(invalid URL)'
+  }
+}

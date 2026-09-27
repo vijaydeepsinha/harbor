@@ -8,6 +8,10 @@ import type { SpecLoaderStrategy, OpenAPISpec } from '../../../core/types/spec.t
 import { SpecLoadError } from '../../../core/types/spec.types.js'
 import type { Logger } from '../../../core/types/logger.types.js'
 import { errorMessage } from '../../../core/utils/errors.js'
+import { redactUrl } from '../../../core/utils/url.js'
+
+/** A spec larger than this is refused rather than buffered: no OpenAPI document needs it. */
+const MAX_SPEC_BYTES = 20 * 1024 * 1024
 
 export class UrlSpecLoaderStrategy implements SpecLoaderStrategy {
   readonly name = 'url-spec-loader'
@@ -22,7 +26,8 @@ export class UrlSpecLoaderStrategy implements SpecLoaderStrategy {
     try {
       const response = await axios.get(this.url, {
         timeout: this.fetchTimeoutMs,
-        responseType: 'text'
+        responseType: 'text',
+        maxContentLength: MAX_SPEC_BYTES
       })
 
       const contentType: string = (response.headers['content-type'] as string | undefined) ?? ''
@@ -38,14 +43,21 @@ export class UrlSpecLoaderStrategy implements SpecLoaderStrategy {
         }
       }
 
-      const dereferenced = await SwaggerParser.dereference(parsed as Parameters<typeof SwaggerParser.dereference>[0])
-      this.logger?.debug({ url: this.url }, 'URL spec loaded')
+      // A fetched spec is someone else's document: its $refs must not make the
+      // gateway read local files (`$ref: /etc/…`) or fetch internal URLs
+      // (`$ref: http://169.254.169.254/…`) and then serve the result to every
+      // agent through search_code. Internal `#/components/…` refs still resolve.
+      const dereferenced = await SwaggerParser.dereference(
+        parsed as Parameters<typeof SwaggerParser.dereference>[0],
+        { resolve: { external: false } }
+      )
+      this.logger?.debug({ url: redactUrl(this.url) }, 'URL spec loaded')
       return dereferenced as OpenAPISpec
     } catch (err) {
       if (err instanceof SpecLoadError) throw err
-      this.logger?.warn({ url: this.url, error: errorMessage(err) }, 'URL spec load failed')
+      this.logger?.warn({ url: redactUrl(this.url), error: errorMessage(err) }, 'URL spec load failed')
       throw new SpecLoadError(
-        `Failed to load spec from URL "${this.url}": ${errorMessage(err)}`,
+        `Failed to load spec from URL "${redactUrl(this.url)}": ${errorMessage(err)}`,
         err
       )
     }
