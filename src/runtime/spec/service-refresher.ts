@@ -20,6 +20,9 @@ export interface ServiceRefreshConfig {
  */
 export class ServiceRefresher {
   private timer: ReturnType<typeof setInterval> | null = null
+  /** A refresh in flight: the next tick is skipped, so a slow load can never land after a newer one. */
+  private running = false
+  private stopped = false
 
   constructor(
     private readonly specLoader: SpecLoaderStrategy,
@@ -53,14 +56,26 @@ export class ServiceRefresher {
     )
   }
 
+  /**
+   * One refresh: spec and skills are swapped together or not at all — skills
+   * written against a spec that failed to load would describe endpoints the
+   * served spec does not have. Overlapping ticks are skipped (a slow load
+   * finishing after a newer one used to install the older spec), and nothing
+   * is swapped after stop().
+   */
   private async refresh(): Promise<void> {
-    const newSpec = await this.loadSpecWithTimeout()
-    const newSkills = this.loadSkills()
-    if (newSpec !== null) {
+    if (this.running) return
+    this.running = true
+    try {
+      const newSpec = await this.loadSpecWithTimeout()
+      if (newSpec === null || this.stopped) return
+      const newSkills = this.loadSkills()
       this.specStore.swap(newSpec)
-      this.logger.info({ loader: this.specLoader.name }, 'Spec refreshed successfully')
+      this.skillStore.swap(newSkills)
+      this.logger.info({ loader: this.specLoader.name, skills: newSkills.length }, 'Spec and skills refreshed')
+    } finally {
+      this.running = false
     }
-    this.skillStore.swap(newSkills)
   }
 
   private async loadSpecWithTimeout(): Promise<OpenAPISpec | null> {
@@ -86,9 +101,7 @@ export class ServiceRefresher {
 
   private loadSkills(): SkillMetadata[] {
     try {
-      const skills = scanSkills(this.serviceDir, this.logger)
-      this.logger.info({ count: skills.length }, 'Skills refreshed successfully')
-      return skills
+      return scanSkills(this.serviceDir, this.logger)
     } catch (err) {
       this.logger.warn({ err: errorMessage(err) }, 'Skills refresh failed — keeping existing skills')
       return this.skillStore.getSkills()
@@ -100,6 +113,7 @@ export class ServiceRefresher {
   }
 
   stop(): void {
+    this.stopped = true
     if (this.timer !== null) {
       clearInterval(this.timer)
       this.timer = null
