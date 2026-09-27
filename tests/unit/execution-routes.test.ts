@@ -4,6 +4,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
 import { ERR, APPROVAL_STATUS, EXECUTION_STATUS } from '../../core/constants.js'
+import { TokenInvalidError } from '../../core/types/auth.types.js'
+import { hashAuthenticatedPrincipal } from '../../core/utils/user-id-hash.js'
 
 vi.mock('@modelcontextprotocol/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@modelcontextprotocol/server')>()
@@ -14,15 +16,41 @@ vi.mock('@modelcontextprotocol/node', () => ({ toNodeHandler: vi.fn(() => vi.fn(
 import { startHttpGateway } from '../../runtime/http/http-gateway.js'
 import { ServiceRegistry } from '../../runtime/registry/service-registry.js'
 import { ActivityJournal } from '../../runtime/execution/activity-journal.js'
-import { makeRuntime, silentLogger } from './code-mode-harness.js'
+import { makeConnector, makeResources, makeRuntime, silentLogger } from './code-mode-harness.js'
 
 const TOKEN = 'route-test-token-0123456789abcdefghijklmnop'
+const OTHER_TOKEN = 'route-other-token-0123456789abcdefgh'
 
-async function start(codeMode: ReturnType<typeof makeRuntime>) {
+function makeRouteRegistry() {
+  const registry = new ServiceRegistry()
+  const resources = makeResources('trafficking', makeConnector().connector)
+  resources.authMiddleware.validateRequest = async (authorization) => {
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : ''
+    let userId: string
+    if (token === TOKEN) userId = 'user-42'
+    else if (token === OTHER_TOKEN) userId = 'user-99'
+    else throw new TokenInvalidError()
+
+    return {
+      payload: {
+        access_token: token,
+        token_type: 'bearer',
+        expires_in: 3600,
+        scope: '',
+        metadata: { userId }
+      },
+      invalidate: async () => {}
+    }
+  }
+  registry.register('trafficking', resources)
+  return registry
+}
+
+async function start(codeMode: ReturnType<typeof makeRuntime>, registry = makeRouteRegistry()) {
   const handle = startHttpGateway({
     host: '127.0.0.1', port: 0,
     createMcpServer: () => { throw new Error('not expected') },
-    registry: new ServiceRegistry(), logger: silentLogger, codeMode
+    registry, logger: silentLogger, codeMode
   })
   await new Promise<void>(resolve => handle.server.once('listening', () => resolve()))
   const { port } = handle.server.address() as AddressInfo
@@ -34,7 +62,11 @@ async function start(codeMode: ReturnType<typeof makeRuntime>) {
 
 /** An execution paused on approval #1, as the tool would leave it. */
 async function seedPaused(rt: ReturnType<typeof makeRuntime>) {
-  const exec = await rt.manager.create({ service: 'trafficking', code: 'async () => 1', userIdHash: 'h' })
+  const userIdHash = hashAuthenticatedPrincipal({
+    access_token: TOKEN,
+    metadata: { userId: 'user-42' }
+  })
+  const exec = await rt.manager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
   await rt.manager.beginRun(exec.executionId)
   const journal = new ActivityJournal(rt.store, exec.executionId, 'trafficking', 1)
   const request = { method: 'POST' as const, rawPath: '/campaigns/C1', specPath: '/campaigns/{id}', operationId: 'updateCampaign', body: { action: 'activate' } }
@@ -55,6 +87,11 @@ describe('execution routes', () => {
     const { baseUrl, close } = await start(rt); cleanup = close
 
     expect((await fetch(`${baseUrl}/executions/${executionId}`)).status).toBe(401)
+    const forged = await fetch(`${baseUrl}/executions/${executionId}`, {
+      headers: { Authorization: 'Bearer forged-token-0123456789abcdefghijkl' }
+    })
+    expect(forged.status).toBe(401)
+
     const missing = await fetch(`${baseUrl}/executions/nope`, { headers: { Authorization: `Bearer ${TOKEN}` } })
     expect(missing.status).toBe(404)
     expect((await missing.json() as { code: string }).code).toBe(ERR.EXECUTION_NOT_FOUND)
@@ -96,6 +133,24 @@ describe('execution routes', () => {
 
     const get = await fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, { headers: { Authorization: `Bearer ${TOKEN}` } })
     expect(get.status).toBe(405)
+  })
+
+  it('rejects a different authenticated principal without exposing or deciding the execution', async () => {
+    const rt = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(rt)
+    const { baseUrl, close } = await start(rt); cleanup = close
+    const headers = { Authorization: `Bearer ${OTHER_TOKEN}` }
+
+    const inspection = await fetch(`${baseUrl}/executions/${executionId}`, { headers })
+    expect(inspection.status).toBe(403)
+
+    const decision = await fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'accept' })
+    })
+    expect(decision.status).toBe(403)
+    expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
   })
 
   it('decline over HTTP denies the execution', async () => {

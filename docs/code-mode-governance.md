@@ -282,7 +282,10 @@ journal.
 ## 11. Inspection
 
 `GET /executions/{id}` (bearer) returns `{ execution, activities, approvals,
-decisions, history }` — for a terminal execution without `originalCode` under
+decisions, history }`. The bearer is validated through that execution's
+service auth strategy, and the authenticated principal must match the execution
+owner for both inspection and HTTP approval decisions — a syntactically valid
+bearer alone is not sufficient. For a terminal execution without `originalCode` under
 the default `DROP`, and `404 EXECUTION_NOT_FOUND` once the retention sweep has
 deleted it. `history` is derived from the records, e.g.
 

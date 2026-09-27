@@ -50,6 +50,7 @@ import {
 } from '../core/constants.js'
 import type { AuditOutcome, ExecutionStatus } from '../core/constants.js'
 import { ensureError, errorCode as getErrorCode, errorRetryable } from '../core/utils/errors.js'
+import { hashAuthenticatedPrincipal } from '../core/utils/user-id-hash.js'
 
 export function registerExecuteApiTool(
   server: McpServer,
@@ -232,10 +233,7 @@ async () => {
         )
         if (isToolError(authResult)) return authResult
         const { payload: tokenPayload, invalidate } = authResult
-        const rawUserId = tokenPayload.metadata?.userId
-        userIdHash = rawUserId
-          ? createHash('sha256').update(String(rawUserId)).digest('hex')
-          : createHash('sha256').update(tokenPayload.access_token).digest('hex')
+        userIdHash = hashAuthenticatedPrincipal(tokenPayload)
 
         logger.info({ correlationId, service, step: '2/4 code' }, `${LOG_PREFIX.MCP} JavaScript code received from AI client`)
         logger.debug({ correlationId, service, codeReceived: code }, `${LOG_PREFIX.MCP} code payload`)
