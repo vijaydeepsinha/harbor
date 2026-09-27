@@ -257,8 +257,15 @@ async () => {
         const program = execution?.originalCode ?? code
 
         logger.info({ correlationId, service, executionId, step: '3/4 sandbox-run' }, `${LOG_PREFIX.MCP} Executing code in V8 sandbox...`)
+        // A governed run's calls are keyed by the execution (the bridge adds
+        // the activity sequence): two executions of the same program are two
+        // intents and must never share a key, while a resume of one keeps it.
+        // Without an execution (legacy) the key is per user + program, so an
+        // agent retrying the identical tool call is deduplicated.
         const codeHash = createHash('sha256').update(program).digest('hex').slice(0, 16)
-        const idempotencyKey = `mcp-${service}-${userIdHash.slice(0, 12)}-${codeHash}`
+        const idempotencyKey = executionId !== undefined
+          ? `mcp-${service}-${executionId}`
+          : `mcp-${service}-${userIdHash.slice(0, 12)}-${codeHash}`
 
         const sandboxCtx: SandboxExecutionContext = {
           tokenPayload, invalidate, apiClient, circuitBreaker, permissionGuard,

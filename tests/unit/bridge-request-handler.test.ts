@@ -40,12 +40,25 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
     const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
     const reply = parse(await handler.handle(call({ method: 'POST', path: '/campaigns/42', body: { a: 1 } })))
     expect(reply).toMatchObject({ status: 201, ok: true })
-    expect(calls[0]?.ctx.idempotencyKey).toBe('idem') // no sequence suffix outside an execution
+    expect(calls[0]?.ctx.idempotencyKey).toBe('idem-c1') // arrival index outside an execution (no sequence)
     expect(calls[0]?.ctx).not.toHaveProperty('clientId')
     expect(ctx.callLog?.entries()).toHaveLength(1)
     expect(new AuditCollector(ctx.callLog!).getEndpoints()).toEqual(['POST /campaigns/{id}'])
     expect(new ProgressCollector(ctx.callLog!, 10).summary().calls[0]).toMatchObject({ method: 'POST', endpoint: '/campaigns/{id}', status: 201 })
     expect(() => handler.throwIfViolated()).not.toThrow()
+  })
+
+  it('gives every call of a legacy run its own idempotency key, stable for an identical rerun', async () => {
+    const keys = async () => {
+      const { ctx, calls } = makeCtx({ limits: { memoryLimitMb: 64, executeTimeoutMs: 1000, searchTimeoutMs: 1000, maxApiCalls: 5, maxConcurrentCalls: 2 } })
+      const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
+      await handler.handle(call({ method: 'GET', path: '/campaigns' }))
+      await handler.handle(call({ method: 'POST', path: '/campaigns', body: { name: 'x' } }))
+      return calls.map(c => c.ctx.idempotencyKey)
+    }
+    const first = await keys()
+    expect(first).toEqual(['idem-c1', 'idem-c2'])
+    expect(await keys()).toEqual(first)
   })
 
   it('passes the caller\'s client id through to the connector', async () => {

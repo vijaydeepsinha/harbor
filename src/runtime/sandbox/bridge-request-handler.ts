@@ -135,6 +135,8 @@ export class BridgeRequestHandler {
     if (refusal !== undefined) return refusal
 
     this.inFlight++
+    // Arrival order within the run: the legacy path's per-call idempotency suffix.
+    const callIndex = this.totalCalls
     // Hoisted so the failure path can record the method/endpoint that was
     // being attempted when the throw happened.
     let attempted: CallIdentity | undefined
@@ -171,7 +173,7 @@ export class BridgeRequestHandler {
         executing = admission.sequence
       }
 
-      const response = await this.execute(apiRequest, endpoint, admission?.sequence)
+      const response = await this.execute(apiRequest, endpoint, admission?.sequence ?? `c${callIndex}`)
       await this.record(attempted, response, admission?.sequence)
       return JSON.stringify(response)
     } catch (err) {
@@ -239,20 +241,21 @@ export class BridgeRequestHandler {
     return undefined
   }
 
-  private async execute(apiRequest: ApiRequest, endpoint: string, sequence: number | undefined): Promise<ApiResponse> {
+  private async execute(apiRequest: ApiRequest, endpoint: string, callKey: number | string): Promise<ApiResponse> {
     const { ctx } = this
     // Route through apiClient.request (not executeRequest) so the
     // configured idempotency strategy actually runs. For services with
     // idempotency type="noop" this is a passthrough; for in-memory /
-    // memcache / couchbase it dedupes replays by idempotencyKey. Under
-    // an execution the key gains the activity sequence so distinct
-    // calls in one run never share a key.
+    // memcache / couchbase it dedupes replays by idempotencyKey. The key
+    // gains the call's place in the program — the activity sequence under
+    // an execution, the arrival index otherwise — so distinct calls of one
+    // run never share a key (a GET and the POST after it must not dedupe).
     return ctx.apiClient.request(
       apiRequest,
       {
         tokenPayload: ctx.tokenPayload,
         invalidate: ctx.invalidate,
-        idempotencyKey: sequence !== undefined ? `${ctx.idempotencyKey}-${sequence}` : ctx.idempotencyKey,
+        idempotencyKey: `${ctx.idempotencyKey}-${callKey}`,
         idempotencyKeyTtlMs: ctx.idempotencyKeyTtlMs,
         correlationId: ctx.correlationId,
         sessionId: ctx.sessionId,

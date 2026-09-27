@@ -12,6 +12,8 @@ import type { AddressInfo } from 'node:net'
 import { ApiClient } from '../../src/runtime/api-client/api-client.js'
 import { CountBasedCircuitBreakerStrategy } from '../../src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
 import { noopIdempotency } from '../../src/spi/idempotency/strategies/noop-idempotency.strategy.js'
+import { InMemoryIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
+import { NoopCircuitBreakerStrategy } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
 import type { CircuitBreakerStrategy } from '../../src/core/types/circuit-breaker.types.js'
 import type { IdempotencyStrategy } from '../../src/core/types/idempotency.types.js'
 import { ERR } from '../../src/core/constants.js'
@@ -59,5 +61,24 @@ describe('governed api_execute over the real ApiClient', () => {
     expect(third['code']).toBe(ERR.CIRCUIT_OPEN)
     expect(seen).toHaveLength(2) // refused before the call went out
     expect(breaker.getState('/campaigns/{id}/creatives')).toBe('OPEN')
+  })
+
+  it('keys idempotency by execution: two executions of the same program both reach the backend', async () => {
+    const { seen, port } = await backend(() => 201)
+    const idempotency = new InMemoryIdempotencyStrategy()
+    const tool = governedTool(port, new NoopCircuitBreakerStrategy(), idempotency)
+    const program = `async () => {
+      const list = await api.request({ method: 'GET', path: '/campaigns' })
+      const created = await api.request({ method: 'POST', path: '/campaigns', body: { name: 'Q4' } })
+      return [list.status, created.data.id]
+    }`
+    const a = parseContent(await tool({ service: 'trafficking', code: program }, makeCtx()))
+    const b = parseContent(await tool({ service: 'trafficking', code: program }, makeCtx()))
+    idempotency.destroy()
+    expect(seen.map(r => `${r.method} ${r.url}`)).toEqual(['GET /campaigns', 'POST /campaigns', 'GET /campaigns', 'POST /campaigns'])
+    expect(a).not.toEqual(b) // the second create was not answered from the first one's cache
+    const keys = seen.map(r => r.headers['x-idempotency-key'] as string)
+    expect(new Set(keys).size).toBe(4)
+    expect(keys[0]!.endsWith('-1') && keys[1]!.endsWith('-2')).toBe(true)
   })
 })
