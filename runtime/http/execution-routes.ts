@@ -73,6 +73,7 @@ export async function handleExecutionRoutes(
     await authorizeExecution(execution, extracted.token, registry, url)
     const result = await codeMode.approvals.decide(approvalId, {
       action,
+      executionId,
       ...(typeof body['approve'] === 'boolean' ? { approve: body['approve'] } : {}),
       ...(typeof body['comment'] === 'string' && body['comment'] ? { comment: body['comment'] } : {}),
       via: 'http'

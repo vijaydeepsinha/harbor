@@ -471,6 +471,7 @@ async function resolveExecution(
         const content = answer.content ?? {}
         const decided = await rt.approvals.decide(state.approvalId, {
           action: answer.action,
+          executionId: state.executionId,
           ...(typeof content['approve'] === 'boolean' ? { approve: content['approve'] } : {}),
           ...(typeof content['comment'] === 'string' && content['comment'] ? { comment: content['comment'] } : {}),
           via: 'mcp-elicitation'
