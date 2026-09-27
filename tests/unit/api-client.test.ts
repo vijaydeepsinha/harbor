@@ -128,3 +128,23 @@ describe('ApiClient — retries never repeat a call whose effect may already hav
     } finally { await backend.close() }
   }, 10_000)
 })
+
+describe('ApiClient — circuit-breaker bookkeeping', () => {
+  it('records one failure per logical call, under the endpoint key the bridge passed', async () => {
+    const backend = await listen(() => ({ status: 500 }))
+    const failures: string[] = []
+    const breaker = { ...noopCircuitBreaker(), recordFailure: (k: string) => { failures.push(k) } }
+    const c = new ApiClient(
+      `http://127.0.0.1:${backend.port}`,
+      { protocol: 'http', host: '127.0.0.1', port: backend.port, basePath: '', requestTimeoutMs: 1000, maxRetries: 1 },
+      breaker, noopIdempotency(), pino({ level: 'silent' }), { serviceName: 'svc', agentName: 'agent' }
+    )
+    try {
+      await expect(c.executeRequest({ method: 'GET', path: '/orders/abc' }, { ...ctx, endpoint: '/orders/{orderId}' })).rejects.toThrow()
+      expect(backend.seen).toHaveLength(2) // one retry
+      expect(failures).toEqual(['/orders/{orderId}']) // one failure, on the template key
+      await expect(c.executeRequest({ method: 'POST', path: '/orders/123' }, ctx)).rejects.toThrow()
+      expect(failures[1]).toBe('/orders/{id}') // no key passed ⇒ derived from the path
+    } finally { await backend.close() }
+  }, 10_000)
+})

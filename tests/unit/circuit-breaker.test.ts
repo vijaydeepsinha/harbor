@@ -112,6 +112,26 @@ describe('CountBasedCircuitBreakerStrategy', () => {
   })
 })
 
+describe('CountBasedCircuitBreakerStrategy — HALF_OPEN admits one probe', () => {
+  it('refuses other callers while the probe is out, and lets a new probe through if it never reports', () => {
+    vi.useFakeTimers()
+    const now = Date.now()
+    vi.setSystemTime(now)
+    const cb = new CountBasedCircuitBreakerStrategy({ failureThreshold: 1, recoveryTimeMs: 10_000 })
+    cb.recordFailure('/orders/{id}')
+    vi.setSystemTime(now + 10_001)
+    expect(() => cb.check('/orders/{id}')).not.toThrow() // the probe
+    expect(() => cb.check('/orders/{id}')).toThrow(CircuitOpenError)
+    expect(() => cb.check('/orders/{id}')).toThrow(CircuitOpenError)
+    vi.setSystemTime(now + 20_002)
+    expect(() => cb.check('/orders/{id}')).not.toThrow() // the first probe never reported
+    cb.recordSuccess('/orders/{id}')
+    expect(cb.getState('/orders/{id}')).toBe('CLOSED')
+    expect(() => cb.check('/orders/{id}')).not.toThrow()
+    vi.useRealTimers()
+  })
+})
+
 describe('NoopCircuitBreakerStrategy', () => {
   let cb: NoopCircuitBreakerStrategy
 

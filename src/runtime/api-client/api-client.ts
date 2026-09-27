@@ -117,7 +117,7 @@ export class ApiClient implements ConnectorAPI {
   async executeRequest(apiRequest: ApiRequest, ctx: ExecuteRequestContext): Promise<ApiResponse> {
     const { tokenPayload, invalidate, idempotencyKey, correlationId, sessionId, clientId, signal } = ctx
     const { path: apiPath, method, params, body } = apiRequest
-    const normalizedPath = normalizeEndpointPath(apiPath)
+    const breakerKey = ctx.endpoint ?? normalizeEndpointPath(apiPath)
 
     // The program may add headers (Accept, Content-Type, its own X-…), but
     // never one Harbor owns or one that changes routing — see
@@ -207,7 +207,6 @@ export class ApiClient implements ConnectorAPI {
         }
 
         // 5xx — service failure
-        this.circuitBreaker.recordFailure(normalizedPath)
         lastError = new ApiError(
           `Upstream API returned ${response.status}`,
           response.status,
@@ -220,7 +219,6 @@ export class ApiClient implements ConnectorAPI {
       } catch (err) {
         // Sandbox disposed — not a backend failure; skip CB recording and retries.
         if (signal?.aborted) throw ensureError(err)
-        this.circuitBreaker.recordFailure(normalizedPath)
         lastError = ensureError(err)
 
         if (attempt < maxRetries) {
@@ -229,6 +227,9 @@ export class ApiClient implements ConnectorAPI {
       }
     }
 
+    // One logical call, one breaker failure — however many attempts it took —
+    // so failureThreshold means "N calls failed", as documented.
+    this.circuitBreaker.recordFailure(breakerKey)
     throw lastError ?? new ApiError('Unknown API error')
   }
 }

@@ -171,7 +171,7 @@ export class BridgeRequestHandler {
         executing = admission.sequence
       }
 
-      const response = await this.execute(apiRequest, admission?.sequence)
+      const response = await this.execute(apiRequest, endpoint, admission?.sequence)
       await this.record(attempted, response, admission?.sequence)
       return JSON.stringify(response)
     } catch (err) {
@@ -239,7 +239,7 @@ export class BridgeRequestHandler {
     return undefined
   }
 
-  private async execute(apiRequest: ApiRequest, sequence: number | undefined): Promise<ApiResponse> {
+  private async execute(apiRequest: ApiRequest, endpoint: string, sequence: number | undefined): Promise<ApiResponse> {
     const { ctx } = this
     // Route through apiClient.request (not executeRequest) so the
     // configured idempotency strategy actually runs. For services with
@@ -257,6 +257,8 @@ export class BridgeRequestHandler {
         correlationId: ctx.correlationId,
         sessionId: ctx.sessionId,
         ...(ctx.clientId !== undefined ? { clientId: ctx.clientId } : {}),
+        // The breaker is checked and credited under `endpoint` here; failures must land on the same key.
+        endpoint,
         signal: this.signal
       }
     )

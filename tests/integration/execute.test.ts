@@ -163,13 +163,10 @@ describe('execute integration', () => {
 
     const client = makeApiClient(cb)
 
-    // Both attempts fail (maxRetries=1, so 2 total tries = 2 recordFailure)
-    try {
-      await client.executeRequest({ method: 'GET', path: '/campaigns' }, baseCtx)
-    } catch {
-      // expected
-    }
-
+    // One logical call is one failure, however many attempts it took (maxRetries=1 ⇒ 2 tries).
+    await client.executeRequest({ method: 'GET', path: '/campaigns' }, baseCtx).catch(() => undefined)
+    expect(cb.getState('/campaigns')).toBe('CLOSED')
+    await client.executeRequest({ method: 'GET', path: '/campaigns' }, baseCtx).catch(() => undefined)
     expect(cb.getState('/campaigns')).toBe('OPEN')
   })
 
