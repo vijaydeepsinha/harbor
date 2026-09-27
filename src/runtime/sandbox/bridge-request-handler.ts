@@ -24,6 +24,7 @@ import {
 import { ActivityGate, type ActivityAdmission, type ActivityStop } from '../execution/activity-gate.js'
 import { CallLog, type CallIdentity } from '../execution/activity-journal.js'
 import type { SandboxExecutionContext } from './execute-api-in-sandbox.js'
+import { canonicalizeRequestPath } from './request-path.js'
 
 /**
  * Tracks resource/policy violations that the bridge enforces during a run.
@@ -76,12 +77,20 @@ function validateApiRequest(raw: unknown): ApiRequestValidationResult {
       detail: `api.request(arg): arg.method must be one of ${ALLOWED_HTTP_METHODS.join(', ')}`
     }
   }
+  const rawParams = arg['params'] ?? undefined
+  if (rawParams !== undefined && (typeof rawParams !== 'object' || Array.isArray(rawParams))) {
+    return { ok: false, reason: 'bad-params', detail: 'api.request(arg): arg.params must be an object of query parameters' }
+  }
+  // Governance, the journal and the connector all see this one spelling of
+  // the path — never the raw string (see request-path.ts).
+  const canonical = canonicalizeRequestPath(arg['path'], rawParams as Record<string, unknown> | undefined)
+  if (!canonical.ok) return { ok: false, reason: 'bad-path', detail: canonical.detail }
   return {
     ok: true,
     apiRequest: {
-      path: arg['path'],
+      path: canonical.path,
       method: arg['method'] as AllowedHttpMethod,
-      params: arg['params'] as ApiRequest['params'],
+      ...(canonical.params !== undefined ? { params: canonical.params as ApiRequest['params'] } : {}),
       body: arg['body'],
       headers: arg['headers'] as ApiRequest['headers']
     }

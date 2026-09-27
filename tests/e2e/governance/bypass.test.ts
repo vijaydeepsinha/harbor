@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest'
 import { useScenario } from '../helpers/diagnostics.js'
 import { expectCompleted, expectPaused, expectToolError } from '../helpers/assertions.js'
-import { ACTIVITY_STATUS, ERR, EXECUTION_STATUS, WIRE } from '../helpers/env.js'
+import { ACTIVITY_STATUS, ERR, EXECUTION_STATUS, WIRE, env } from '../helpers/env.js'
 import * as programs from '../fixtures/programs.js'
 import { IDENTITIES, RESOURCES } from '../fixtures/identities.js'
 
@@ -114,6 +114,52 @@ describe('bypass attempts', () => {
     const meta = res.result?.['_meta'] as Record<string, unknown>
     expect((meta[WIRE.META_SERVER_INFO] as { name: string }).name).toBe('harbor')
     expect(await s().mock.requests()).toHaveLength(0)
+  })
+
+  describe('path spellings cannot move a call out from under its rule (RG-007)', () => {
+    // Governance resolves the canonical path, and that same path is what goes on the wire.
+    it.each(['/%6frders/order-001', '/Orders/order-001', 'orders/order-001/'])(
+      'should_deny_an_equivalent_spelling_of_a_denied_delete_%s', async path => {
+        const program = `async () => (await api.request({ method: 'DELETE', path: '${path}' })).status`
+        const out = expectToolError(await s().client('alice').apiExecute('commerce', program), ERR.GOVERNANCE_DENIED)
+        s().track(out.meta.executionId)
+        expect(await s().mock.requests()).toHaveLength(0)
+        const insp = await s().admin.inspect(out.meta.executionId!)
+        expect(insp.decisions[0]).toMatchObject({ decision: 'DENY', decidingRule: 'deny-delete-order' })
+      })
+
+    it.each(['/orders/./order-001', '/orders/x/../order-001', '/orders/%2e%2e/orders/order-001', '/orders%2Forder-001', '/orders//order-001', '/orders\\order-001', '/orders/order-001#x'])(
+      'should_refuse_an_aliasing_spelling_before_governance_and_send_nothing_%s', async path => {
+        const program = `async () => (await api.request({ method: 'DELETE', path: '${path}' })).status`
+        const out = expectToolError(await s().client('alice').apiExecute('commerce', program), ERR.INVALID_API_REQUEST)
+        s().track(out.meta.executionId)
+        expect(await s().mock.requests()).toHaveLength(0)
+        expect((await s().admin.inspect(out.meta.executionId!)).activities).toHaveLength(0)
+      })
+
+    it('should_never_send_a_call_or_the_callers_bearer_to_an_absolute_url', async () => {
+      // One of these is the mock as the gateway reaches it (Compose service name, or the host address in local mode).
+      const targets = ['http://mock-api:4010/ping', `${env.mockApiUrl}/ping`, '//mock-api:4010/ping']
+      const program = `async () => {
+        const out = []
+        for (const path of ${JSON.stringify(targets)}) {
+          try { out.push((await api.request({ method: 'GET', path })).status) } catch (e) { out.push(e.message.split(':')[0]) }
+        }
+        return out
+      }`
+      const out = expectToolError(await s().client('alice').apiExecute('commerce', program), ERR.INVALID_API_REQUEST)
+      s().track(out.meta.executionId)
+      expect(await s().mock.requests()).toHaveLength(0)
+    })
+
+    it('should_let_rules_read_a_query_written_into_the_path', async () => {
+      const program = `async () => (await api.request({ method: 'GET', path: '/customers/customer-001?include=tier' })).status`
+      const out = expectCompleted(await s().client('alice').apiExecute('commerce', program))
+      s().track(out.meta.executionId)
+      const insp = await s().admin.inspect(out.meta.executionId!)
+      expect(insp.activities[0]!.request).toMatchObject({ rawPath: '/customers/customer-001', query: { include: 'tier' } })
+      expect((await s().mock.requests())[0]).toMatchObject({ method: 'GET', path: '/customers/customer-001' })
+    })
   })
 
   describe('known gaps pinned so they are visible (see TEST_ARCHITECTURE.md §6)', () => {

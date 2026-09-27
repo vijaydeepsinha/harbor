@@ -81,4 +81,66 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
     expect((await store.getActivity('exec-1', 1))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
     expect(() => handler.throwIfViolated()).toThrow(ApprovalRequiredError)
   })
+
+  describe('one path for governance, journal and wire', () => {
+    function governed(decide: (req: { specPath: string; operationId?: string; query?: Record<string, unknown> }) => 'ALLOW' | 'DENY') {
+      const store = new InMemoryCodeModeStore()
+      const seen: Array<{ specPath: string; operationId?: string; query?: Record<string, unknown> }> = []
+      const { ctx, calls } = makeCtx({
+        limits: { memoryLimitMb: 64, executeTimeoutMs: 1000, searchTimeoutMs: 1000, maxApiCalls: 10, maxConcurrentCalls: 2 },
+        executionBridge: {
+          journal: new ActivityJournal(store, 'exec-1', 'trafficking', 1),
+          resolve: (m, p) => resolveOperation(campaignSpec, m, p),
+          decide: async (_seq, req) => {
+            seen.push(req)
+            return decide(req) === 'DENY' ? { decision: 'DENY', reason: 'no', matchedRules: ['r'] } : { decision: 'ALLOW' }
+          }
+        }
+      })
+      return { store, seen, ctx, calls, handler: new BridgeRequestHandler(ctx, new AbortController().signal) }
+    }
+    const denyFinalize = (req: { operationId?: string }) => req.operationId === 'finalizeCampaign' ? 'DENY' : 'ALLOW'
+
+    it.each(['/campaigns/C1/finalize', '/campaigns/C1/%66inalize', '/Campaigns/C1/finalize', 'campaigns/C1/finalize/'])(
+      'an equivalent spelling (%s) reaches the same operation and the same DENY', async path => {
+        const { handler, calls, seen } = governed(denyFinalize)
+        expect(parse(await handler.handle(call({ method: 'POST', path }))).code).toBe(ERR.GOVERNANCE_DENIED)
+        expect(seen[0]?.operationId).toBe('finalizeCampaign')
+        expect(calls).toHaveLength(0)
+      })
+
+    it.each(['/campaigns/C1/./finalize', '/campaigns/x/../C1/finalize', '/campaigns/%2e%2e/C1/finalize', 'http://elsewhere.example/campaigns/C1/finalize', '//elsewhere.example/x', '/campaigns/C1%2Ffinalize'])(
+      'an aliasing spelling (%s) is refused before governance and never sent', async path => {
+        const { handler, calls, seen, store } = governed(denyFinalize)
+        const reply = parse(await handler.handle(call({ method: 'POST', path })))
+        expect(reply.code).toBe(ERR.INVALID_API_REQUEST)
+        expect(seen).toHaveLength(0)
+        expect(calls).toHaveLength(0)
+        expect(await store.getActivity('exec-1', 1)).toBeUndefined()
+        expect(() => handler.throwIfViolated()).toThrow(SandboxInvalidApiRequestError)
+      })
+
+    it('sends the canonical path, and a query written into the path travels as params that rules can read', async () => {
+      const { handler, calls, seen, store } = governed(() => 'ALLOW')
+      await handler.handle(call({ method: 'GET', path: '/%63ampaigns?status=active', params: { page: 2 } }))
+      expect(calls[0]?.req).toMatchObject({ path: '/campaigns', params: { page: 2, status: 'active' } })
+      expect(seen[0]).toMatchObject({ specPath: '/campaigns', query: { page: 2, status: 'active' } })
+      expect((await store.getActivity('exec-1', 1))?.request).toMatchObject({ rawPath: '/campaigns', query: { page: 2, status: 'active' } })
+    })
+
+    it('refuses params that are not an object of query parameters', async () => {
+      const { ctx } = makeCtx()
+      const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
+      expect(parse(await handler.handle(call({ method: 'GET', path: '/campaigns', params: 'status=active' }))).code).toBe(ERR.INVALID_API_REQUEST)
+      expect(parse(await new BridgeRequestHandler(makeCtx().ctx, new AbortController().signal)
+        .handle(call({ method: 'GET', path: '/campaigns', params: null }))).status).toBe(200)
+    })
+
+    it('applies the same refusals on the legacy (ungoverned) path', async () => {
+      const { ctx, calls } = makeCtx()
+      const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
+      expect(parse(await handler.handle(call({ method: 'GET', path: 'http://169.254.169.254/latest' }))).code).toBe(ERR.INVALID_API_REQUEST)
+      expect(calls).toHaveLength(0)
+    })
+  })
 })

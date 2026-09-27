@@ -63,4 +63,32 @@ describe('resolveOperation', () => {
   it('decodes percent-encoded parameter values', () => {
     expect(resolveOperation(spec, 'GET', '/campaigns/a%20b').pathParams).toEqual({ id: 'a b' })
   })
+
+  it('matches literal segments by their decoded form — an escaped letter is the same operation', () => {
+    expect(resolveOperation(spec, 'GET', '/%63ampaigns/C1')).toMatchObject({ operationId: 'getCampaign', matched: true })
+  })
+
+  it('matches literals ignoring letter case, preferring an exact-case template', () => {
+    // Express (default) and ASP.NET route /Campaigns/C1 to /campaigns/{id}; so must governance.
+    expect(resolveOperation(spec, 'GET', '/Campaigns/C1')).toMatchObject({ operationId: 'getCampaign', pathParams: { id: 'C1' } })
+    const cased = { ...spec, paths: { '/Users/{id}': { get: { operationId: 'upper' } }, '/users/{id}': { get: { operationId: 'lower' } } } } as unknown as OpenAPISpec
+    expect(resolveOperation(cased, 'GET', '/users/1').operationId).toBe('lower')
+    expect(resolveOperation(cased, 'GET', '/Users/1').operationId).toBe('upper')
+  })
+
+  it('resolves templates that mix literals and parameters inside one segment', () => {
+    const mixed = {
+      openapi: '3.0.0', info: { title: 't', version: '1' },
+      paths: {
+        '/files/{name}.json': { delete: { operationId: 'deleteJson' } },
+        '/files/{name}': { delete: { operationId: 'deleteFile' } },
+        '/v1/{job}:cancel': { post: { operationId: 'cancelJob' } }
+      }
+    } as unknown as OpenAPISpec
+    expect(resolveOperation(mixed, 'DELETE', '/files/report.json')).toMatchObject({ operationId: 'deleteJson', pathParams: { name: 'report' } })
+    expect(resolveOperation(mixed, 'DELETE', '/files/report.csv')).toMatchObject({ operationId: 'deleteFile', pathParams: { name: 'report.csv' } })
+    expect(resolveOperation(mixed, 'POST', '/v1/job-7:cancel')).toMatchObject({ operationId: 'cancelJob', pathParams: { job: 'job-7' } })
+    expect(resolveOperation(mixed, 'POST', '/v1/job-7:CANCEL')).toMatchObject({ operationId: 'cancelJob' })
+    expect(resolveOperation(mixed, 'POST', '/v1/:cancel').matched).toBe(false)
+  })
 })

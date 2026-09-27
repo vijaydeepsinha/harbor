@@ -73,6 +73,11 @@ export class ApiClient implements ConnectorAPI {
 
     this.axiosInstance = axios.create({
       baseURL: baseUrl,
+      // Without this an absolute `path` (`http://elsewhere/…`, `//host/…`)
+      // replaces baseURL and the caller's bearer goes to another host. The
+      // bridge already refuses such paths; this keeps any other ConnectorAPI
+      // caller on the service too.
+      allowAbsoluteUrls: false,
       timeout: apiConfig.requestTimeoutMs,
       httpsAgent,
       validateStatus: () => true
