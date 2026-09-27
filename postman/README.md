@@ -4,8 +4,25 @@ Two collections live here:
 
 | Collection | Covers | Environment |
 |---|---|---|
-| `mcp-governance.postman_collection.json` + `environments/local.postman_environment.json` | the Code Mode governance lifecycle — allow / deny / approval-required, MRTR approve + resume, the HTTP fallback approval, a multi-step workflow with two approvals, denial, replay, idempotency, error cases, security, audit (14 folders, 84 requests, ~180 assertions). Generated from the vitest E2E fixtures by `npm run postman:build`. | `npm run governance:up` (Docker) or `npm run governance:up -- --local`; run with `npm run test:postman`, `npx newman`, or the Postman GUI (folders top to bottom — they chain ids through collection variables). Runs in CI (`governance-e2e.yml`) through the dependency-free runner `tests/postman/run-collection.mjs`, see [`TESTING.md`](../TESTING.md). |
+| `mcp-governance.postman_collection.json` + `environments/local.postman_environment.json` | the Code Mode governance lifecycle — allow / deny / approval-required, MRTR approve + resume, the HTTP fallback approval, a multi-step workflow with two approvals, denial, replay, idempotency, error cases, security, audit, review hardening (15 folders, 118 requests, 224 assertions). Generated from the vitest E2E fixtures by `npm run postman:build`. | `npm run governance:up` (Docker) or `npm run governance:up -- --local`; run with `npm run test:postman`, `npx newman`, or the Postman GUI (folders top to bottom — they chain ids through collection variables). Runs in CI (`governance-e2e.yml`) through the dependency-free runner `tests/postman/run-collection.mjs`, see [`TESTING.md`](../TESTING.md). |
 | `Harbor.postman_collection.json` | the four auth strategies (below) | `examples/demo/start.sh` / `start-oauth-mode.sh` — manual only |
+
+Folder `15 - Review Hardening` of the governance collection replays the corner
+cases fixed in the 2026-09-27 review of main, each with assertions on the tool
+result and on what reached the mock backend: an equivalent spelling of a denied
+`DELETE` (`/%6frders/…`) is still denied by `deny-delete-order`; dot-segment,
+encoded-slash and absolute-URL paths are refused with `INVALID_API_REQUEST` and
+nothing is sent; program-supplied `Authorization`, method-override and
+idempotency headers are dropped (the backend sees the caller and Harbor's own
+key); a body passed as a JSON string is governed like the object; an accept
+without a boolean `approve` (no content, or the string `"false"`) is refused
+over MRTR and HTTP (400) and the approval stays pending; a conflicting MRTR decline after an HTTP approve gets
+`APPROVAL_ALREADY_DECIDED` and runs nothing; a POST that gets a 500 is sent
+once; an uncaught backend timeout is `SANDBOX_RUNTIME`, not retryable; and two
+fresh submissions of one create carry different idempotency keys. It mirrors
+`tests/e2e/governance/bypass.test.ts`, `approval.test.ts`, `failures.test.ts`
+and `idempotency.test.ts`; like every folder it is built by
+`tests/postman/build-collection.mts` — edit that, not the JSON.
 
 `Harbor.postman_collection.json` exercises Harbor's `/mcp` endpoint across all
 4 pluggable auth strategies (`static-token`, `oauth-2.1`, `jwt-validation`,
