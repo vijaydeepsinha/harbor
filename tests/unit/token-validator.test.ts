@@ -3,12 +3,12 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import axios from 'axios'
-import { OAuthIntrospectionStrategy } from '../../adapters/auth/strategies/oauth-introspection.strategy.js'
+import { OAuthIntrospectionStrategy } from '../../src/adapters/auth/strategies/oauth-introspection.strategy.js'
 import {
   TokenExpiredError,
   TokenInvalidError,
   TokenIntrospectionError
-} from '../../core/types/auth.types.js'
+} from '../../src/core/types/auth.types.js'
 
 vi.mock('axios')
 

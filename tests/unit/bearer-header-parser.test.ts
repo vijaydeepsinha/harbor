@@ -2,8 +2,8 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect } from 'vitest'
-import { parseBearerAuthorizationHeader } from '../../spi/auth/bearer-header-parser.js'
-import { BEARER_CREDENTIAL_MAX_OCTETS, BEARER_OPAQUE_MIN_OCTETS } from '../../core/constants.js'
+import { parseBearerAuthorizationHeader } from '../../src/spi/auth/bearer-header-parser.js'
+import { BEARER_CREDENTIAL_MAX_OCTETS, BEARER_OPAQUE_MIN_OCTETS } from '../../src/core/constants.js'
 
 describe('parseBearerAuthorizationHeader', () => {
   it('accepts Bearer with JWT-shaped token', () => {

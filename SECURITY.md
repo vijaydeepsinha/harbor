@@ -10,7 +10,7 @@
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-To report a security issue, please open a [GitHub Security Advisory](https://github.com/vdssinha/harbor/security/advisories/new) (private disclosure). Include:
+To report a security issue, please open a [GitHub Security Advisory](https://github.com/vijaydeepsinha/harbor/security/advisories/new) (private disclosure). Include:
 
 - A description of the vulnerability
 - Steps to reproduce

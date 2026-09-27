@@ -3,9 +3,9 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
-import { ERR, APPROVAL_STATUS, EXECUTION_STATUS } from '../../core/constants.js'
-import { TokenInvalidError } from '../../core/types/auth.types.js'
-import { hashAuthenticatedPrincipal } from '../../core/utils/user-id-hash.js'
+import { ERR, APPROVAL_STATUS, EXECUTION_STATUS } from '../../src/core/constants.js'
+import { TokenInvalidError } from '../../src/core/types/auth.types.js'
+import { hashAuthenticatedPrincipal } from '../../src/core/utils/user-id-hash.js'
 
 vi.mock('@modelcontextprotocol/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@modelcontextprotocol/server')>()
@@ -13,9 +13,9 @@ vi.mock('@modelcontextprotocol/server', async (importOriginal) => {
 })
 vi.mock('@modelcontextprotocol/node', () => ({ toNodeHandler: vi.fn(() => vi.fn()) }))
 
-import { startHttpGateway } from '../../runtime/http/http-gateway.js'
-import { ServiceRegistry } from '../../runtime/registry/service-registry.js'
-import { ActivityJournal } from '../../runtime/execution/activity-journal.js'
+import { startHttpGateway } from '../../src/runtime/http/http-gateway.js'
+import { ServiceRegistry } from '../../src/runtime/registry/service-registry.js'
+import { ActivityJournal } from '../../src/runtime/execution/activity-journal.js'
 import { makeConnector, makeResources, makeRuntime, silentLogger } from './code-mode-harness.js'
 
 const TOKEN = 'route-test-token-0123456789abcdefghijklmnop'

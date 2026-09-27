@@ -11,7 +11,8 @@ import { createMcpGateway } from './runtime/server-factory.js'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const servicesDir = process.env['SERVICES_DIR']
   ? resolve(process.cwd(), process.env['SERVICES_DIR'])
-  : resolve(__dirname, 'services')
+  // One level up from both src/index.ts (tsx) and dist/index.js (built): the repo or image root.
+  : resolve(__dirname, '..', 'services')
 
 const globalConfig = validateGlobalConfig()
 await createMcpGateway(servicesDir, globalConfig)

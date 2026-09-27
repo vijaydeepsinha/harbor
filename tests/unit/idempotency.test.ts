@@ -2,10 +2,10 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { InMemoryIdempotencyStrategy } from '../../adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
-import { NoopIdempotencyStrategy } from '../../spi/idempotency/strategies/noop-idempotency.strategy.js'
-import { MemcacheIdempotencyStrategy } from '../../adapters/idempotency/strategies/memcache-idempotency.strategy.js'
-import { CouchbaseIdempotencyStrategy } from '../../adapters/idempotency/strategies/couchbase-idempotency.strategy.js'
+import { InMemoryIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
+import { NoopIdempotencyStrategy } from '../../src/spi/idempotency/strategies/noop-idempotency.strategy.js'
+import { MemcacheIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/memcache-idempotency.strategy.js'
+import { CouchbaseIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/couchbase-idempotency.strategy.js'
 import axios from 'axios'
 
 vi.mock('axios')
@@ -115,7 +115,7 @@ describe('InMemoryIdempotencyStrategy', () => {
     const logger = {
       info: vi.fn(), warn, error: vi.fn(), debug: vi.fn(), trace: vi.fn(), fatal: vi.fn(),
       child: () => logger
-    } as unknown as import('../../runtime/observability/logger.js').Logger
+    } as unknown as import('../../src/runtime/observability/logger.js').Logger
     const loggedStrategy = new InMemoryIdempotencyStrategy(logger)
 
     const fn = vi.fn().mockRejectedValue(new Error('backend kaboom'))

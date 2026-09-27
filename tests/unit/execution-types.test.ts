@@ -11,12 +11,12 @@ import {
   ExecutionNotResumableError,
   ExecutionCancelledError,
   ExecutionError
-} from '../../core/types/execution.types.js'
+} from '../../src/core/types/execution.types.js'
 import {
   ERR, EXECUTION_STATUS, ACTIVITY_STATUS, GOVERNANCE_DECISION, GOVERNANCE_PRECEDENCE,
   EXECUTION_ID_META_KEY, META_PREFIX
-} from '../../core/constants.js'
-import { errorCode, errorRetryable } from '../../core/utils/errors.js'
+} from '../../src/core/constants.js'
+import { errorCode, errorRetryable } from '../../src/core/utils/errors.js'
 
 const summary = {
   service: 'trafficking', method: 'POST' as const, specPath: '/campaigns/{id}',

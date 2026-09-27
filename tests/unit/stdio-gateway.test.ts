@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { Logger } from '../../runtime/observability/logger.js'
+import type { Logger } from '../../src/runtime/observability/logger.js'
 
 const { mockServeStdio } = vi.hoisted(() => ({
   mockServeStdio: vi.fn()
@@ -12,9 +12,9 @@ vi.mock('@modelcontextprotocol/server/stdio', () => ({
   serveStdio: mockServeStdio
 }))
 
-import { startStdioGateway } from '../../runtime/transport/stdio-gateway.js'
-import { ServiceRegistry } from '../../runtime/registry/service-registry.js'
-import type { GatewayMcpServerFactory } from '../../runtime/http/mcp-server-factory.js'
+import { startStdioGateway } from '../../src/runtime/transport/stdio-gateway.js'
+import { ServiceRegistry } from '../../src/runtime/registry/service-registry.js'
+import type { GatewayMcpServerFactory } from '../../src/runtime/http/mcp-server-factory.js'
 
 function makeLogger(): Logger {
   const noop = () => {}

@@ -34,7 +34,7 @@ Thank you for your interest in contributing. This guide covers setup, developmen
 **Clone and install**
 
 ```bash
-git clone https://github.com/vdssinha/harbor
+git clone https://github.com/vijaydeepsinha/harbor
 cd harbor
 npm install
 ```
@@ -100,12 +100,14 @@ curl -s -X POST http://127.0.0.1:3333/mcp \
 ## 3. Project Layout
 
 ```
-core/           Pure types, constants, config schema, shared utilities. No runtime deps.
-runtime/        Gateway server, service registry, sandbox executor, API client. Imports spi/ only.
-tools/          MCP tool handlers (discover_services, api_execute, …). Imports runtime/ + spi/.
-spi/            Abstract contracts: ConnectorAPI, AuthMiddleware, PermissionGuard, SpecLoader, …
-adapters/       Concrete implementations: in-memory, Memcache, Couchbase, static-token, oauth-introspection
-wiring/         Composition root — strategy factories + service auth/circuit-breaker resolver.
+src/            All gateway source; tsconfig rootDir, compiled to dist/.
+  index.ts      Process entry — validates config, boots the gateway.
+  core/         Pure types, constants, config schema, shared utilities. No runtime deps.
+  runtime/      Gateway server, service registry, sandbox executor, API client. Imports spi/ only.
+  tools/        MCP tool handlers (discover_services, api_execute, …). Imports runtime/ + spi/.
+  spi/          Abstract contracts: ConnectorAPI, AuthMiddleware, PermissionGuard, SpecLoader, …
+  adapters/     Concrete implementations: in-memory, Memcache, Couchbase, static-token, oauth-introspection
+  wiring/       Composition root — strategy factories + service auth/circuit-breaker resolver.
                 Imports adapters/ + spi/ to wire concrete strategies; runtime/ re-exports from here.
 services/       Your service definitions — spec.yaml + config.json + skills/*.md (add yours here)
 examples/
@@ -115,7 +117,7 @@ tests/          Vitest unit + integration tests; demo_e2e.py smoke test
 docs/           architecture.md, request-lifecycle.md
 ```
 
-**Key layering rule:** `runtime/` must never import from `adapters/` directly — only from `spi/` interfaces. `wiring/` is the only layer that imports both `adapters/` and `spi/` — it is the composition root. `core/` has zero upward dependencies.
+**Key layering rule:** `src/runtime/` must never import from `src/adapters/` directly — only from `src/spi/` interfaces. `src/wiring/` is the only layer that imports both `src/adapters/` and `src/spi/` — it is the composition root. `src/core/` has zero upward dependencies.
 
 ---
 
@@ -125,11 +127,11 @@ Connectors are concrete implementations of SPI interfaces. Two common extension 
 
 ### 4a. Token Cache Backend
 
-**Base class:** `spi/auth/abstract-token-cache.ts` → `AbstractTokenCache`
+**Base class:** `src/spi/auth/abstract-token-cache.ts` → `AbstractTokenCache`
 
 Extend `AbstractTokenCache` — do not implement `TokenCacheStrategy` directly. The base class handles hashing, TTL, and all protocol methods; subclasses implement three storage primitives.
 
-1. Create `adapters/auth/strategies/redis-token-cache.strategy.ts`:
+1. Create `src/adapters/auth/strategies/redis-token-cache.strategy.ts`:
 
 ```typescript
 // SPDX-License-Identifier: Apache-2.0
@@ -176,19 +178,19 @@ import { RedisTokenCache } from './adapters/auth/strategies/redis-token-cache.st
 registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCache(config, ttlMs, logger))
 ```
 
-3. Add `'redis'` to the `allowedTypes` array in `core/config/config.ts` at the `TOKEN_CACHE_TYPE` call site — `resolveStoreTypeConfig` validates against this list on startup and exits if the type is unrecognized.
+3. Add `'redis'` to the `allowedTypes` array in `src/core/config/config.ts` at the `TOKEN_CACHE_TYPE` call site — `resolveStoreTypeConfig` validates against this list on startup and exits if the type is unrecognized.
 
 4. Activate by setting `TOKEN_CACHE_TYPE=redis` in your environment (or `.env`). The registered factory is resolved at gateway startup — no `config.json` change needed.
 
 ### 4b. Idempotency Backend
 
-**Interface:** `core/types/idempotency.types.ts` → `IdempotencyStrategy`
+**Interface:** `src/core/types/idempotency.types.ts` → `IdempotencyStrategy`
 
-Same pattern — create under `adapters/idempotency/strategies/`, register with `registerIdempotencyBackend('postgres', ...)`.
+Same pattern — create under `src/adapters/idempotency/strategies/`, register with `registerIdempotencyBackend('postgres', ...)`.
 
 ### 4c. Outbound Transport (ConnectorAPI)
 
-**Interface:** `spi/connector/connector-api.ts` → `ConnectorAPI`
+**Interface:** `src/spi/connector/connector-api.ts` → `ConnectorAPI`
 
 Replace HTTP/axios with gRPC, GraphQL, or a mock:
 
@@ -205,7 +207,7 @@ export class GrpcConnector implements ConnectorAPI {
 }
 ```
 
-Pass your connector instance when building service resources (see `runtime/server-factory.ts`).
+Pass your connector instance when building service resources (see `src/runtime/server-factory.ts`).
 
 ---
 
@@ -309,12 +311,12 @@ curl -s -X POST http://127.0.0.1:3333/mcp \
 
 **Layer discipline**
 
-- `core/` → no imports from anything else in this repo
-- `spi/` → may import `core/` only
-- `adapters/` → may import `core/` and `spi/` only
-- `runtime/` → may import `core/`, `spi/` only (not `adapters/` directly)
-- `wiring/` → may import `core/`, `spi/`, `adapters/` (composition root — this is the only layer that wires concrete adapters)
-- `tools/` → may import `core/`, `spi/`, `runtime/`
+- `src/core/` → no imports from anything else in this repo
+- `src/spi/` → may import `src/core/` only
+- `src/adapters/` → may import `src/core/` and `src/spi/` only
+- `src/runtime/` → may import `src/core/`, `src/spi/` only (not `src/adapters/` directly)
+- `src/wiring/` → may import `src/core/`, `src/spi/`, `src/adapters/` (composition root — this is the only layer that wires concrete adapters)
+- `src/tools/` → may import `src/core/`, `src/spi/`, `src/runtime/`
 
 Violations get caught in review. When in doubt, check `docs/architecture.md`.
 
@@ -412,19 +414,19 @@ These are isolated, well-scoped tasks with clear acceptance criteria. Each links
 ### Connectors
 
 **Redis token-cache connector** (`good-first-issue`, `connector`)
-Implement `adapters/auth/strategies/redis-token-cache.strategy.ts` using `ioredis`.
-Interface: `core/types/auth.types.ts → TokenCacheStrategy`.
+Implement `src/adapters/auth/strategies/redis-token-cache.strategy.ts` using `ioredis`.
+Interface: `src/core/types/auth.types.ts → TokenCacheStrategy`.
 Register via `registerTokenCacheBackend('redis', ...)`.
 Include tests under `tests/unit/adapters/`.
 
 **Redis idempotency connector** (`good-first-issue`, `connector`)
-Same pattern as above but for `IdempotencyStrategy` (`core/types/idempotency.types.ts`).
-File: `adapters/idempotency/strategies/redis-idempotency.strategy.ts`.
+Same pattern as above but for `IdempotencyStrategy` (`src/core/types/idempotency.types.ts`).
+File: `src/adapters/idempotency/strategies/redis-idempotency.strategy.ts`.
 Register via `registerIdempotencyBackend('redis', ...)`.
 
 **Filesystem idempotency connector** (`good-first-issue`, `connector`)
 Persist idempotency keys to a local JSON file — useful for development without an external store.
-File: `adapters/idempotency/strategies/filesystem-idempotency.strategy.ts`.
+File: `src/adapters/idempotency/strategies/filesystem-idempotency.strategy.ts`.
 Uses Node.js `fs/promises`. No external dependencies.
 
 ### Services and Skills

@@ -10,7 +10,7 @@ This is how Claude Desktop integrates: it spawns the gateway on demand and commu
 
 ## ConnectorAPI
 
-The `ConnectorAPI` interface in `spi/connector/connector-api.ts` is the outbound transport contract. The built-in `ApiClient` implements it over HTTP/axios. Implement the same interface to replace the transport with gRPC, GraphQL, a mock, or anything else.
+The `ConnectorAPI` interface in `src/spi/connector/connector-api.ts` is the outbound transport contract. The built-in `ApiClient` implements it over HTTP/axios. Implement the same interface to replace the transport with gRPC, GraphQL, a mock, or anything else.
 
 Your implementation receives the request, the execution context (token payload, idempotency key), and must return `{ data, status, ok }`. Returning `ok: false` signals a 4xx — no circuit failure. Throwing signals a 5xx — circuit failure is recorded and the call is retried.
 

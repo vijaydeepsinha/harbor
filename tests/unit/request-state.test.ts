@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest'
 import type { ServerContext } from '@modelcontextprotocol/server'
-import { createResumeStateCodec, type ResumeState } from '../../runtime/execution/request-state.js'
+import { createResumeStateCodec, type ResumeState } from '../../src/runtime/execution/request-state.js'
 
 const state: ResumeState = { executionId: 'e-1', approvalId: 'ap-1', activitySequence: 3, userIdHash: 'h' }
 const ctx = (method: string) => ({ mcpReq: { method } }) as unknown as ServerContext
@@ -28,7 +28,7 @@ describe('resume-state codec', () => {
 
   it('without a configured key it warns and still works within the process', async () => {
     const warnings: string[] = []
-    const logger = { warn: (msg: unknown) => warnings.push(String(msg)) } as unknown as import('../../core/types/logger.types.js').Logger
+    const logger = { warn: (msg: unknown) => warnings.push(String(msg)) } as unknown as import('../../src/core/types/logger.types.js').Logger
     const codec = createResumeStateCodec({ ttlSeconds: 60, logger })
     expect(warnings[0]).toMatch(/GOVERNANCE_REQUEST_STATE_KEY/)
     const wire = await codec.mint(state, ctx('tools/call'))

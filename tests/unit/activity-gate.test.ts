@@ -2,13 +2,13 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ActivityGate, type GovernanceVerdict } from '../../runtime/execution/activity-gate.js'
-import { ActivityJournal } from '../../runtime/execution/activity-journal.js'
-import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
-import { resolveOperation } from '../../runtime/governance/operation-resolver.js'
-import { ACTIVITY_STATUS, ERR, type ActivityStatus } from '../../core/constants.js'
-import { ReplayDivergedError, type ApprovalSummary } from '../../core/types/execution.types.js'
-import type { ApiRequest } from '../../spi/connector/connector-api.js'
+import { ActivityGate, type GovernanceVerdict } from '../../src/runtime/execution/activity-gate.js'
+import { ActivityJournal } from '../../src/runtime/execution/activity-journal.js'
+import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { resolveOperation } from '../../src/runtime/governance/operation-resolver.js'
+import { ACTIVITY_STATUS, ERR, type ActivityStatus } from '../../src/core/constants.js'
+import { ReplayDivergedError, type ApprovalSummary } from '../../src/core/types/execution.types.js'
+import type { ApiRequest } from '../../src/spi/connector/connector-api.js'
 import { campaignSpec } from './code-mode-harness.js'
 
 const FINALIZE: ApiRequest = { method: 'POST', path: '/campaigns/C1/finalize', body: { note: 'go' } }

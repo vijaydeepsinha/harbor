@@ -2,8 +2,8 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect } from 'vitest'
-import { resolveOperation } from '../../runtime/governance/operation-resolver.js'
-import type { OpenAPISpec } from '../../core/types/spec.types.js'
+import { resolveOperation } from '../../src/runtime/governance/operation-resolver.js'
+import type { OpenAPISpec } from '../../src/core/types/spec.types.js'
 
 const spec: OpenAPISpec = {
   openapi: '3.0.3',

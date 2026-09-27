@@ -109,7 +109,7 @@ All files live in `tests/e2e/governance/`; each names its requirement ids at the
 | `bypass.test.ts` | 8 | no network or host globals in the isolate; the raw bridge reference is still governed; swallowed denial cannot continue; a later step invoked directly is governed on its own; a resume cannot change resource or action; forged `_meta` status/approval ignored; spoofed envelope ignored; `known_gap` outbound Authorization override |
 | `audit.test.ts` | 6 | decisions carry reason, rule identity, version and hash; hash stable across executions; approvals record who, when and comment; chronological history with the real ordering guarantees; terminal reasons and results; 404 / 405 on the route |
 | `defaults.test.ts` | 5 | strict instance: default DENY for unmatched operations; explicit ALLOW still works; approval round trip within TTL; expired state refused while the HTTP channel still decides; a state minted by the other instance refused |
-| `boot.test.ts` | 1 | the real gateway (Docker image in Compose mode, `index.ts` locally) refuses to start on an invalid rule file and says why |
+| `boot.test.ts` | 1 | the real gateway (Docker image in Compose mode, `src/index.ts` locally) refuses to start on an invalid rule file and says why |
 
 ## E. Multi-step approval flow — how the test proves it
 
@@ -146,7 +146,7 @@ Or import `postman/mcp-governance.postman_collection.json` and `postman/environm
 
 ## J. GitHub CI
 
-`.github/workflows/governance-e2e.yml` runs on every push and pull request touching `core/`, `runtime/`, `tools/`, `spi/`, `adapters/`, `wiring/`, `governance/`, `index.ts`, the Dockerfile, `docker/governance-e2e/`, `tests/e2e/`, `tests/postman/`, the Postman files, the E2E vitest config, `package*.json`, `tsconfig.json` and the workflow itself. Steps: `npm ci` → `typecheck` + `typecheck:e2e` → lint the suite → build the production Dockerfile with buildx (GHA layer cache) → `npm run test:governance -- --no-build` (compose up → health → boot refusal + E2E → Postman → `governance-test-summary.json` → container logs → down) → summary table in the job summary → always upload `artifacts/` (JUnit, JSON, logs, per-test failure dumps). The job fails when the image does not build, a container never becomes healthy, the boot check fails, any E2E test or Postman assertion fails, or setup fails; nothing is swallowed. Unit tests, the `npm audit` gate and the Python demo smoke remain in `ci.yml`.
+`.github/workflows/governance-e2e.yml` runs on every push and pull request touching `src/`, `governance/`, the Dockerfile, `docker/governance-e2e/`, `tests/e2e/`, `tests/postman/`, the Postman files, the E2E vitest config, `package*.json`, `tsconfig.json` and the workflow itself. Steps: `npm ci` → `typecheck` + `typecheck:e2e` → lint the suite → build the production Dockerfile with buildx (GHA layer cache) → `npm run test:governance -- --no-build` (compose up → health → boot refusal + E2E → Postman → `governance-test-summary.json` → container logs → down) → summary table in the job summary → always upload `artifacts/` (JUnit, JSON, logs, per-test failure dumps). The job fails when the image does not build, a container never becomes healthy, the boot check fails, any E2E test or Postman assertion fails, or setup fails; nothing is swallowed. Unit tests, the `npm audit` gate and the Python demo smoke remain in `ci.yml`.
 
 ## K. Known gaps, findings and validation
 
@@ -154,9 +154,9 @@ Or import `postman/mcp-governance.postman_collection.json` and `postman/environm
 
 | Injected defect | Where | Detected by |
 |---|---|---|
-| DENY evaluated as ALLOW | `runtime/governance/rule-evaluator.ts` | `deny.test.ts` (5 of 8 fail) |
-| REQUIRE_APPROVAL does not pause | `runtime/sandbox/execute-api-in-sandbox.ts` | `approval.test.ts` (12/12), `multi-step.test.ts` (6/6) |
-| Resume not counted as a new run (`runCount`) | `runtime/execution/execution-manager.ts` | `lifecycle.test.ts` (2), `approval.test.ts` (4) |
+| DENY evaluated as ALLOW | `src/runtime/governance/rule-evaluator.ts` | `deny.test.ts` (5 of 8 fail) |
+| REQUIRE_APPROVAL does not pause | `src/runtime/sandbox/execute-api-in-sandbox.ts` | `approval.test.ts` (12/12), `multi-step.test.ts` (6/6) |
+| Resume not counted as a new run (`runCount`) | `src/runtime/execution/execution-manager.ts` | `lifecycle.test.ts` (2), `approval.test.ts` (4) |
 | COMPLETED activity re-executed instead of replayed | bridge replay switch | `replay.test.ts` (4), `multi-step.test.ts` (4) |
 | Later calls proceed after a denial/pause stopped the run | bridge run-stopping guard | `bypass.test.ts` (1), `lifecycle.test.ts` (1) |
 | DENIED / COMPLETED execution resumable | `ExecutionManager.assertNotTerminal` | `multi-step.test.ts` (1), `deny.test.ts` (1), `replay.test.ts` (2) |
@@ -170,8 +170,8 @@ Or import `postman/mcp-governance.postman_collection.json` and `postman/environm
 
 ### Findings for the owner (pinned as `known_gap_` / `known_quirk_` tests, deliberately not fixed by the harness)
 
-1. **A program can override the outbound `Authorization` header** via `api.request({ headers: { Authorization: … } })` — `runtime/api-client/api-client.ts` spreads `apiRequest.headers` after the auth header, so the backend sees another identity (`bypass.test.ts › known_gap_program_supplied_headers_can_override_the_outbound_authorization_header`). Rules are unaffected on this branch (they do not read identity); backend authorization is. Recommended production fix: spread program headers first, or drop `Authorization` from them.
-2. **An uncaught backend timeout is reported as `SANDBOX_TIMEOUT`** (`failures.test.ts › known_quirk_…`): `runtime/sandbox/sandbox-core.ts normalizeIsolateError` classifies any error message containing "timeout" as a sandbox timeout. The journal is right (activity `FAILED`, outcome unknown); only the tool-level code and message mislead.
+1. **A program can override the outbound `Authorization` header** via `api.request({ headers: { Authorization: … } })` — `src/runtime/api-client/api-client.ts` spreads `apiRequest.headers` after the auth header, so the backend sees another identity (`bypass.test.ts › known_gap_program_supplied_headers_can_override_the_outbound_authorization_header`). Rules are unaffected on this branch (they do not read identity); backend authorization is. Recommended production fix: spread program headers first, or drop `Authorization` from them.
+2. **An uncaught backend timeout is reported as `SANDBOX_TIMEOUT`** (`failures.test.ts › known_quirk_…`): `src/runtime/sandbox/sandbox-core.ts normalizeIsolateError` classifies any error message containing "timeout" as a sandbox timeout. The journal is right (activity `FAILED`, outcome unknown); only the tool-level code and message mislead.
 3. **Any valid bearer can inspect and decide another principal's execution** over `/executions/*` (`authorization.test.ts › known_gap_…`), as documented in `docs/code-mode-governance.md` §14. The resume itself stays principal-bound.
 4. **`Dockerfile` `HEALTHCHECK` uses `http://localhost:3333/health`**; alpine resolves `localhost` to `::1` while the gateway binds IPv4, so the container reports *unhealthy* under Docker 29. The Compose file uses `127.0.0.1`. A one-line Dockerfile change is recommended.
 5. Observed and pinned semantics worth knowing: a sandbox timeout leaves the execution `INTERRUPTED` (retryable), not `FAILED`; `runIndex` is the run that first *encountered* an activity (a paused-then-executed activity keeps run 1); the governance decision is timestamped before the activity record exists, so history may show `GOVERNANCE:*#n` before `ACTIVITY:ENCOUNTERED#n`.

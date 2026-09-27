@@ -6,19 +6,19 @@ import pino from 'pino'
 import { type ZodObject } from 'zod'
 import { makeServerCtx } from './mcp-test-context.js'
 
-vi.mock('../../runtime/sandbox/skills-search-in-sandbox.js', () => ({
+vi.mock('../../src/runtime/sandbox/skills-search-in-sandbox.js', () => ({
   runSkillsSearchInSandbox: vi.fn()
 }))
 
-import { runSkillsSearchInSandbox } from '../../runtime/sandbox/skills-search-in-sandbox.js'
-import { registerDiscoverSkillsTool } from '../../tools/discover-skills.tool.js'
-import { TOOL, METRIC, OUTCOME, ERR, AUTH_SCHEME } from '../../core/constants.js'
-import type { ServiceRegistry, ServiceResources } from '../../runtime/registry/service-registry.js'
+import { runSkillsSearchInSandbox } from '../../src/runtime/sandbox/skills-search-in-sandbox.js'
+import { registerDiscoverSkillsTool } from '../../src/tools/discover-skills.tool.js'
+import { TOOL, METRIC, OUTCOME, ERR, AUTH_SCHEME } from '../../src/core/constants.js'
+import type { ServiceRegistry, ServiceResources } from '../../src/runtime/registry/service-registry.js'
 import type { McpServer } from '@modelcontextprotocol/server'
-import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
-import type { TokenPayload } from '../../core/types/auth.types.js'
-import { MissingTokenError } from '../../core/types/auth.types.js'
-import { SandboxRuntimeError } from '../../core/types/sandbox-error.types.js'
+import type { MetricsRegistry } from '../../src/runtime/observability/metrics.js'
+import type { TokenPayload } from '../../src/core/types/auth.types.js'
+import { MissingTokenError } from '../../src/core/types/auth.types.js'
+import { SandboxRuntimeError } from '../../src/core/types/sandbox-error.types.js'
 
 const silentLogger = pino({ level: 'silent' })
 

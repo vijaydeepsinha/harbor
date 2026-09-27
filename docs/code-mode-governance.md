@@ -46,18 +46,18 @@ CREATED ──► RUNNING ──► COMPLETED
 
 | Fact | Where |
 |---|---|
-| One logical program = one `executionId` (UUID minted by Harbor) | `runtime/execution/execution-manager.ts` |
+| One logical program = one `executionId` (UUID minted by Harbor) | `src/runtime/execution/execution-manager.ts` |
 | The code first submitted is persisted — before the first run, because an interrupted or crashed run resumes from it — and is authoritative for every resume; replacement code is ignored (logged) | `ExecutionRecord.originalCode` |
 | Once the execution is terminal its code is dropped (`EXECUTION_CODE_RETENTION=DROP`, default; `KEEP` keeps it against the `executionId`); the execution is stamped `finishedAt` and, under `EXECUTION_RETENTION_SEC`, `expiresAt` | `ExecutionManager` |
 | Every run takes a per-execution lock; a concurrent run gets `EXECUTION_LOCKED` (retryable). A `RUNNING` record whose lock is free is a crashed run and may resume | `ExecutionManager.beginRun` |
 | Terminal states are not resumable (`EXECUTION_NOT_RESUMABLE`) | same |
-| A resume that arrives while the approval is still undecided is not a failure: the run does not start, the execution stays `WAITING_APPROVAL`, and the caller gets the pause again (`ApprovalPendingError` → `input_required`, or `APPROVAL_REQUIRED` for clients without elicitation) | same, and `tools/execute-api.tool.ts` |
+| A resume that arrives while the approval is still undecided is not a failure: the run does not start, the execution stays `WAITING_APPROVAL`, and the caller gets the pause again (`ApprovalPendingError` → `input_required`, or `APPROVAL_REQUIRED` for clients without elicitation) | same, and `src/tools/execute-api.tool.ts` |
 
 ## 3. Activity journal
 
 Every `api.request()` that reaches the host bridge becomes activity `#N`,
 numbered in **arrival order** within the execution — never by variable name,
-never by hashing code (`runtime/execution/activity-journal.ts`). Each record
+never by hashing code (`src/runtime/execution/activity-journal.ts`). Each record
 holds the request (`method`, raw path, resolved OpenAPI path template,
 `operationId`, path params, query, body — never headers) and, once the call
 returns, the response (`status`, `ok`, `data`).
@@ -89,8 +89,8 @@ Activity states:
 ## 4. Replay
 
 On every run the program starts from the top. At activity `#N` the bridge
-(`runtime/sandbox/bridge-request-handler.ts`) asks the activity gate
-(`runtime/execution/activity-gate.ts`), which looks the sequence up:
+(`src/runtime/sandbox/bridge-request-handler.ts`) asks the activity gate
+(`src/runtime/execution/activity-gate.ts`), which looks the sequence up:
 
 | Journaled record at `#N` | Bridge action |
 |---|---|
@@ -127,24 +127,24 @@ V8 api.request() → bridge → resolve OpenAPI operation → evaluate rules →
 ```
 
 Governance always runs **before** the external call, never after. The
-evaluator (`runtime/governance/rule-evaluator.ts`) is a pure function of the
+evaluator (`src/runtime/governance/rule-evaluator.ts`) is a pure function of the
 rule set and the request — no I/O, no clock, no model.
 
 ## 6. Governance Rules
 
-Rules come from a **rule source** (`spi/governance/rule-source.ts`): by default
+Rules come from a **rule source** (`src/spi/governance/rule-source.ts`): by default
 the files in `governance/rules/*.yaml|yml|json` (`GOVERNANCE_RULES_DIR`), or one
 document at `GOVERNANCE_RULES_URL` (`GOVERNANCE_RULES_SOURCE=url`), or a source
 registered with `registerGovernanceRuleSourceBackend`. With
 `GOVERNANCE_RULES_REFRESH_SEC` > 0 the source is re-read on that interval
-(`runtime/governance/rule-refresher.ts`): a changed set is swapped in
+(`src/runtime/governance/rule-refresher.ts`): a changed set is swapped in
 atomically; an unreachable source or an invalid set keeps the last valid set.
 Format and operators in [`governance/rules/README.md`](../governance/rules/README.md).
 
 - **Targeting** uses the service's own OpenAPI document: a call to
   `POST /campaigns/C1/activate` resolves to `operationId: activateCampaign`,
   path template `/campaigns/{id}/activate`, `pathParams.id = "C1"`
-  (`runtime/governance/operation-resolver.ts`). Rules match on `service`,
+  (`src/runtime/governance/operation-resolver.ts`). Rules match on `service`,
   `operation`, `method` (one or a list), `path` (template, or `/prefix/**` for
   a template and everything beneath it) — `*` matches anything.
 - **Conditions** are a bounded boolean tree — `allOf` (AND), `anyOf` (OR),
@@ -314,7 +314,7 @@ published to the audit sinks (`AUDIT_SINKS`, default `console`) as an
 `execution-state` event: statuses, activities with HTTP status, approvals and
 governance decisions with rule versions. Request and response bodies and the
 program are never included. Destinations beyond the console plug in with
-`registerAuditSinkBackend` (`spi/observability/audit-sink.ts`).
+`registerAuditSinkBackend` (`src/spi/observability/audit-sink.ts`).
 
 ## 12. Storage
 
@@ -324,7 +324,7 @@ program are never included. Destinations beyond the console plug in with
 restart. Both are bound to one pod.
 
 `memcache` shares executions across pods
-(`adapters/execution/memcache-execution-store.ts`): the execution, every
+(`src/adapters/execution/memcache-execution-store.ts`): the execution, every
 activity, the approvals and the decisions live in memcache — read there on
 every access, never cached in a pod — and the run lock is an atomic `add` with
 a TTL, held across pods. A run paused on one pod can be approved and resumed
@@ -334,14 +334,14 @@ Connection settings follow the token cache (`EXECUTION_STORE_MEMCACHE_HOST`,
 (default 300) is how long a crashed pod's lock survives — it must exceed the
 longest run. Retention uses item TTLs.
 
-All stores implement the same SPI (`spi/execution/execution-store.ts`);
+All stores implement the same SPI (`src/spi/execution/execution-store.ts`);
 register another backend (e.g. Redis) with
-`registerExecutionStoreBackend('redis', factory)` in `wiring/strategy-builders.ts`.
+`registerExecutionStoreBackend('redis', factory)` in `src/wiring/strategy-builders.ts`.
 
 **Retention.** A finished (terminal) execution and everything recorded for it
 — activities, approvals, decisions — is deleted `EXECUTION_RETENTION_SEC`
 after it finished (default one day; `0` keeps it for good). The sweep
-(`runtime/execution/execution-retention.ts`) runs every min(retention, 1 h) and
+(`src/runtime/execution/execution-retention.ts`) runs every min(retention, 1 h) and
 uses the SPI's `listExpiredExecutions` / `deleteExecution`. Paused and
 interrupted executions are never deleted. Independently, the program text of
 a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.

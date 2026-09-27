@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest'
 import {
   makeConnector, makeResources, makeRuntime, registerGoverned, makeCtx, retryCtx, parseContent
 } from '../unit/code-mode-harness.js'
-import { EXECUTION_STATUS, ACTIVITY_STATUS, EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY } from '../../core/constants.js'
+import { EXECUTION_STATUS, ACTIVITY_STATUS, EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY } from '../../src/core/constants.js'
 
 const PROGRAM = `async () => {
   const campaigns = await api.request({ method: 'GET', path: '/campaigns' })

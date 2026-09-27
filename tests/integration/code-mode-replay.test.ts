@@ -2,21 +2,21 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { runApiInSandbox, type SandboxExecutionContext, type GovernanceVerdict } from '../../runtime/sandbox/execute-api-in-sandbox.js'
-import { ActivityJournal } from '../../runtime/execution/activity-journal.js'
-import { AuditCollector } from '../../runtime/observability/audit.js'
-import { ProgressCollector } from '../../runtime/observability/progress.js'
-import { resolveOperation } from '../../runtime/governance/operation-resolver.js'
-import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
-import { noopCircuitBreaker } from '../../spi/resilience/strategies/noop-circuit-breaker.strategy.js'
-import { forwardTokenPermissionGuard } from '../../spi/permissions/strategies/forward-token-permission-guard.strategy.js'
-import type { ConnectorAPI, ApiRequest, ExecuteRequestContext } from '../../spi/connector/connector-api.js'
-import type { OpenAPISpec } from '../../core/types/spec.types.js'
-import type { TokenPayload } from '../../core/types/auth.types.js'
-import { ACTIVITY_STATUS, EXECUTION_STATUS } from '../../core/constants.js'
+import { runApiInSandbox, type SandboxExecutionContext, type GovernanceVerdict } from '../../src/runtime/sandbox/execute-api-in-sandbox.js'
+import { ActivityJournal } from '../../src/runtime/execution/activity-journal.js'
+import { AuditCollector } from '../../src/runtime/observability/audit.js'
+import { ProgressCollector } from '../../src/runtime/observability/progress.js'
+import { resolveOperation } from '../../src/runtime/governance/operation-resolver.js'
+import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import type { ConnectorAPI, ApiRequest, ExecuteRequestContext } from '../../src/spi/connector/connector-api.js'
+import type { OpenAPISpec } from '../../src/core/types/spec.types.js'
+import type { TokenPayload } from '../../src/core/types/auth.types.js'
+import { ACTIVITY_STATUS, EXECUTION_STATUS } from '../../src/core/constants.js'
 import {
   ApprovalRequiredError, GovernanceDeniedError, ReplayDivergedError, ActivityOutcomeUnknownError
-} from '../../core/types/execution.types.js'
+} from '../../src/core/types/execution.types.js'
 
 const spec: OpenAPISpec = {
   openapi: '3.0.3', info: { title: 'Trafficking', version: '1' },

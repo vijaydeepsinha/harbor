@@ -14,7 +14,7 @@ Community contributions are welcome. See `CONTRIBUTING.md` for setup, coding gui
 
 **New features and good-first-issues:** open an issue first to align on scope, then submit a PR.
 
-**Architectural changes** — anything that touches the layer boundaries (`core/`, `spi/`, `runtime/`, `tools/`, `adapters/`) or the public extension points (`ConnectorAPI`, `registerTokenCacheBackend`, `registerIdempotencyBackend`) — require maintainer review and sign-off before merge. Open a GitHub issue describing the change before starting implementation.
+**Architectural changes** — anything that touches the layer boundaries (`src/core/`, `src/spi/`, `src/runtime/`, `src/tools/`, `src/adapters/`) or the public extension points (`ConnectorAPI`, `registerTokenCacheBackend`, `registerIdempotencyBackend`) — require maintainer review and sign-off before merge. Open a GitHub issue describing the change before starting implementation.
 
 ## Decision Process
 

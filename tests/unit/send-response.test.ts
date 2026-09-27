@@ -3,8 +3,8 @@
 
 import { describe, it, expect } from 'vitest'
 import type { ServerResponse } from 'node:http'
-import { sendJson, sendGatewayError } from '../../runtime/http/send-response.js'
-import { CONTENT_TYPE_JSON } from '../../core/constants.js'
+import { sendJson, sendGatewayError } from '../../src/runtime/http/send-response.js'
+import { CONTENT_TYPE_JSON } from '../../src/core/constants.js'
 
 interface FakeResponse {
   status?: number

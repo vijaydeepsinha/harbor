@@ -2,17 +2,17 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ApprovalService } from '../../runtime/execution/approval-service.js'
-import { ExecutionManager } from '../../runtime/execution/execution-manager.js'
-import { ActivityJournal } from '../../runtime/execution/activity-journal.js'
-import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
-import { APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR } from '../../core/constants.js'
+import { ApprovalService } from '../../src/runtime/execution/approval-service.js'
+import { ExecutionManager } from '../../src/runtime/execution/execution-manager.js'
+import { ActivityJournal } from '../../src/runtime/execution/activity-journal.js'
+import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR } from '../../src/core/constants.js'
 import {
   ApprovalAlreadyDecidedError,
   ApprovalNotFoundError,
   ExecutionLockedError,
   type ApprovalSummary
-} from '../../core/types/execution.types.js'
+} from '../../src/core/types/execution.types.js'
 
 const summary: ApprovalSummary = {
   service: 'trafficking', method: 'POST', specPath: '/campaigns/{id}/activate', operationId: 'activateCampaign',

@@ -15,7 +15,7 @@ Rules do not have to ship with the deployment:
 |---|---|
 | `dir` (default) | the files in `GOVERNANCE_RULES_DIR` (a mounted volume or ConfigMap works) |
 | `url` | one document at `GOVERNANCE_RULES_URL` (`{ rules: [...] }`, a list, or one rule; JSON if served as JSON, YAML otherwise), fetched with GET within `GOVERNANCE_RULES_URL_TIMEOUT_MS` |
-| anything else | a source registered with `registerGovernanceRuleSourceBackend(type, factory)` (`wiring/strategy-builders.ts`) — object storage, a config service, a database |
+| anything else | a source registered with `registerGovernanceRuleSourceBackend(type, factory)` (`src/wiring/strategy-builders.ts`) — object storage, a config service, a database |
 
 `GOVERNANCE_RULES_REFRESH_SEC` (default `0` = load once) re-reads the source on
 that interval. A changed set is swapped in whole; a refresh that cannot reach

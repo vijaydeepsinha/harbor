@@ -3,10 +3,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
-import { AuthMiddleware } from '../../spi/auth/auth-middleware.js'
-import { InMemoryTokenCache } from '../../adapters/auth/strategies/in-memory-token-cache.strategy.js'
-import { hashAuthenticatedPrincipal } from '../../core/utils/user-id-hash.js'
-import type { TokenPayload, AuthStrategy } from '../../core/types/auth.types.js'
+import { AuthMiddleware } from '../../src/spi/auth/auth-middleware.js'
+import { InMemoryTokenCache } from '../../src/adapters/auth/strategies/in-memory-token-cache.strategy.js'
+import { hashAuthenticatedPrincipal } from '../../src/core/utils/user-id-hash.js'
+import type { TokenPayload, AuthStrategy } from '../../src/core/types/auth.types.js'
 
 const TOK = 'StableInboundBearerPresentedByTheCaller'
 

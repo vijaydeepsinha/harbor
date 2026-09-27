@@ -3,11 +3,11 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import pino from 'pino'
-import { registerDiscoverServicesTool } from '../../tools/discover-services.tool.js'
-import { TOOL, METRIC, OUTCOME } from '../../core/constants.js'
-import type { ServiceRegistry } from '../../runtime/registry/service-registry.js'
+import { registerDiscoverServicesTool } from '../../src/tools/discover-services.tool.js'
+import { TOOL, METRIC, OUTCOME } from '../../src/core/constants.js'
+import type { ServiceRegistry } from '../../src/runtime/registry/service-registry.js'
 import type { McpServer } from '@modelcontextprotocol/server'
-import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
+import type { MetricsRegistry } from '../../src/runtime/observability/metrics.js'
 
 const silentLogger = pino({ level: 'silent' })
 

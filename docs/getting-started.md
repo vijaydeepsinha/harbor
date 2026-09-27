@@ -19,7 +19,7 @@ This guide walks you from zero to a running MCP gateway connected to your AI cli
 ## Step 1 — Install
 
 ```bash
-git clone https://github.com/vdssinha/harbor
+git clone https://github.com/vijaydeepsinha/harbor
 cd harbor
 npm install
 ```

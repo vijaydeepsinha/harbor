@@ -2,7 +2,7 @@
 
 A production-grade [Model Context Protocol (MCP)](https://modelcontextprotocol.io) gateway that connects AI clients to your existing backend APIs — without modifying those APIs.
 
-[![CI](https://github.com/vdssinha/harbor/actions/workflows/ci.yml/badge.svg)](https://github.com/vdssinha/harbor/actions/workflows/ci.yml)
+[![CI](https://github.com/vijaydeepsinha/harbor/actions/workflows/ci.yml/badge.svg)](https://github.com/vijaydeepsinha/harbor/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-green)](package.json)
 
@@ -54,7 +54,7 @@ AI client  →  Harbor  →  Your backend APIs
 **Prerequisites:** Node.js 22+, npm 10+, native build tools (Xcode CLT on macOS / `build-essential` on Linux)
 
 ```bash
-git clone https://github.com/vdssinha/harbor
+git clone https://github.com/vijaydeepsinha/harbor
 cd harbor
 npm install
 ```

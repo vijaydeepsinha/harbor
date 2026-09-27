@@ -3,9 +3,9 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import axios from 'axios'
-import { UrlSpecLoaderStrategy, urlSpec } from '../../spi/spec/strategies/url-spec-loader.strategy.js'
-import { SpecLoadError } from '../../core/types/spec.types.js'
-import type { Logger } from '../../runtime/observability/logger.js'
+import { UrlSpecLoaderStrategy, urlSpec } from '../../src/spi/spec/strategies/url-spec-loader.strategy.js'
+import { SpecLoadError } from '../../src/core/types/spec.types.js'
+import type { Logger } from '../../src/runtime/observability/logger.js'
 
 vi.mock('axios')
 

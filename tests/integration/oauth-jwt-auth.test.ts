@@ -13,14 +13,14 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { generateKeyPair, SignJWT, exportJWK, type KeyLike } from 'jose'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { JwtValidationStrategy } from '../../adapters/auth/strategies/jwt-validation.strategy.js'
-import { OAuthDiscoveryStrategy } from '../../adapters/auth/strategies/oauth-discovery.strategy.js'
-import { InMemoryTokenCache } from '../../adapters/auth/strategies/in-memory-token-cache.strategy.js'
+import { JwtValidationStrategy } from '../../src/adapters/auth/strategies/jwt-validation.strategy.js'
+import { OAuthDiscoveryStrategy } from '../../src/adapters/auth/strategies/oauth-discovery.strategy.js'
+import { InMemoryTokenCache } from '../../src/adapters/auth/strategies/in-memory-token-cache.strategy.js'
 import {
   TokenExpiredError,
   TokenInvalidError,
   TokenIntrospectionError
-} from '../../core/types/auth.types.js'
+} from '../../src/core/types/auth.types.js'
 
 const AUDIENCE = 'https://harbor.example.com'
 

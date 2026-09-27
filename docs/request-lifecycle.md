@@ -14,11 +14,11 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 |---|---|---|
 | `createMcpGateway` | `server-factory.ts` | Builds service registry and starts the gateway |
 | `ServiceRegistry` | `registry/service-registry.ts` | Maps service names to their resources |
-| `registerDiscoverServicesTool` | `tools/discover-services.tool.ts` | Defines what happens when `discover_services()` is called |
-| `registerDiscoverSkillsTool` | `tools/discover-skills.tool.ts` | Defines what happens when `discover_skills()` is called |
-| `registerGetSkillDetailsTool` | `tools/get-skill-details.tool.ts` | Defines what happens when `get_skill_details()` is called |
-| `registerSearchCodeTool` | `tools/search-code.tool.ts` | Defines what happens when `search_code()` is called |
-| `registerExecuteApiTool` | `tools/execute-api.tool.ts` | Defines what happens when `api_execute()` is called |
+| `registerDiscoverServicesTool` | `src/tools/discover-services.tool.ts` | Defines what happens when `discover_services()` is called |
+| `registerDiscoverSkillsTool` | `src/tools/discover-skills.tool.ts` | Defines what happens when `discover_skills()` is called |
+| `registerGetSkillDetailsTool` | `src/tools/get-skill-details.tool.ts` | Defines what happens when `get_skill_details()` is called |
+| `registerSearchCodeTool` | `src/tools/search-code.tool.ts` | Defines what happens when `search_code()` is called |
+| `registerExecuteApiTool` | `src/tools/execute-api.tool.ts` | Defines what happens when `api_execute()` is called |
 | `AuthMiddleware` | `auth/auth-middleware.ts` | Parses bearer token, validates via auth strategy, cache-first lookup, proactive refresh, session expiry detection |
 | `AbstractTokenCache` | `auth/abstract-token-cache.ts` | Base class for all token cache backends — provides hash, TTL, get/validate/update orchestration |
 | `InMemoryTokenCache` | `auth/strategies/in-memory-token-cache.strategy.ts` | Default in-memory implementation of `AbstractTokenCache` |
@@ -26,7 +26,7 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 | `CouchbaseTokenCache` | `auth/strategies/couchbase-token-cache.strategy.ts` | Couchbase-backed implementation of `AbstractTokenCache` |
 | `OAuthIntrospectionStrategy` | `auth/strategies/oauth-introspection.strategy.ts` | Configurable auth call (GET/POST, flexible token passing, dot-path response/metadata mapping, proactive refresh via separate endpoint) |
 | `StaticTokenAuthStrategy` | `auth/strategies/static-token.strategy.ts` | Client-first: uses client's token as primary; falls back to the configured static token when none provided |
-| `toolHelpers` | `tools/tool-helpers.ts` | Shared utilities — `mcpError`, `mcpSuccess`, `resolveService`, `validateAuth`, `extractCorrelationId`, `extractSessionId`, `runSandboxTool` |
+| `toolHelpers` | `src/tools/tool-helpers.ts` | Shared utilities — `mcpError`, `mcpSuccess`, `resolveService`, `validateAuth`, `extractCorrelationId`, `extractSessionId`, `runSandboxTool` |
 | `AuditCollector` | `observability/audit.ts` | Projection of the run's call log: which endpoints were called during a request |
 | `ProgressCollector` | `observability/progress.ts` | Projection of the run's call log: per-call status and created ids, returned on failure |
 | `runInSandbox` | `sandbox/sandbox-core.ts` | Shared base — creates V8 isolate, calls `setupContext` to inject data, runs user code, disposes isolate |
@@ -46,7 +46,7 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 
 ## Phase 1 — Startup (runs once, not per request)
 
-**File: `index.ts`**
+**File: `src/index.ts`**
 ```typescript
 const servicesDir = resolve(__dirname, 'services')
 const globalConfig = validateGlobalConfig()
@@ -107,7 +107,7 @@ The gateway factory runs these steps once at startup:
 
 This is the simplest tool. No sandbox, no auth, no network.
 
-**File: `tools/discover-services.tool.ts`**
+**File: `src/tools/discover-services.tool.ts`**
 
 1. AI calls `discover_services()` (no parameters).
 2. The handler calls `registry.listServices()`.
@@ -137,7 +137,7 @@ service to target.
 Not every scenario has a matching skill. The AI should check for relevant skills before
 proceeding, but can skip directly to `search_code` if none are found.
 
-**File: `tools/discover-skills.tool.ts`**
+**File: `src/tools/discover-skills.tool.ts`**
 
 1. AI calls `discover_skills` with `service: "tasks"` and a JavaScript function as `code`.
 2. **Service lookup** — via `resolveService()` helper. If the service doesn't exist, returns an error listing available services.
@@ -158,7 +158,7 @@ If no relevant skills are found, the AI proceeds directly to `search_code` witho
 Only used when `discover_skills` returned a relevant skill. Provides the full business SOP
 with workflow steps, required fields, and constraints.
 
-**File: `tools/get-skill-details.tool.ts`**
+**File: `src/tools/get-skill-details.tool.ts`**
 
 1. AI calls `get_skill_details` with `service` and `skill_id` (from `discover_skills` results).
 2. **Service lookup** — via `resolveService()` helper.
@@ -170,7 +170,7 @@ with workflow steps, required fields, and constraints.
 
 ### Tool 4: `search_code({ service, code })`
 
-**File: `tools/search-code.tool.ts`**
+**File: `src/tools/search-code.tool.ts`**
 
 1. AI calls `search_code` with `service: "tasks"` and a JavaScript function as `code`.
 
@@ -201,7 +201,7 @@ network capability whatsoever. It is a read-only computation over a JSON object.
 
 This is the full pipeline. Every step is described below.
 
-**File: `tools/execute-api.tool.ts`**
+**File: `src/tools/execute-api.tool.ts`**
 
 ---
 
@@ -354,7 +354,7 @@ continues running until the function returns, throws, or times out.
 
 #### Step 7 — Audit and metrics
 
-**File: `tools/execute-api.tool.ts`**
+**File: `src/tools/execute-api.tool.ts`**
 
 When the sandbox function returns:
 

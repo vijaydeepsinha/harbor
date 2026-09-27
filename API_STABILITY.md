@@ -34,39 +34,39 @@ These surfaces are frozen as of v0.1.0. Any change to them is a breaking change 
 
 ---
 
-### `spi/` — Extension Contracts
+### `src/spi/` — Extension Contracts
 
 All SPI interfaces are frozen. Adding a field to any of these is a breaking change for all downstream implementors.
 
 | Interface | File | Notes |
 |-----------|------|-------|
-| `ConnectorAPI` | `spi/connector/connector-api.ts` | `request(req, ctx, ttlMs): Promise<ApiResponse>` |
-| `AuthStrategy` | `core/types/auth.types.ts` | `validate(token): Promise<TokenPayload>` |
-| `AbstractTokenCache` | `spi/auth/abstract-token-cache.ts` | Base class — `readEntry`, `writeEntry`, `deleteEntry` |
-| `IdempotencyStrategy` | `core/types/idempotency.types.ts` | `checkAndExecute(key, fn, ttlMs)` |
-| `CircuitBreakerStrategy` | `core/types/circuit-breaker.types.ts` | `check(endpoint)`, `recordSuccess`, `recordFailure` |
-| `PermissionGuard` | `core/types/permission.types.ts` | `filterSpec`, `canExecute` |
-| `SpecLoaderStrategy` | `core/types/spec.types.ts` | `load(): Promise<OpenAPISpec>` |
+| `ConnectorAPI` | `src/spi/connector/connector-api.ts` | `request(req, ctx, ttlMs): Promise<ApiResponse>` |
+| `AuthStrategy` | `src/core/types/auth.types.ts` | `validate(token): Promise<TokenPayload>` |
+| `AbstractTokenCache` | `src/spi/auth/abstract-token-cache.ts` | Base class — `readEntry`, `writeEntry`, `deleteEntry` |
+| `IdempotencyStrategy` | `src/core/types/idempotency.types.ts` | `checkAndExecute(key, fn, ttlMs)` |
+| `CircuitBreakerStrategy` | `src/core/types/circuit-breaker.types.ts` | `check(endpoint)`, `recordSuccess`, `recordFailure` |
+| `PermissionGuard` | `src/core/types/permission.types.ts` | `filterSpec`, `canExecute` |
+| `SpecLoaderStrategy` | `src/core/types/spec.types.ts` | `load(): Promise<OpenAPISpec>` |
 
 ---
 
-### `core/` — Types and Constants
+### `src/core/` — Types and Constants
 
 | Symbol | File | Notes |
 |--------|------|-------|
-| `GlobalConfig` | `core/types/config.types.ts` | All env var names map to this shape |
-| `ApiRequest` / `ApiResponse` | `core/types/connector.types.ts` | Shared between sandbox bridge and ConnectorAPI |
-| `ExecuteRequestContext` | `core/types/connector.types.ts` | Passed through sandbox → ConnectorAPI |
-| `SandboxError` hierarchy | `core/types/sandbox-error.types.ts` | Error codes clients may receive |
-| Tool name constants | `core/constants.ts` | String values used in MCP tool registration |
-| Env var name constants | `core/constants.ts` | Names used in `process.env` and config docs |
+| `GlobalConfig` | `src/core/types/config.types.ts` | All env var names map to this shape |
+| `ApiRequest` / `ApiResponse` | `src/core/types/connector.types.ts` | Shared between sandbox bridge and ConnectorAPI |
+| `ExecuteRequestContext` | `src/core/types/connector.types.ts` | Passed through sandbox → ConnectorAPI |
+| `SandboxError` hierarchy | `src/core/types/sandbox-error.types.ts` | Error codes clients may receive |
+| Tool name constants | `src/core/constants.ts` | String values used in MCP tool registration |
+| Env var name constants | `src/core/constants.ts` | Names used in `process.env` and config docs |
 
 ---
 
 ### External Registration API
 
 ```typescript
-// runtime/gateway/strategy-builders.ts
+// src/runtime/gateway/strategy-builders.ts
 registerTokenCacheBackend(type: string, factory: TokenCacheFactory): void
 registerIdempotencyBackend(type: string, factory: IdempotencyFactory): void
 ```
@@ -86,7 +86,7 @@ Adding a new variable is non-breaking. Removing or renaming is breaking.
 ### `ServiceResources` Shape
 
 ```typescript
-// runtime/registry/service-registry.ts
+// src/runtime/registry/service-registry.ts
 interface ServiceResources {
   spec: SpecStore
   skills: SkillStore
@@ -114,7 +114,7 @@ All fields documented in `docs/service-onboarding.md` are stable. Additions are 
 
 These work in v0.1.0 but may change in a MINOR release. Third parties should not build production dependencies on them.
 
-### `runtime/sandbox/`
+### `src/runtime/sandbox/`
 
 | File | Status | Risk |
 |------|--------|------|
@@ -129,14 +129,14 @@ These work in v0.1.0 but may change in a MINOR release. Third parties should not
 ### `MetricsRegistry`
 
 ```typescript
-// runtime/observability/metrics.ts
+// src/runtime/observability/metrics.ts
 ```
 
 In-memory counters only. No push endpoint, no Prometheus format yet. Counter names are stable; the registry API (`increment`, `get`) may gain new methods.
 
 ### `AuditRecord` shape
 
-Audit records go to every `AUDIT_SINKS` sink (`spi/observability/audit-sink.ts`; the built-in `console` sink logs them via pino). The JSON field names are not yet frozen — Prometheus/SIEM integrations built on these field names may break in a MINOR release.
+Audit records go to every `AUDIT_SINKS` sink (`src/spi/observability/audit-sink.ts`; the built-in `console` sink logs them via pino). The JSON field names are not yet frozen — Prometheus/SIEM integrations built on these field names may break in a MINOR release.
 
 ---
 
@@ -146,11 +146,11 @@ Not public API. May change in any release without notice or deprecation period.
 
 | Module | Notes |
 |--------|-------|
-| `runtime/http/` internals | Session manager TTL, SSE writer, HTTP error format |
-| `runtime/gateway/service-resources-factory.ts` | Wiring logic between config and strategies |
-| `runtime/spec/service-refresher.ts` | Internal refresh loop — interval API stable, retry logic internal |
-| `adapters/infra/` | CouchbaseRestClient, memcache factory — internal singleton management |
-| `adapters/auth/strategies/oauth-introspection.strategy.ts` | Internal HTTP logic may change |
+| `src/runtime/http/` internals | Session manager TTL, SSE writer, HTTP error format |
+| `src/runtime/gateway/service-resources-factory.ts` | Wiring logic between config and strategies |
+| `src/runtime/spec/service-refresher.ts` | Internal refresh loop — interval API stable, retry logic internal |
+| `src/adapters/infra/` | CouchbaseRestClient, memcache factory — internal singleton management |
+| `src/adapters/auth/strategies/oauth-introspection.strategy.ts` | Internal HTTP logic may change |
 | `examples/` | Not API — demo code, may change freely |
 
 ---
@@ -166,7 +166,7 @@ These are planned interfaces, not yet shipped. Do not build against them.
 | `ToolResolver` | v1.x | Dynamic tool registration beyond the five defaults |
 
 See `docs/architecture.md` section 5 for proposed interface shapes. (The
-planned `StorageProvider` shipped as `AuditSink`, `spi/observability/audit-sink.ts`.)
+planned `StorageProvider` shipped as `AuditSink`, `src/spi/observability/audit-sink.ts`.)
 
 ---
 
@@ -174,8 +174,8 @@ planned `StorageProvider` shipped as `AuditSink`, `spi/observability/audit-sink.
 
 | Change type | Breaking? | Mitigation |
 |-------------|-----------|------------|
-| Add field to `spi/` interface | ✅ Yes | Add with a default value; bump MAJOR |
-| Remove field from `spi/` interface | ✅ Yes | Deprecate one MINOR first; bump MAJOR |
+| Add field to `src/spi/` interface | ✅ Yes | Add with a default value; bump MAJOR |
+| Remove field from `src/spi/` interface | ✅ Yes | Deprecate one MINOR first; bump MAJOR |
 | Rename env var | ✅ Yes | Support old name for one MINOR via alias |
 | Rename MCP tool | ✅ Yes | No alias possible in MCP — avoid |
 | Add optional field to `config.json` | No | Additive; no action needed |

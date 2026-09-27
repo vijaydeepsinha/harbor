@@ -2,8 +2,8 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { InMemoryTokenCache } from '../../adapters/auth/strategies/in-memory-token-cache.strategy.js'
-import type { TokenPayload } from '../../core/types/auth.types.js'
+import { InMemoryTokenCache } from '../../src/adapters/auth/strategies/in-memory-token-cache.strategy.js'
+import type { TokenPayload } from '../../src/core/types/auth.types.js'
 
 const SVC = 'test-service'
 

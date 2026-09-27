@@ -79,7 +79,7 @@ INTROSPECTION_PORT      = 3008
 
 # Fixed test fixtures known to examples/demo/mock-introspection-server.js.
 # All >=32 chars so Harbor's bearer-format pre-check lets them through to the
-# introspection strategy itself (see spi/auth/bearer-authorization.ts).
+# introspection strategy itself (see src/spi/auth/bearer-authorization.ts).
 INTROSPECT_TOKEN_VALID      = "introspection-valid-token-abc123"
 INTROSPECT_TOKEN_WRONG_AUD  = "introspection-wrong-aud-token-xyz789"
 INTROSPECT_TOKEN_REVOKED    = "introspection-revoked-token-00000000"
@@ -145,7 +145,7 @@ def start_services(extra_env: Optional[dict] = None):
 
     tsx = ROOT / "node_modules" / ".bin" / "tsx"
     gw = subprocess.Popen(
-        [node, str(tsx), "index.ts"],
+        [node, str(tsx), "src/index.ts"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env={**env, "LOG_LEVEL": "error"},
@@ -261,7 +261,7 @@ def _start_harbor_oauth(oauth_env: dict):
         **oauth_env,
     }
     _oauth_harbor_proc = subprocess.Popen(
-        [node, str(tsx), "index.ts"],
+        [node, str(tsx), "src/index.ts"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env=env,

@@ -2,8 +2,8 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect } from 'vitest'
-import { ProgressCollector, extractTopLevelIds } from '../../runtime/observability/progress.js'
-import { CallLog } from '../../runtime/execution/activity-journal.js'
+import { ProgressCollector, extractTopLevelIds } from '../../src/runtime/observability/progress.js'
+import { CallLog } from '../../src/runtime/execution/activity-journal.js'
 
 describe('ProgressCollector — a projection of the run\'s call log', () => {
   const ok = (status: number, data: unknown = {}) => ({ status, ok: status < 400, data })

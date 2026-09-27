@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect } from 'vitest'
-import { requireResourceBindingAudience } from '../../adapters/auth/strategies/resource-binding.js'
+import { requireResourceBindingAudience } from '../../src/adapters/auth/strategies/resource-binding.js'
 
 describe('requireResourceBindingAudience (spec §17, RFC 8707)', () => {
   it('throws the given message when audience is undefined', () => {

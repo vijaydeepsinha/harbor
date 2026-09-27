@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from 'vitest'
 import type { IncomingHttpHeaders } from 'node:http'
-import { readMcpRequestIdentity } from '../../runtime/http/mcp-request-identity.js'
+import { readMcpRequestIdentity } from '../../src/runtime/http/mcp-request-identity.js'
 
 describe('readMcpRequestIdentity (spec §13/§14)', () => {
   it('reads protocol version, method and name from headers', () => {

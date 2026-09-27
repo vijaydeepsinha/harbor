@@ -2,9 +2,9 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { CountBasedCircuitBreakerStrategy } from '../../adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
-import { NoopCircuitBreakerStrategy } from '../../spi/resilience/strategies/noop-circuit-breaker.strategy.js'
-import { CircuitOpenError } from '../../core/types/circuit-breaker.types.js'
+import { CountBasedCircuitBreakerStrategy } from '../../src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
+import { NoopCircuitBreakerStrategy } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { CircuitOpenError } from '../../src/core/types/circuit-breaker.types.js'
 
 describe('CountBasedCircuitBreakerStrategy', () => {
   let cb: CountBasedCircuitBreakerStrategy

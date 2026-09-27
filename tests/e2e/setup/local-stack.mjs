@@ -4,7 +4,7 @@
 /**
  * Local-process equivalent of docker/governance-e2e/compose.yaml: the mock
  * API, the main gateway and the strict gateway as child processes (the
- * gateway runs the real `index.ts` through tsx). A tiny control server lets
+ * gateway runs the real `src/index.ts` through tsx). A tiny control server lets
  * the lifecycle tests restart / kill / start the main gateway exactly as the
  * Compose hooks do.
  *
@@ -31,7 +31,7 @@ const MOCK_PORT = Number(process.env['E2E_MOCK_API_PORT'] ?? 4010)
 const CONTROL_PORT = Number(process.env['E2E_LOCAL_CONTROL_PORT'] ?? 4099)
 const FIXTURES = join(ROOT, 'tests', 'e2e', 'fixtures')
 // One process per gateway (`node --import tsx`), so SIGKILL really kills it — the tsx CLI would spawn a child that outlives it.
-const TSX_ARGS = ['--import', 'tsx', 'index.ts']
+const TSX_ARGS = ['--import', 'tsx', 'src/index.ts']
 
 mkdirSync(LOGS, { recursive: true })
 mkdirSync(LOCAL, { recursive: true })

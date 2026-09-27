@@ -51,7 +51,7 @@ Harbor sits between an AI agent (Claude, Cursor, or any MCP client) and one or m
 
 ## 2. Module Responsibilities
 
-### `core/` — Framework Nucleus   ✅ Stable
+### `src/core/` — Framework Nucleus   ✅ Stable
 
 Zero runtime dependencies. Every other module imports from here. Nothing here imports from other framework modules.
 
@@ -72,24 +72,24 @@ Zero runtime dependencies. Every other module imports from here. Nothing here im
 
 ---
 
-### `spi/` — Extension Contracts   ✅ Stable
+### `src/spi/` — Extension Contracts   ✅ Stable
 
-SPI = _Service Provider Interface_. Defines what the framework calls; `adapters/` (or third-party code) implements it. Interfaces here are frozen — changing them is a breaking change.
+SPI = _Service Provider Interface_. Defines what the framework calls; `src/adapters/` (or third-party code) implements it. Interfaces here are frozen — changing them is a breaking change.
 
 | Contract | Interface | Default |
 |----------|-----------|---------|
-| `spi/auth/abstract-token-cache.ts` | `AbstractTokenCache` | — (in-memory is default) |
-| `spi/auth/auth-middleware.ts` | `AuthStrategy` | — (required per-service) |
-| `spi/auth/bearer-authorization.ts` | Bearer token validation helpers | — |
-| `spi/connector/connector-api.ts` | `ConnectorAPI` | `ApiClient` (HTTP/axios) |
-| `spi/idempotency/strategies/` | `IdempotencyStrategy` | `NoopIdempotencyStrategy` |
-| `spi/permissions/strategies/` | `PermissionGuard` | `ForwardTokenPermissionGuardStrategy` |
-| `spi/resilience/strategies/` | `CircuitBreakerStrategy` | `NoopCircuitBreakerStrategy` |
-| `spi/spec/strategies/` | `SpecLoaderStrategy` | `FileSpecLoaderStrategy` |
+| `src/spi/auth/abstract-token-cache.ts` | `AbstractTokenCache` | — (in-memory is default) |
+| `src/spi/auth/auth-middleware.ts` | `AuthStrategy` | — (required per-service) |
+| `src/spi/auth/bearer-authorization.ts` | Bearer token validation helpers | — |
+| `src/spi/connector/connector-api.ts` | `ConnectorAPI` | `ApiClient` (HTTP/axios) |
+| `src/spi/idempotency/strategies/` | `IdempotencyStrategy` | `NoopIdempotencyStrategy` |
+| `src/spi/permissions/strategies/` | `PermissionGuard` | `ForwardTokenPermissionGuardStrategy` |
+| `src/spi/resilience/strategies/` | `CircuitBreakerStrategy` | `NoopCircuitBreakerStrategy` |
+| `src/spi/spec/strategies/` | `SpecLoaderStrategy` | `FileSpecLoaderStrategy` |
 
 **`ConnectorAPI`**:
 ```typescript
-// spi/connector/connector-api.ts
+// src/spi/connector/connector-api.ts
 export interface ConnectorAPI {
   request(
     apiRequest: ApiRequest,
@@ -101,12 +101,12 @@ export interface ConnectorAPI {
 
 ---
 
-### `adapters/` — Built-in Implementations   ✅ Stable
+### `src/adapters/` — Built-in Implementations   ✅ Stable
 
-Concrete implementations of `spi/` contracts. All optional — disable any by not wiring it.
+Concrete implementations of `src/spi/` contracts. All optional — disable any by not wiring it.
 
 ```
-adapters/
+src/adapters/
 ├── auth/strategies/
 │   ├── static-token.strategy.ts           validates static bearer (demo / test)
 │   ├── oauth-introspection.strategy.ts    POST /oauth/token introspect; caches result
@@ -139,10 +139,10 @@ Set `TOKEN_CACHE_TYPE=redis` or `IDEMPOTENCY_TYPE=postgres` in env. The registry
 
 ---
 
-### `runtime/` — Gateway Orchestration   ✅ Stable / 🟡 Experimental (sandbox only)
+### `src/runtime/` — Gateway Orchestration   ✅ Stable / 🟡 Experimental (sandbox only)
 
 ```
-runtime/
+src/runtime/
 ├── server-factory.ts              bootstrap — scans services, builds registry, wires tools, starts transport
 ├── api-client/
 │   └── api-client.ts              implements ConnectorAPI; outbound axios; auth headers; retry + backoff
@@ -186,20 +186,20 @@ runtime/
 
 ---
 
-### `wiring/` — Composition Root   ✅ Stable
+### `src/wiring/` — Composition Root   ✅ Stable
 
-The only layer that imports from both `adapters/` and `spi/`. Keeps the layer invariant intact: `runtime/` imports only from `wiring/` (via re-exports), never from `adapters/` directly.
+The only layer that imports from both `src/adapters/` and `src/spi/`. Keeps the layer invariant intact: `src/runtime/` imports only from `src/wiring/` (via re-exports), never from `src/adapters/` directly.
 
 | File | Responsibility |
 |------|----------------|
 | `strategy-builders.ts` | Factory registry for token-cache and idempotency backends; `buildTokenCacheStrategy`, `buildIdempotencyStrategy`, `buildSpecLoader`, `buildGovernanceRuleSource`, `buildAuditSinks`; external `registerTokenCacheBackend` / `registerIdempotencyBackend` / `registerGovernanceRuleSourceBackend` / `registerAuditSinkBackend` registration points |
 | `service-wiring.ts` | `resolveAuth` — instantiates the correct `AuthStrategy` from a `ServiceAuthConfig` descriptor; `resolveCircuitBreaker` — instantiates `CircuitBreakerStrategy` from config |
 
-`runtime/gateway/strategy-builders.ts` is a thin re-export shell (`export * from '../../wiring/strategy-builders.js'`) so existing import paths stay valid.
+`src/runtime/gateway/strategy-builders.ts` is a thin re-export shell (`export * from '../../wiring/strategy-builders.js'`) so existing import paths stay valid.
 
 ---
 
-### `tools/` — MCP Tool Layer   ✅ Stable
+### `src/tools/` — MCP Tool Layer   ✅ Stable
 
 Five tools registered per session on `McpServer`. Tool names and input schemas are public API — changing either is a breaking change.
 
@@ -292,7 +292,7 @@ AI Agent → McpServer → tool handler
 ## 4. Service Registration Lifecycle
 
 ```
-index.ts                          ← SERVICES_DIR defaults to ./services/
+src/index.ts                      ← SERVICES_DIR defaults to <repo root>/services/
   ├─ dotenv/config  — load .env
   ├─ validateGlobalConfig()  — Zod parse process.env; exit on error
   └─ createMcpGateway(servicesDir, globalConfig)
@@ -345,7 +345,7 @@ server-factory.ts
 
 ### ✅ `ConnectorAPI`
 
-**File:** `spi/connector/connector-api.ts`
+**File:** `src/spi/connector/connector-api.ts`
 
 **What it unlocks:** swap the outbound transport without touching sandbox code. Implement `ConnectorAPI`, pass the instance into `ServiceResources.apiClient`. The sandbox bridge calls the interface — it never sees HTTP, gRPC, or anything else directly.
 
@@ -366,7 +366,7 @@ Wire by replacing `apiClient` in `service-resources-factory.ts` or injecting int
 
 ### ✅ External Backend Registration
 
-**File:** `runtime/gateway/strategy-builders.ts`
+**File:** `src/runtime/gateway/strategy-builders.ts`
 
 **What it unlocks:** custom token-cache and idempotency backends without forking the framework.
 
@@ -381,13 +381,13 @@ Set env vars: `TOKEN_CACHE_TYPE=redis`, `IDEMPOTENCY_TYPE=postgres`. Built-in ty
 
 ### ⚠️ `ProtocolAdapter`   NOT YET IMPLEMENTED
 
-**File that needs it:** `runtime/server-factory.ts`
+**File that needs it:** `src/runtime/server-factory.ts`
 
 **Problem:** transport selection is hardcoded `if/else` on `config.mcp.transport`. Adding WebSocket or Unix socket requires editing the bootstrap file.
 
 **Proposed interface:**
 ```typescript
-// spi/transport/protocol-adapter.ts
+// src/spi/transport/protocol-adapter.ts
 export interface ProtocolAdapter {
   start(server: McpServer, config: McpConfig, logger: Logger): Promise<void>
   stop(): Promise<void>
@@ -398,13 +398,13 @@ export interface ProtocolAdapter {
 
 ### ⚠️ `SkillProvider`   NOT YET IMPLEMENTED
 
-**File that needs it:** `runtime/registry/filesystem-scanner.ts` + `skill-store.ts`
+**File that needs it:** `src/runtime/registry/filesystem-scanner.ts` + `skill-store.ts`
 
 **Problem:** skills are loaded from disk at startup. No runtime update, no database source, no remote CMS.
 
 **Proposed interface:**
 ```typescript
-// spi/skill/skill-provider.ts
+// src/spi/skill/skill-provider.ts
 export interface SkillProvider {
   listSkills(serviceName: string): Promise<SkillDocument[]>
   getSkill(skillId: string): Promise<SkillDocument | undefined>
@@ -415,13 +415,13 @@ export interface SkillProvider {
 
 ### ⚠️ `ToolResolver`   NOT YET IMPLEMENTED
 
-**File that needs it:** `runtime/server-factory.ts`
+**File that needs it:** `src/runtime/server-factory.ts`
 
 **Problem:** five tools are hard-registered at startup. No dynamic registration, no custom tools.
 
 **Proposed interface:**
 ```typescript
-// spi/tool/tool-resolver.ts
+// src/spi/tool/tool-resolver.ts
 export interface ToolResolver {
   registerAll(server: McpServer, registry: ServiceRegistry, config: GlobalConfig): void
 }
@@ -431,7 +431,7 @@ export interface ToolResolver {
 
 ### ✅ `AuditSink`
 
-**Where:** `spi/observability/audit-sink.ts`, fanned out by `runtime/observability/audit-pipeline.ts`.
+**Where:** `src/spi/observability/audit-sink.ts`, fanned out by `src/runtime/observability/audit-pipeline.ts`.
 
 Every `api_execute` audit record and every execution state change (statuses,
 approvals, decisions — no request/response bodies) goes to each sink listed
@@ -452,7 +452,7 @@ unaffected. An unknown name in `AUDIT_SINKS` stops boot.
 
 ## 6. Known Issues
 
-### `runtime/server-factory.ts` — mixed responsibilities
+### `src/runtime/server-factory.ts` — mixed responsibilities
 
 Bootstrap, tool wiring, transport selection, and shutdown handling are one function. See `ProtocolAdapter` and `ToolResolver` extension points above. Fix when a second transport or dynamic tools are needed.
 
@@ -466,23 +466,23 @@ Bootstrap, tool wiring, transport selection, and shutdown handling are one funct
 
 | Module | Status | Notes |
 |--------|--------|-------|
-| `core/constants.ts` | ✅ Stable | Public API — env var names and tool names are breaking changes |
-| `core/config/config.ts` | ✅ Stable | Zod schema is the config contract |
-| `core/types/` | ✅ Stable | All SPI interfaces root here |
-| `tools/` | ✅ Stable | Tool names + input schemas are public API |
-| `spi/` | ✅ Stable | All interfaces frozen; adding fields is breaking |
-| `adapters/` | ✅ Stable | Internal field names may change; public factory signatures are stable |
-| `runtime/registry/service-registry.ts` | ✅ Stable | `ServiceResources` shape is public API |
-| `runtime/http/` | ✅ Stable | HTTP transport + session manager |
-| `runtime/spec/service-refresher.ts` | ✅ Stable | Per-service interval from `config.json`; `0` = disabled |
-| `runtime/observability/` | ✅ Stable | Audit, metrics, logger, progress shapes established |
-| `runtime/api-client/api-client.ts` | ✅ Stable | Implements `ConnectorAPI`; re-exports types for backwards compat |
-| `runtime/gateway/strategy-builders.ts` | ✅ Stable | Thin re-export of `wiring/strategy-builders.ts`; `registerTokenCacheBackend` / `registerIdempotencyBackend` public API preserved |
-| `wiring/strategy-builders.ts` | ✅ Stable | Canonical factory registry; built-in switch + external registration |
-| `wiring/service-wiring.ts` | ✅ Stable | Auth + circuit-breaker resolver; accepts config descriptors, returns strategy instances |
-| `runtime/registry/filesystem-scanner.ts` | ✅ Stable | Returns config descriptors; strategy instantiation delegated to `wiring/service-wiring.ts` |
-| `runtime/server-factory.ts` | 🔴 Needs Refactor | Mixed responsibilities; blocks `ProtocolAdapter` + `ToolResolver` |
-| `runtime/sandbox/sandbox-core.ts` | 🟡 Experimental | `isolated-vm` native addon; security model depends on single library |
+| `src/core/constants.ts` | ✅ Stable | Public API — env var names and tool names are breaking changes |
+| `src/core/config/config.ts` | ✅ Stable | Zod schema is the config contract |
+| `src/core/types/` | ✅ Stable | All SPI interfaces root here |
+| `src/tools/` | ✅ Stable | Tool names + input schemas are public API |
+| `src/spi/` | ✅ Stable | All interfaces frozen; adding fields is breaking |
+| `src/adapters/` | ✅ Stable | Internal field names may change; public factory signatures are stable |
+| `src/runtime/registry/service-registry.ts` | ✅ Stable | `ServiceResources` shape is public API |
+| `src/runtime/http/` | ✅ Stable | HTTP transport + session manager |
+| `src/runtime/spec/service-refresher.ts` | ✅ Stable | Per-service interval from `config.json`; `0` = disabled |
+| `src/runtime/observability/` | ✅ Stable | Audit, metrics, logger, progress shapes established |
+| `src/runtime/api-client/api-client.ts` | ✅ Stable | Implements `ConnectorAPI`; re-exports types for backwards compat |
+| `src/runtime/gateway/strategy-builders.ts` | ✅ Stable | Thin re-export of `src/wiring/strategy-builders.ts`; `registerTokenCacheBackend` / `registerIdempotencyBackend` public API preserved |
+| `src/wiring/strategy-builders.ts` | ✅ Stable | Canonical factory registry; built-in switch + external registration |
+| `src/wiring/service-wiring.ts` | ✅ Stable | Auth + circuit-breaker resolver; accepts config descriptors, returns strategy instances |
+| `src/runtime/registry/filesystem-scanner.ts` | ✅ Stable | Returns config descriptors; strategy instantiation delegated to `src/wiring/service-wiring.ts` |
+| `src/runtime/server-factory.ts` | 🔴 Needs Refactor | Mixed responsibilities; blocks `ProtocolAdapter` + `ToolResolver` |
+| `src/runtime/sandbox/sandbox-core.ts` | 🟡 Experimental | `isolated-vm` native addon; security model depends on single library |
 
 ---
 
@@ -500,5 +500,5 @@ Bootstrap, tool wiring, transport selection, and shutdown handling are one funct
 ### Architectural Invariants — Never Break
 
 1. **Sandbox isolation** — skill code must have zero direct access to gateway process, filesystem, or network. `ConnectorAPI` is the only outbound surface from inside the isolate.
-2. **SPI boundary** — `runtime/` must only import `spi/` interfaces, never `adapters/` concrete classes directly. `wiring/` is the sole exception by design — it is the composition root whose entire purpose is wiring concrete adapters.
-3. **`core/` independence** — `core/` has no imports from `runtime/`, `tools/`, `spi/`, or `adapters/`. It must stay importable by consumers without pulling in the full framework.
+2. **SPI boundary** — `src/runtime/` must only import `src/spi/` interfaces, never `src/adapters/` concrete classes directly. `src/wiring/` is the sole exception by design — it is the composition root whose entire purpose is wiring concrete adapters.
+3. **`src/core/` independence** — `src/core/` has no imports from `src/runtime/`, `src/tools/`, `src/spi/`, or `src/adapters/`. It must stay importable by consumers without pulling in the full framework.

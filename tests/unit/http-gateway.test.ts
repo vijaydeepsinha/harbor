@@ -4,7 +4,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
 import type { AuthInfo } from '@modelcontextprotocol/server'
-import { ERR, MCP_PROTOCOL_VERSION } from '../../core/constants.js'
+import { ERR, MCP_PROTOCOL_VERSION } from '../../src/core/constants.js'
 
 const { mockNodeMcpHandler, mockCreateMcpHandler, mockToNodeHandler } = vi.hoisted(() => {
   const nodeHandler = vi.fn()
@@ -28,9 +28,9 @@ vi.mock('@modelcontextprotocol/node', () => ({
   toNodeHandler: mockToNodeHandler
 }))
 
-import { startHttpGateway, type HttpGatewayHandle } from '../../runtime/http/http-gateway.js'
-import { ServiceRegistry } from '../../runtime/registry/service-registry.js'
-import type { Logger } from '../../runtime/observability/logger.js'
+import { startHttpGateway, type HttpGatewayHandle } from '../../src/runtime/http/http-gateway.js'
+import { ServiceRegistry } from '../../src/runtime/registry/service-registry.js'
+import type { Logger } from '../../src/runtime/observability/logger.js'
 
 /**
  * The gateway is tested end-to-end against a real `node:http` listener on an
