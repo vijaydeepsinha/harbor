@@ -43,7 +43,8 @@ export interface TokenCacheStrategy {
     rawToken: string,
     validatorFn: (token: string) => Promise<TokenPayload>
   ): Promise<TokenPayload>
-  get(service: string, rawToken: string): Promise<{ payload: TokenPayload; expiresAt: number } | undefined>
+  /** `tokenExpiresAt`: when the payload's access token expires (drives proactive refresh); `expiresAt`: when the entry does. */
+  get(service: string, rawToken: string): Promise<{ payload: TokenPayload; expiresAt: number; tokenExpiresAt?: number } | undefined>
   update(service: string, rawToken: string, payload: TokenPayload): Promise<void>
   invalidate(tokenHash: string): Promise<void>
   destroy(): void

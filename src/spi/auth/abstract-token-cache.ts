@@ -7,7 +7,10 @@ import type { Logger } from '../../core/types/logger.types.js'
 
 export interface CacheEntry {
   payload: TokenPayload
+  /** When this entry stops being served and the caller's own token is validated again. */
   expiresAt: number
+  /** When `payload.access_token` expires — what the refresh window is measured against. Absent on entries written before it existed. */
+  tokenExpiresAt?: number
 }
 
 export abstract class AbstractTokenCache implements TokenCacheStrategy {
@@ -32,8 +35,13 @@ export abstract class AbstractTokenCache implements TokenCacheStrategy {
     return Math.min(payload.expires_in * 1000, this.configTtlMs)
   }
 
-  protected buildEntry(payload: TokenPayload): CacheEntry {
-    return { payload, expiresAt: Date.now() + this.computeTtlMs(payload) }
+  protected buildEntry(payload: TokenPayload, notAfter?: number): CacheEntry {
+    const now = Date.now()
+    return {
+      payload,
+      expiresAt: Math.min(now + this.computeTtlMs(payload), notAfter ?? Number.POSITIVE_INFINITY),
+      tokenExpiresAt: now + payload.expires_in * 1000
+    }
   }
 
   async getOrValidate(
@@ -53,7 +61,7 @@ export abstract class AbstractTokenCache implements TokenCacheStrategy {
     return payload
   }
 
-  async get(service: string, rawToken: string): Promise<{ payload: TokenPayload; expiresAt: number } | undefined> {
+  async get(service: string, rawToken: string): Promise<CacheEntry | undefined> {
     const entry = await this.readEntry(this.cacheKey(service, rawToken))
     if (entry && Date.now() < entry.expiresAt) {
       return entry
@@ -61,8 +69,18 @@ export abstract class AbstractTokenCache implements TokenCacheStrategy {
     return undefined
   }
 
+  /**
+   * Stores a refreshed payload for the caller's token. A refresh rotates the
+   * *backend* token; it says nothing about the caller's own credential. So a
+   * live entry keeps its expiry: the caller's token is validated again when
+   * it would have been anyway, and a token revoked at the auth server stops
+   * working then — however often the client calls and refreshes land.
+   */
   async update(service: string, rawToken: string, payload: TokenPayload): Promise<void> {
-    await this.writeEntry(this.cacheKey(service, rawToken), this.buildEntry(payload))
+    const key = this.cacheKey(service, rawToken)
+    const existing = await this.readEntry(key)
+    const notAfter = existing && Date.now() < existing.expiresAt ? existing.expiresAt : undefined
+    await this.writeEntry(key, this.buildEntry(payload, notAfter))
   }
 
   async invalidate(tokenHash: string): Promise<void> {

@@ -20,7 +20,11 @@ export function hashAuthenticatedPrincipal(
   payload: Pick<TokenPayload, 'access_token' | 'metadata'>,
   rawToken?: string
 ): string {
+  // Only a scalar id names a principal. An object or array claim (a mapping
+  // mistake) stringifies to "[object Object]" or "a,b" — every such caller
+  // would share one identity and could resume each other's executions.
   const userId = payload.metadata?.userId
-  const identity = userId ? String(userId) : (rawToken ?? payload.access_token)
+  const usable = (typeof userId === 'string' && userId !== '') || (typeof userId === 'number' && Number.isFinite(userId))
+  const identity = usable ? String(userId) : (rawToken ?? payload.access_token)
   return createHash('sha256').update(identity).digest('hex')
 }

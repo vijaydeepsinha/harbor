@@ -79,3 +79,21 @@ describe('hashAuthenticatedPrincipal', () => {
       .toBe(createHash('sha256').update('only-this').digest('hex'))
   })
 })
+
+describe('hashAuthenticatedPrincipal — only a scalar userId names a principal', () => {
+  it('an object or array userId never collapses callers into one identity; it falls back to the caller\'s bearer', () => {
+    const a = hashAuthenticatedPrincipal({ access_token: 'x', metadata: { userId: { id: 1 } } }, 'bearer-a')
+    const b = hashAuthenticatedPrincipal({ access_token: 'x', metadata: { userId: { id: 2 } } }, 'bearer-b')
+    expect(a).not.toBe(b)
+    expect(a).toBe(hashAuthenticatedPrincipal({ access_token: 'x' }, 'bearer-a'))
+    expect(hashAuthenticatedPrincipal({ access_token: 'x', metadata: { userId: ['u'] } }, 'bearer-a')).toBe(a)
+    expect(hashAuthenticatedPrincipal({ access_token: 'x', metadata: { userId: '' } }, 'bearer-a')).toBe(a)
+  })
+
+  it('string and number ids still name the principal, whatever the bearer', () => {
+    expect(hashAuthenticatedPrincipal({ access_token: 'x', metadata: { userId: 'alice' } }, 'b1'))
+      .toBe(hashAuthenticatedPrincipal({ access_token: 'y', metadata: { userId: 'alice' } }, 'b2'))
+    expect(hashAuthenticatedPrincipal({ access_token: 'x', metadata: { userId: 42 } }, 'b1'))
+      .toBe(hashAuthenticatedPrincipal({ access_token: 'y', metadata: { userId: 42 } }, 'b2'))
+  })
+})
