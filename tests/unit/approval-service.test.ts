@@ -9,6 +9,8 @@ import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-ex
 import { APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR } from '../../src/core/constants.js'
 import {
   ApprovalAlreadyDecidedError,
+  ApprovalAnswerInvalidError,
+  ApprovalStaleError,
   ApprovalNotFoundError,
   ExecutionLockedError,
   type ApprovalSummary
@@ -94,7 +96,7 @@ describe('ApprovalService', () => {
 
   it('an approval is decided exactly once', async () => {
     const { approvalId } = await pauseOnApproval()
-    await service.decide(approvalId, { action: 'accept', via: 'http', executionId })
+    await service.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId })
     await expect(service.decide(approvalId, { action: 'decline', via: 'http', executionId })).rejects.toBeInstanceOf(ApprovalAlreadyDecidedError)
     expect((await store.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.APPROVED)
   })
@@ -102,7 +104,7 @@ describe('ApprovalService', () => {
   it('serializes concurrent opposite decisions and leaves records consistent with the winner', async () => {
     const { approvalId } = await pauseOnApproval()
     const results = await Promise.allSettled([
-      service.decide(approvalId, { action: 'accept', via: 'http', executionId }),
+      service.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId }),
       service.decide(approvalId, { action: 'decline', via: 'http', executionId })
     ])
     const winners = results.filter((result) => result.status === 'fulfilled')
@@ -134,7 +136,7 @@ describe('ApprovalService', () => {
     const other = await manager.create({ service: 'trafficking', code: 'c', userIdHash: 'other-hash' })
 
     await expect(
-      service.decide(approvalId, { action: 'accept', via: 'http', executionId: other.executionId })
+      service.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId: other.executionId })
     ).rejects.toBeInstanceOf(ApprovalNotFoundError)
 
     // Nothing moved: the approval, its activity and its execution are untouched.
@@ -144,7 +146,7 @@ describe('ApprovalService', () => {
     // The lock was never taken, so the rightful owner can still decide.
     expect(await store.acquireLock(executionId)).toBe(true)
     await store.releaseLock(executionId)
-    expect((await service.decide(approvalId, { action: 'accept', via: 'http', executionId })).outcome).toBe('APPROVED')
+    expect((await service.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId })).outcome).toBe('APPROVED')
   })
 
   it('builds an elicitation that explains what/where/values/why without secrets', async () => {
@@ -166,5 +168,35 @@ describe('ApprovalService', () => {
     const e = service.buildElicitation(big)
     expect(e.message.length).toBeLessThan(1500)
     expect(e.message).toContain('more chars')
+  })
+
+  it('an accept without approve: true is not a decision: refused, nothing changes', async () => {
+    const { approvalId } = await pauseOnApproval()
+    for (const approve of [undefined, 'false', 0, null] as unknown[]) {
+      await expect(service.decide(approvalId, { action: 'accept', ...(approve !== undefined ? { approve } : {}), via: 'http', executionId } as never))
+        .rejects.toBeInstanceOf(ApprovalAnswerInvalidError)
+    }
+    expect((await service.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+    expect((await store.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
+    expect(await store.acquireLock(executionId)).toBe(true) // the lock was released
+  })
+
+  it('a PENDING approval left on a finished execution cannot change it', async () => {
+    const { approvalId } = await pauseOnApproval()
+    const record = await manager.load(executionId)
+    await store.updateExecution({ ...record, status: EXECUTION_STATUS.COMPLETED })
+    for (const action of ['cancel', 'decline'] as const) {
+      await expect(service.decide(approvalId, { action, via: 'http', executionId })).rejects.toBeInstanceOf(ApprovalStaleError)
+    }
+    expect((await manager.load(executionId)).status).toBe(EXECUTION_STATUS.COMPLETED)
+    expect((await service.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+  })
+
+  it('an approval whose activity was re-asked under another approval cannot rewrite that activity', async () => {
+    const stale = await service.request(executionId, 1, summary) // e.g. a crash before the activity was journaled
+    const { approvalId: current } = await pauseOnApproval()
+    await expect(service.decide(stale.approvalId, { action: 'decline', via: 'http', executionId })).rejects.toBeInstanceOf(ApprovalStaleError)
+    expect(await store.getActivity(executionId, 1)).toMatchObject({ status: ACTIVITY_STATUS.WAITING_APPROVAL, approvalId: current })
+    expect((await manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
   })
 })

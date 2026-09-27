@@ -103,6 +103,40 @@ describe('approval required', () => {
     expect(await s().mock.requests()).toHaveLength(0)
   })
 
+  it('should_refuse_an_accept_that_does_not_say_approve_true_and_keep_the_approval_pending', async () => {
+    // The form declares `approve` required; a missing or non-boolean value is not a yes (fail closed).
+    const c = s().client('alice')
+    const paused = expectPaused(await c.apiExecute('commerce', program))
+    s().track(paused.executionId)
+    for (const content of [undefined, {}, { approve: 'false' }, { approve: 1 }]) {
+      const out = expectToolError(await c.apiExecute('commerce', program, {
+        requestState: paused.requestState,
+        inputResponses: { [WIRE.APPROVAL_INPUT_KEY]: { action: 'accept', ...(content ? { content } : {}) } }
+      }), ERR.INVALID_API_REQUEST)
+      expect(out.retryable).toBe(false)
+    }
+    const overHttp = await s().admin.decide(paused.executionId, paused.approvalId, { action: 'accept' })
+    expect(overHttp.status).toBe(400)
+    expect(await s().mock.count('POST', '/orders')).toBe(0)
+    const insp = await s().admin.inspect(paused.executionId)
+    expect(insp.approvals[0]!.status).toBe(APPROVAL_STATUS.PENDING)
+    expect(insp.execution.status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    // A proper answer still works afterwards.
+    expectCompleted(await c.answerApproval(paused, { action: 'accept' }))
+    expect(await s().mock.count('POST', '/orders')).toBe(1)
+  })
+
+  it('should_refuse_a_conflicting_answer_after_the_approval_was_decided_over_http', async () => {
+    const c = s().client('alice')
+    const paused = expectPaused(await c.apiExecute('commerce', program))
+    s().track(paused.executionId)
+    expect((await s().admin.decide(paused.executionId, paused.approvalId, { action: 'accept', approve: true })).status).toBe(200)
+    expectToolError(await c.answerApproval(paused, { action: 'decline' }), ERR.APPROVAL_ALREADY_DECIDED)
+    expect(await s().mock.count('POST', '/orders')).toBe(0) // the decliner did not run the approved call
+    expectCompleted(await c.answerApproval(paused, { action: 'accept' }))
+    expect(await s().mock.count('POST', '/orders')).toBe(1)
+  })
+
   it('should_cancel_the_execution_and_execute_nothing_when_the_human_cancels', async () => {
     const c = s().client('alice')
     const paused = expectPaused(await c.apiExecute('commerce', program))

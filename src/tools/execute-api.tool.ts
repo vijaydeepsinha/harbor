@@ -45,7 +45,7 @@ import {
 } from './tool-helpers.js'
 import {
   TOOL, LOG_PREFIX, METRIC, OUTCOME, ERR,
-  EXECUTION_STATUS, GOVERNANCE_DECISION,
+  EXECUTION_STATUS, GOVERNANCE_DECISION, APPROVAL_STATUS,
   EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY, APPROVAL_ID_META_KEY, APPROVAL_INPUT_KEY
 } from '../core/constants.js'
 import type { AuditOutcome, ExecutionStatus } from '../core/constants.js'
@@ -391,12 +391,18 @@ async () => {
           ...(progressCollector.hasAny() ? { progress: progressCollector.summary() } : {}),
           ...(executionId !== undefined ? { executionId } : {})
         }
+        // When no run started (beginRun refused: locked, finished, approval
+        // still pending) nothing changed, so `_meta` reports the execution as
+        // it is stored — not the status this error would have given a run.
+        const reportedStatus = runStarted || !codeMode || executionId === undefined
+          ? status
+          : await codeMode.manager.load(executionId).then(r => r.status, () => undefined)
         return mcpError(
           errObj.message,
           errorCode,
           errorRetryable(err),
           Object.keys(extra).length ? extra : undefined,
-          executionMeta(executionId, status, approvalId)
+          executionMeta(executionId, reportedStatus, approvalId)
         )
       }
     }
@@ -457,7 +463,7 @@ async function resolveExecution(
   try {
     execution = await rt.manager.load(resumeId)
   } catch (err) {
-    return { error: mcpError(ensureError(err).message, getErrorCode(err), false) }
+    return { error: mcpError(ensureError(err).message, getErrorCode(err), errorRetryable(err)) }
   }
   // Principal binding: the sealed state and the stored execution both name the caller.
   if ((state && state.userIdHash !== input.userIdHash) || execution.userIdHash !== input.userIdHash) {
@@ -500,8 +506,24 @@ async function resolveExecution(
           ) }
         }
       } catch (err) {
-        // A duplicate retry after the decision was applied is harmless; anything else is not.
-        if (!(err instanceof ApprovalAlreadyDecidedError)) return { error: mcpError(ensureError(err).message, getErrorCode(err), false) }
+        if (!(err instanceof ApprovalAlreadyDecidedError)) {
+          return { error: mcpError(ensureError(err).message, getErrorCode(err), errorRetryable(err), undefined, executionMeta(resumeId, execution.status)) }
+        }
+        // Already decided. A retry carrying the *same* answer (the client
+        // retried after a lost response) resumes; a different answer — a
+        // decline arriving after an HTTP approve — must not quietly run the
+        // approved call on the decliner's behalf.
+        const recorded = err.status
+        const asked = answer.action === 'cancel' ? APPROVAL_STATUS.CANCELLED
+          : answer.action === 'decline' || answer.content?.['approve'] === false ? APPROVAL_STATUS.REJECTED
+          : APPROVAL_STATUS.APPROVED
+        if (recorded !== asked) {
+          return { error: mcpError(
+            `${err.message}; this answer (${asked}) was not applied and nothing was executed.`,
+            ERR.APPROVAL_ALREADY_DECIDED, false, { executionId: resumeId, approvalId: state.approvalId },
+            executionMeta(resumeId, execution.status, state.approvalId)
+          ) }
+        }
       }
       execution = await rt.manager.load(resumeId)
     } else if (execution.status === EXECUTION_STATUS.WAITING_APPROVAL) {

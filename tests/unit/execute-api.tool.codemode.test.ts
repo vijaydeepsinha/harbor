@@ -141,7 +141,7 @@ describe('api_execute under the Code Mode governance layer', () => {
 
     expect((await rt.manager.load(body.executionId)).originalCode).toBe(PROGRAM_FINALIZE) // persisted while paused
 
-    await rt.approvals.decide(body.approvalId, { action: 'accept', via: 'http', executionId: body.executionId })
+    await rt.approvals.decide(body.approvalId, { action: 'accept', approve: true, via: 'http', executionId: body.executionId })
     const done = await handler({ service: 'trafficking', code: 'async () => "REPLACEMENT CODE IS IGNORED"' }, makeCtx({ elicitation: false, executionIdMeta: body.executionId }))
     expect(done['isError']).toBeUndefined()
     expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' }) // the persisted program ran
@@ -182,7 +182,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
 
     // Still resumable once decided.
-    await rt.approvals.decide(approvalId, { action: 'accept', via: 'http', executionId })
+    await rt.approvals.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId })
     const done = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false, executionIdMeta: executionId }))
     expect(done['isError']).toBeUndefined()
     expect((done['_meta'] as Record<string, unknown>)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
@@ -330,5 +330,45 @@ describe('api_execute under the Code Mode governance layer', () => {
     const handler = registerGoverned(rt, makeResources('trafficking', makeConnector().connector))
     const r = await handler({ service: 'trafficking', code: PROGRAM }, makeCtx({ executionIdMeta: 'does-not-exist' }))
     expect((parseContent(r) as { code: string }).code).toBe(ERR.EXECUTION_NOT_FOUND)
+  })
+
+  describe('answers and refusals after the decision', () => {
+    it('a conflicting MRTR answer after an HTTP decision is refused and runs nothing; the same answer resumes', async () => {
+      const rt = makeRuntime([FINALIZE_RULE])
+      const { connector, count } = makeConnector()
+      const handler = registerGoverned(rt, makeResources('trafficking', connector))
+      const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+      const meta = paused['_meta'] as Record<string, string>
+      await rt.approvals.decide(meta[APPROVAL_ID_META_KEY]!, { action: 'accept', approve: true, via: 'http', executionId: meta[EXECUTION_ID_META_KEY]! })
+
+      const declined = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'decline' }))
+      expect((parseContent(declined) as { code: string }).code).toBe(ERR.APPROVAL_ALREADY_DECIDED)
+      expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
+
+      const accepted = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'accept' }))
+      expect(accepted['isError']).toBeUndefined()
+      expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
+    })
+
+    it('a refused resume reports the stored status in _meta, not the status of a run that never started', async () => {
+      const rt = makeRuntime()
+      const handler = registerGoverned(rt, makeResources('trafficking', makeConnector().connector))
+      const done = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+      const executionId = (done['_meta'] as Record<string, string>)[EXECUTION_ID_META_KEY]!
+      const again = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ executionIdMeta: executionId }))
+      expect((parseContent(again) as { code: string }).code).toBe(ERR.EXECUTION_NOT_RESUMABLE)
+      expect((again['_meta'] as Record<string, string>)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
+    })
+
+    it('a decision that meets a held lock is reported retryable on the MCP path too', async () => {
+      const rt = makeRuntime([FINALIZE_RULE])
+      const handler = registerGoverned(rt, makeResources('trafficking', makeConnector().connector))
+      const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+      const executionId = (paused['_meta'] as Record<string, string>)[EXECUTION_ID_META_KEY]!
+      expect(await rt.store.acquireLock(executionId)).toBe(true)
+      const r = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'accept' }))
+      expect(parseContent(r)).toMatchObject({ code: ERR.EXECUTION_LOCKED, retryable: true })
+      await rt.store.releaseLock(executionId)
+    })
   })
 })

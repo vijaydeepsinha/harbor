@@ -120,7 +120,13 @@ describe('execution routes', () => {
     const wrongExec = await post(`/executions/other-exec/approvals/${approvalId}`, { action: 'accept' })
     expect(wrongExec.status).toBe(404)
 
-    const ok = await post(`/executions/${executionId}/approvals/${approvalId}`, { action: 'accept', comment: 'fine' })
+    for (const approve of [undefined, 'true', 1, null]) {
+      const malformed = await post(`/executions/${executionId}/approvals/${approvalId}`, { action: 'accept', ...(approve !== undefined ? { approve } : {}) })
+      expect(malformed.status, `approve=${String(approve)}`).toBe(400) // an accept that does not say approve: true is not a yes
+    }
+    expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+
+    const ok = await post(`/executions/${executionId}/approvals/${approvalId}`, { action: 'accept', approve: true, comment: 'fine' })
     expect(ok.status).toBe(200)
     const decided = await ok.json() as { outcome: string; approval: { status: string; comment: string; decidedVia: string }; executionStatus: string }
     expect(decided.outcome).toBe('APPROVED')
