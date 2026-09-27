@@ -84,7 +84,9 @@ export async function handleExecutionRoutes(
     if (err instanceof HttpError) throw err
     if (err instanceof ApprovalAlreadyDecidedError) throw new HttpError(409, err.code, err.message, undefined, { url })
     if (err instanceof ExecutionError) {
-      const status = err.code === ERR.EXECUTION_NOT_FOUND || err.code === ERR.APPROVAL_NOT_FOUND ? 404 : 400
+      const status = err.code === ERR.EXECUTION_NOT_FOUND || err.code === ERR.APPROVAL_NOT_FOUND ? 404
+        : err.code === ERR.EXECUTION_LOCKED ? 409
+        : 400
       throw new HttpError(status, err.code, err.message, undefined, { url })
     }
     throw new HttpError(500, errorCode(err, ERR.INTERNAL), 'Internal server error', undefined, { url })

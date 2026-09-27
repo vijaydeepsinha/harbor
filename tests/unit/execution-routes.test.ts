@@ -153,6 +153,25 @@ describe('execution routes', () => {
     expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
   })
 
+  it('returns a conflict when another operation holds the execution lock', async () => {
+    const rt = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(rt)
+    expect(await rt.store.acquireLock(executionId)).toBe(true)
+    const { baseUrl, close } = await start(rt); cleanup = close
+
+    const decision = await fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, {
+      method: 'POST',
+      headers: { Authorization: ['Bearer', TOKEN].join(' '), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'accept' })
+    })
+
+    expect(decision.status).toBe(409)
+    expect((await decision.json() as { code: string }).code).toBe(ERR.EXECUTION_LOCKED)
+    expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+    expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    await rt.store.releaseLock(executionId)
+  })
+
   it('decline over HTTP denies the execution', async () => {
     const rt = makeRuntime()
     const { executionId, approvalId } = await seedPaused(rt)

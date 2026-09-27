@@ -7,7 +7,12 @@ import { ExecutionManager } from '../../runtime/execution/execution-manager.js'
 import { ActivityJournal } from '../../runtime/execution/activity-journal.js'
 import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
 import { APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR } from '../../core/constants.js'
-import { ApprovalAlreadyDecidedError, ApprovalNotFoundError, type ApprovalSummary } from '../../core/types/execution.types.js'
+import {
+  ApprovalAlreadyDecidedError,
+  ApprovalNotFoundError,
+  ExecutionLockedError,
+  type ApprovalSummary
+} from '../../core/types/execution.types.js'
 
 const summary: ApprovalSummary = {
   service: 'trafficking', method: 'POST', specPath: '/campaigns/{id}/activate', operationId: 'activateCampaign',
@@ -92,6 +97,36 @@ describe('ApprovalService', () => {
     await service.decide(approvalId, { action: 'accept', via: 'http' })
     await expect(service.decide(approvalId, { action: 'decline', via: 'http' })).rejects.toBeInstanceOf(ApprovalAlreadyDecidedError)
     expect((await store.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.APPROVED)
+  })
+
+  it('serializes concurrent opposite decisions and leaves records consistent with the winner', async () => {
+    const { approvalId } = await pauseOnApproval()
+    const results = await Promise.allSettled([
+      service.decide(approvalId, { action: 'accept', via: 'http' }),
+      service.decide(approvalId, { action: 'decline', via: 'http' })
+    ])
+    const winners = results.filter((result) => result.status === 'fulfilled')
+    const losers = results.filter((result) => result.status === 'rejected')
+
+    expect(winners).toHaveLength(1)
+    expect(losers).toHaveLength(1)
+    expect(losers[0]).toMatchObject({
+      status: 'rejected',
+      reason: expect.any(ExecutionLockedError)
+    })
+
+    const winner = winners[0]
+    if (!winner || winner.status !== 'fulfilled') throw new Error('Expected one successful decision')
+    const expectedStatus = winner.value.outcome === 'APPROVED' ? APPROVAL_STATUS.APPROVED : APPROVAL_STATUS.REJECTED
+    const expectedActivityStatus = winner.value.outcome === 'APPROVED' ? ACTIVITY_STATUS.APPROVED : ACTIVITY_STATUS.DENIED
+    const expectedExecutionStatus = winner.value.outcome === 'APPROVED' ? EXECUTION_STATUS.WAITING_APPROVAL : EXECUTION_STATUS.DENIED
+
+    expect((await service.get(approvalId)).status).toBe(expectedStatus)
+    expect((await store.getActivity(executionId, 1))?.status).toBe(expectedActivityStatus)
+    expect((await manager.load(executionId)).status).toBe(expectedExecutionStatus)
+    expect(await store.acquireLock(executionId)).toBe(true)
+    await store.releaseLock(executionId)
+    await expect(service.decide(approvalId, { action: 'cancel', via: 'http' })).rejects.toBeInstanceOf(ApprovalAlreadyDecidedError)
   })
 
   it('builds an elicitation that explains what/where/values/why without secrets', async () => {

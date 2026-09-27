@@ -270,6 +270,7 @@ Agent                Harbor (api_execute)          V8 #1              Backend   
 | Circuit open / other retryable error | execution `INTERRUPTED` (resumable via `_meta["harbor/execution-id"]`); no activity recorded for the unmade call |
 | Governance evaluation error | `DENY` with `GOVERNANCE_EVALUATION_FAILED` |
 | Approval decided twice | second decision refused (`APPROVAL_ALREADY_DECIDED`); a duplicate MRTR retry after the decision simply resumes |
+| Concurrent approval decisions | decisions serialize on the execution lock; a contender gets `EXECUTION_LOCKED` (HTTP 409) without changing state, then can retry and observe `APPROVAL_ALREADY_DECIDED` |
 | Resume before the approval is decided | the pause is returned again with the same approval id and `_meta["harbor/execution-status"] = WAITING_APPROVAL`; nothing runs, the execution is untouched |
 | Store write failure | the tool call fails; nothing is executed without its journal entry |
 | Replay mismatch | `REPLAY_DIVERGED`, execution `FAILED` |
@@ -368,9 +369,10 @@ a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
   `EXECUTION_RETENTION_SEC=0`) can be evicted under memory pressure — size it
   for what you keep; the audit trail is the durable record. The run lock must
   outlive the longest run (`EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC`).
-- Two humans deciding the same approval at the same moment through different
-  pods can both pass the "still pending" check: the decision is not yet an
-  atomic compare-and-set in the store.
+- Approval, activity, and execution updates are separate store writes, not a
+  cross-record transaction. The execution lock prevents concurrent decisions
+  from overwriting each other, but a store failure midway through one decision
+  can still leave partially updated records.
 - `requestState` binds the principal via `userIdHash` inside the sealed
   payload and the JSON-RPC method via the codec; it is not bound to the
   transport bearer itself.
