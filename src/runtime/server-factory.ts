@@ -111,6 +111,7 @@ export async function createMcpGateway(
 
     const http = startHttpGateway({
       host, port,
+      ...(globalConfig.mcp.maxBodyBytes !== undefined ? { maxBodyBytes: globalConfig.mcp.maxBodyBytes } : {}),
       createMcpServer, registry, logger: gatewayLogger,
       oauthConfig: globalConfig.oauth,
       codeMode

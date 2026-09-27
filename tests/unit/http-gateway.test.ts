@@ -248,3 +248,35 @@ describe('startHttpGateway', () => {
     )
   })
 })
+
+describe('startHttpGateway — request body limits', () => {
+  let cleanup: (() => Promise<void>) | undefined
+  afterEach(async () => { await cleanup?.(); cleanup = undefined })
+  const token = 'abcdefghijklmnopqrstuvwxyz0123456789AB'
+
+  it('refuses a /mcp body over the limit with 413 before the MCP handler sees it, declared or streamed', async () => {
+    mockNodeMcpHandler.mockReset()
+    const { baseUrl, close } = await startForTest({ maxBodyBytes: 1024 })
+    cleanup = close
+    const declared = await fetch(`${baseUrl}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: 'x'.repeat(4096) })
+    expect(declared.status).toBe(413)
+    expect((await declared.json() as { code: string }).code).toBe('PAYLOAD_TOO_LARGE')
+    const stream = new ReadableStream({ start(c) { for (let i = 0; i < 8; i++) c.enqueue(new TextEncoder().encode('y'.repeat(512))); c.close() } })
+    const streamed = await fetch(`${baseUrl}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: stream, duplex: 'half' } as RequestInit)
+    expect(streamed.status).toBe(413)
+    expect(mockNodeMcpHandler).not.toHaveBeenCalled()
+  })
+
+  it('hands a body within the limit to the MCP handler already parsed; invalid JSON gets the JSON-RPC parse error', async () => {
+    mockNodeMcpHandler.mockReset()
+    mockNodeMcpHandler.mockImplementation(async (_req, res) => { res.statusCode = 200; res.end('{}') })
+    const { baseUrl, close } = await startForTest({ maxBodyBytes: 1024 })
+    cleanup = close
+    const ok = await fetch(`${baseUrl}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' })
+    expect(ok.status).toBe(200)
+    expect(mockNodeMcpHandler.mock.calls[0]?.[2]).toEqual({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    const bad = await fetch(`${baseUrl}/mcp`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: '{"jsonrpc":' })
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toMatchObject({ jsonrpc: '2.0', id: null, error: { code: -32700 } })
+  })
+})

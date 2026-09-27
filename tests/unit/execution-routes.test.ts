@@ -173,10 +173,25 @@ describe('execution routes', () => {
     })
 
     expect(res.status).toBe(404)
-    expect((await res.json() as { code: string }).code).toBe(ERR.APPROVAL_NOT_FOUND)
+    const refused = await res.json() as { code: string; error: string }
+    expect(refused.code).toBe(ERR.APPROVAL_NOT_FOUND)
+    expect(refused.error).not.toContain(theirs.executionId) // the reply does not confirm whose approval it is
     // Their approval is untouched and their execution still pauses on it.
     expect((await rt.approvals.get(theirs.approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
     expect((await rt.manager.load(theirs.executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+  })
+
+  it('answers an over-limit POST body with a readable 413, not a reset connection', async () => {
+    const rt = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(rt)
+    const { baseUrl, close } = await start(rt); cleanup = close
+    const res = await fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'accept', approve: true, comment: 'x'.repeat(100 * 1024) })
+    })
+    expect(res.status).toBe(413)
+    expect((await res.json() as { code: string }).code).toBe(ERR.PAYLOAD_TOO_LARGE)
+    expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
   })
 
   it('returns a conflict when another operation holds the execution lock', async () => {

@@ -14,7 +14,7 @@ import type {
 } from '../types/config.types.js'
 import { LOG_LEVELS } from '../types/config.types.js'
 import { SAFE_HEADER_VALUE } from '../utils/header-value.js'
-import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, DEFAULT_HARBOR_SERVER_ID, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, EXECUTION_STORE_TYPE, EXECUTION_CODE_RETENTION, GOVERNANCE_DECISION, GOVERNANCE_RULE_SOURCE_TYPE } from '../constants.js'
+import { STORE_TYPE, ENV, REQUEST_SOURCE_VALUE, DEFAULT_HARBOR_SERVER_ID, MCP_DEFAULT_HOST, MCP_DEFAULT_PORT, MCP_DEFAULT_MAX_BODY_BYTES, EXECUTION_STORE_TYPE, EXECUTION_CODE_RETENTION, GOVERNANCE_DECISION, GOVERNANCE_RULE_SOURCE_TYPE } from '../constants.js'
 
 /**
  * `<install root>/governance/rules`: three levels up from both
@@ -172,6 +172,7 @@ function resolveStoreTypeConfig(env: NodeJS.ProcessEnv, opts: StoreTypeEnvOption
 const GlobalConfigSchema = z.object({
   MCP_HOST: z.string().default(MCP_DEFAULT_HOST),
   MCP_PORT: z.coerce.number().int().positive().default(MCP_DEFAULT_PORT),
+  MCP_MAX_BODY_BYTES: z.coerce.number().int().positive().default(MCP_DEFAULT_MAX_BODY_BYTES),
   MCP_TRANSPORT: z.enum(['http', 'stdio']).default('http'),
   MCP_TOKEN: z.string().optional(),
   AUTH_TOKEN_CACHE_TTL_MS: z.coerce.number().int().positive().default(300_000),
@@ -259,6 +260,7 @@ export function validateGlobalConfig(): GlobalConfig {
     mcp: {
       host: env.MCP_HOST,
       port: env.MCP_PORT,
+      maxBodyBytes: env.MCP_MAX_BODY_BYTES,
       transport: env.MCP_TRANSPORT,
       ...(env.MCP_TOKEN ? { token: env.MCP_TOKEN } : {})
     },

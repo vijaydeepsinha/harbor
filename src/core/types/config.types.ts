@@ -107,6 +107,8 @@ export interface GlobalConfig {
   mcp: {
     host: string
     port: number
+    /** Largest `/mcp` request body read before a 413 (MCP_MAX_BODY_BYTES). Absent ⇒ MCP_DEFAULT_MAX_BODY_BYTES. */
+    maxBodyBytes?: number
     transport: 'http' | 'stdio'
     /** Static bearer used by the stdio transport. Required when transport === 'stdio'. */
     token?: string

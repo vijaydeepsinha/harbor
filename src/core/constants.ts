@@ -87,6 +87,8 @@ export const ERR = {
   SANDBOX_RUNTIME: 'SANDBOX_RUNTIME',
   INVALID_API_REQUEST: 'INVALID_API_REQUEST',
   NOT_FOUND: 'NOT_FOUND',
+  /** An HTTP request body over the configured limit (MCP_MAX_BODY_BYTES for /mcp; 64 KiB for /executions). */
+  PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   INTERNAL: 'INTERNAL',
   // ── Code Mode governance layer ──
   APPROVAL_REQUIRED: 'APPROVAL_REQUIRED',
@@ -116,6 +118,7 @@ export type AllowedHttpMethod = (typeof ALLOWED_HTTP_METHODS)[number]
 
 export const HTTP_HEADER = {
   CONTENT_TYPE: 'Content-Type',
+  CONNECTION: 'Connection',
   AUTHORIZATION: 'Authorization',
   CORRELATION_ID: 'X-Correlation-ID',
   REQUEST_SOURCE: 'X-Request-Source',
@@ -155,6 +158,8 @@ export const HTTP_ROUTES = {
 /** Default bind address and port for the MCP gateway HTTP transport. */
 export const MCP_DEFAULT_HOST = '127.0.0.1'
 export const MCP_DEFAULT_PORT = 3333
+/** Largest `/mcp` request body read (MCP_MAX_BODY_BYTES): a tool call carries a program, never a payload. */
+export const MCP_DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024
 
 /** Max length for bearer credentials after the `Bearer` prefix (header value hardening). */
 export const BEARER_CREDENTIAL_MAX_OCTETS = 8192
