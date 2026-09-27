@@ -198,6 +198,8 @@ async () => {
       let executionId: string | undefined
       // True once beginRun took the run lock — only then is there a run to end.
       let runStarted = false
+      // What actually runs: the persisted original on a resume (the incoming code is ignored then).
+      let program = code
       let userIdHash = 'unknown'
 
       const audit = (extra: Partial<Parameters<typeof writeAuditRecord>[0]>, codeSubmitted: string): void => {
@@ -244,7 +246,18 @@ async () => {
         let pendingRetry: InputRequiredResult | undefined
         if (codeMode) {
           const resumed = await resolveExecution(codeMode, ctx, { service, code, userIdHash }, logger, correlationId)
-          if ('error' in resumed) return resumed.error
+          if ('error' in resumed) {
+            // Refused, or the answer itself ended the execution (decline, cancel): nothing ran, but the
+            // decision is part of the audit trail. codeSubmitted stays what this caller sent — never
+            // the persisted program, which may belong to someone else.
+            executionId = resumed.executionId
+            const refusedCode = toolErrorCode(resumed.error)
+            outcome = refusedCode === ERR.GOVERNANCE_DENIED ? OUTCOME.GOVERNANCE_DENIED
+              : refusedCode === ERR.EXECUTION_CANCELLED ? OUTCOME.EXECUTION_CANCELLED
+              : OUTCOME.ERROR
+            audit({ outcome, errorCode: refusedCode, userIdHash: 'unknown' }, code)
+            return resumed.error
+          }
           if ('reprompt' in resumed) pendingRetry = resumed.reprompt
           execution = resumed.execution
           executionId = execution.executionId
@@ -254,7 +267,7 @@ async () => {
           bridge = makeBridge(codeMode, execution, svcResources, userIdHash)
           callLog = bridge.journal
         }
-        const program = execution?.originalCode ?? code
+        program = execution?.originalCode ?? code
 
         logger.info({ correlationId, service, executionId, step: '3/4 sandbox-run' }, `${LOG_PREFIX.MCP} Executing code in V8 sandbox...`)
         // A governed run's calls are keyed by the execution (the bridge adds
@@ -374,13 +387,13 @@ async () => {
           }
           if (err instanceof ApprovalRequiredError) {
             approvalId = err.approvalId
-            audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, code)
+            audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, program)
             return await approvalResult(codeMode, ctx, err, userIdHash, logger, correlationId)
           }
         }
 
         // Error-path audit keeps the pre-existing shape (userIdHash 'unknown'); see docs/code-mode-governance.md → limitations.
-        audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, code)
+        audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, program)
 
         // Attach structured progress (per-call status + ids extracted from
         // successful POST responses) so the caller can resume a failed
@@ -411,6 +424,16 @@ async () => {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+/** The `code` an mcpError carries in its JSON text. */
+function toolErrorCode(response: ToolResponse): string {
+  try {
+    const body = JSON.parse(response.content[0]?.text ?? '{}') as { code?: unknown }
+    return typeof body.code === 'string' ? body.code : ERR.UNKNOWN
+  } catch {
+    return ERR.UNKNOWN
+  }
+}
+
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
   EXECUTION_STATUS.COMPLETED, EXECUTION_STATUS.FAILED, EXECUTION_STATUS.DENIED, EXECUTION_STATUS.CANCELLED
 ])
@@ -436,7 +459,8 @@ function executionMeta(executionId?: string, status?: ExecutionStatus, approvalI
 type ResolvedExecution =
   | { execution: ExecutionRecord }
   | { execution: ExecutionRecord; reprompt: InputRequiredResult }
-  | { error: ToolResponse }
+  /** The resume was refused or the human's answer ended it; nothing ran. */
+  | { error: ToolResponse; executionId: string }
 
 /**
  * Decides which execution this call belongs to (§6, §7, §26):
@@ -467,14 +491,14 @@ async function resolveExecution(
   try {
     execution = await rt.manager.load(resumeId)
   } catch (err) {
-    return { error: mcpError(ensureError(err).message, getErrorCode(err), errorRetryable(err)) }
+    return { executionId: resumeId, error: mcpError(ensureError(err).message, getErrorCode(err), errorRetryable(err)) }
   }
   // Principal binding: the sealed state and the stored execution both name the caller.
   if ((state && state.userIdHash !== input.userIdHash) || execution.userIdHash !== input.userIdHash) {
-    return { error: mcpError('This execution belongs to a different principal', ERR.EXECUTION_NOT_RESUMABLE, false) }
+    return { executionId: resumeId, error: mcpError('This execution belongs to a different principal', ERR.EXECUTION_NOT_RESUMABLE, false) }
   }
   if (execution.service !== input.service) {
-    return { error: mcpError(`Execution ${resumeId} runs against service "${execution.service}", not "${input.service}"`, ERR.EXECUTION_NOT_RESUMABLE, false) }
+    return { executionId: resumeId, error: mcpError(`Execution ${resumeId} runs against service "${execution.service}", not "${input.service}"`, ERR.EXECUTION_NOT_RESUMABLE, false) }
   }
   if (execution.originalCode !== undefined && input.code !== execution.originalCode) {
     logger.warn({ correlationId, executionId: resumeId }, 'Resume carried different code — ignored; the persisted original program is authoritative')
@@ -496,14 +520,14 @@ async function resolveExecution(
         logger.info({ correlationId, executionId: resumeId, approvalId: state.approvalId, outcome: decided.outcome }, 'Approval decided via MCP elicitation')
         // The human's answer may end the execution here and now — report that consequence, not a failed resume.
         if (decided.outcome === 'REJECTED') {
-          return { error: mcpError(
+          return { executionId: resumeId, error: mcpError(
             `Approval rejected for activity #${state.activitySequence}; the execution is denied and the operation was not executed.`,
             ERR.GOVERNANCE_DENIED, false, { executionId: resumeId, approvalId: state.approvalId },
             executionMeta(resumeId, EXECUTION_STATUS.DENIED, state.approvalId)
           ) }
         }
         if (decided.outcome === 'CANCELLED') {
-          return { error: mcpError(
+          return { executionId: resumeId, error: mcpError(
             `Approval cancelled for activity #${state.activitySequence}; the execution is cancelled and the operation was not executed.`,
             ERR.EXECUTION_CANCELLED, false, { executionId: resumeId, approvalId: state.approvalId },
             executionMeta(resumeId, EXECUTION_STATUS.CANCELLED, state.approvalId)
@@ -511,7 +535,7 @@ async function resolveExecution(
         }
       } catch (err) {
         if (!(err instanceof ApprovalAlreadyDecidedError)) {
-          return { error: mcpError(ensureError(err).message, getErrorCode(err), errorRetryable(err), undefined, executionMeta(resumeId, execution.status)) }
+          return { executionId: resumeId, error: mcpError(ensureError(err).message, getErrorCode(err), errorRetryable(err), undefined, executionMeta(resumeId, execution.status)) }
         }
         // Already decided. A retry carrying the *same* answer (the client
         // retried after a lost response) resumes; a different answer — a
@@ -523,7 +547,7 @@ async function resolveExecution(
           : APPROVAL_STATUS.APPROVED
         // Only while the execution could still run: a finished one is refused below as not resumable.
         if (recorded !== asked && !TERMINAL_STATUSES.has(execution.status)) {
-          return { error: mcpError(
+          return { executionId: resumeId, error: mcpError(
             `${err.message}; this answer (${asked}) was not applied and nothing was executed.`,
             ERR.APPROVAL_ALREADY_DECIDED, false, { executionId: resumeId, approvalId: state.approvalId },
             executionMeta(resumeId, execution.status, state.approvalId)

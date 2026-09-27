@@ -10,6 +10,8 @@ import { registerExecuteApiTool } from '../../src/tools/execute-api.tool.js'
 import type { MetricsRegistry } from '../../src/runtime/observability/metrics.js'
 import { MemcacheCodeModeStore } from '../../src/adapters/execution/memcache-execution-store.js'
 import { FakeMemcache } from './fake-memcache.js'
+import { AuditPipeline } from '../../src/runtime/observability/audit-pipeline.js'
+import type { AuditEvent } from '../../src/spi/observability/audit-sink.js'
 import {
   ERR, EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS, GOVERNANCE_DECISION, GOVERNANCE_REASON, TOOL,
   EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY, APPROVAL_ID_META_KEY, APPROVAL_INPUT_KEY
@@ -374,6 +376,55 @@ describe('api_execute under the Code Mode governance layer', () => {
       const r = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'accept' }))
       expect(parseContent(r)).toMatchObject({ code: ERR.EXECUTION_LOCKED, retryable: true })
       await rt.store.releaseLock(executionId)
+    })
+  })
+
+  describe('audit trail on resume', () => {
+    function auditedTool(rt: ReturnType<typeof makeRuntime>, failFinalize = false) {
+      const events: AuditEvent[] = []
+      const pipeline = new AuditPipeline([{ name: 'capture', write: (e: AuditEvent) => { events.push(e) } }], silentLogger)
+      const { handlers, server } = makeFakeServer()
+      const metrics = { increment: () => {}, stop: () => {} } as unknown as MetricsRegistry
+      const config = { ...globalConfig, observability: { ...globalConfig.observability, enableAudit: true } }
+      const base = makeConnector().connector
+      const connector = failFinalize
+        ? { request: async (req: Parameters<typeof base.request>[0], c: Parameters<typeof base.request>[1]) => {
+            if (req.path.endsWith('/finalize')) throw new Error('backend down')
+            return base.request(req, c)
+          } }
+        : base
+      registerExecuteApiTool(server, makeRegistry({ trafficking: makeResources('trafficking', connector) }), config, silentLogger, metrics, 'client-token', rt, pipeline)
+      const records = () => events.filter(e => e.kind === 'audit').map(e => (e as Extract<AuditEvent, { kind: 'audit' }>).record)
+      return { handler: handlers[TOOL.API_EXECUTE]!, records }
+    }
+    const settle = () => new Promise(r => setTimeout(r, 0))
+
+    it('records the persisted program that ran, not the ignored code a resume carried', async () => {
+      const rt = makeRuntime([FINALIZE_RULE])
+      const { handler, records } = auditedTool(rt, true)
+      const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false }))
+      const { executionId, approvalId } = parseContent(paused) as { executionId: string; approvalId: string }
+      await rt.approvals.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId })
+      // The persisted program runs and fails at the approved finalize (backend down) — the error path.
+      const failed = await handler({ service: 'trafficking', code: 'async () => "I only read the weather"' }, makeCtx({ elicitation: false, executionIdMeta: executionId }))
+      expect(failed['isError']).toBe(true)
+      await settle()
+      const last = records().at(-1)!
+      expect(last.executionId).toBe(executionId)
+      expect(last.codeSubmitted).toBe(PROGRAM_FINALIZE)
+    })
+
+    it('a decline answered on resume is audited, with the code that caller sent', async () => {
+      const rt = makeRuntime([FINALIZE_RULE])
+      const { handler, records } = auditedTool(rt)
+      const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+      await settle()
+      const before = records().length
+      const r = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'decline' }))
+      expect((parseContent(r) as { code: string }).code).toBe(ERR.GOVERNANCE_DENIED)
+      await settle()
+      expect(records()).toHaveLength(before + 1)
+      expect(records().at(-1)).toMatchObject({ outcome: 'governance_denied', errorCode: ERR.GOVERNANCE_DENIED, executionId: (paused['_meta'] as Record<string, string>)[EXECUTION_ID_META_KEY] })
     })
   })
 })
