@@ -286,7 +286,13 @@ journal.
 decisions, history }`. The bearer is validated through that execution's
 service auth strategy, and the authenticated principal must match the execution
 owner for both inspection and HTTP approval decisions — a syntactically valid
-bearer alone is not sufficient. For a terminal execution without `originalCode` under
+bearer alone is not sufficient. A decision also names the execution it targets
+(`ApprovalDecisionInput.executionId`), and `ApprovalService.decide` refuses —
+as `APPROVAL_NOT_FOUND`, before taking the lock — any approval that does not
+belong to it. The decision mutates the approval's *own* execution, so without
+that assertion a caller authorized against one execution could decide an
+approval belonging to another; checking it at the mutation point covers both
+the HTTP and the MCP door. For a terminal execution without `originalCode` under
 the default `DROP`, and `404 EXECUTION_NOT_FOUND` once the retention sweep has
 deleted it. `history` is derived from the records, e.g.
 
@@ -404,7 +410,7 @@ a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
 | 3 | V8 can be destroyed wherever execution is suspended | pause = bridge refusal + isolate disposal; state is in the store |
 | 4 | restarting V8 never repeats completed calls | replay of `COMPLETED` activities |
 | 5 | every external call has exactly one sequence | `ActivityJournal.next` |
-| 6 | approval binds to one activity | `ApprovalRecord.activitySequence` |
+| 6 | approval binds to one activity | `ApprovalRecord.activitySequence`; and to one execution — `decide` asserts `input.executionId` |
 | 7 | multiple approval rounds | repeated `input_required` |
 | 8 | governance before side effect | bridge order: decide → execute |
 | 9 | V8 cannot bypass governance | every call crosses `__makeRequest`; no network in the isolate |
