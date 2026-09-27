@@ -104,6 +104,12 @@ export class OAuthIntrospectionStrategy implements AuthStrategy {
         throw new TokenIntrospectionError(`introspection returned ${response.status}`)
       }
 
+      // RFC 7662 §2.2: `active` is the answer. A server that sends it and
+      // says anything but true has rejected the token (revoked, expired,
+      // unknown), whatever else the response carries.
+      const active = (response.data as Record<string, unknown> | undefined)?.['active']
+      if (active !== undefined && active !== true) throw new TokenInvalidError('introspection says the token is not active')
+
       return this.mapResponse(response.data, rawToken)
     } catch (err) {
       this.rethrowOrWrap(err)
@@ -152,7 +158,10 @@ export class OAuthIntrospectionStrategy implements AuthStrategy {
 
   private rethrowOrWrap(err: unknown): never {
     if (err instanceof AuthError) throw err
-    throw new TokenIntrospectionError(err instanceof Error ? err.message : String(err))
+    // The client sees this message: name the failure (ECONNREFUSED,
+    // ECONNABORTED …), never the auth server's address or the raw error text.
+    const code = (err as { code?: unknown } | null)?.code
+    throw new TokenIntrospectionError(typeof code === 'string' ? code : 'auth server request failed')
   }
 
   private async callAuthService(token: string) {
@@ -200,7 +209,7 @@ export class OAuthIntrospectionStrategy implements AuthStrategy {
       return undefined
     }
 
-    const expiresIn = Number(resolve(this.responseMapping.expires_in, 'expiresIn', 'expires_in'))
+    const expiresIn = lifetimeSeconds(resolve(this.responseMapping.expires_in, 'expiresIn', 'expires_in'), body['exp'])
     if (!Number.isFinite(expiresIn) || expiresIn <= 0) {
       throw new TokenExpiredError('expires_in <= 0 or invalid in auth response')
     }
@@ -240,6 +249,26 @@ export class OAuthIntrospectionStrategy implements AuthStrategy {
     }
   }
 }
+
+/**
+ * Seconds the token has left. A relative `expires_in` (the auth-service
+ * style) is taken as is; RFC 7662's absolute `exp` (epoch seconds) is
+ * converted. A mapped `expires_in` holding an epoch timestamp — e.g.
+ * `responseMapping.expires_in: exp` — would otherwise read as a lifetime of
+ * decades and accept a token that expired long ago, so any value past
+ * EPOCH_SECONDS_FLOOR is read as absolute too.
+ */
+function lifetimeSeconds(relative: unknown, absoluteExp: unknown): number {
+  const now = Math.floor(Date.now() / 1000)
+  if (relative !== undefined) {
+    const n = Number(relative)
+    return n > EPOCH_SECONDS_FLOOR ? n - now : n
+  }
+  return typeof absoluteExp === 'number' ? absoluteExp - now : NaN
+}
+
+/** 2001-09-09 in epoch seconds: no token lifetime is this long, every current `exp` is past it. */
+const EPOCH_SECONDS_FLOOR = 1_000_000_000
 
 function resolveDotPath(obj: Record<string, unknown>, path: string): unknown {
   let current: unknown = obj

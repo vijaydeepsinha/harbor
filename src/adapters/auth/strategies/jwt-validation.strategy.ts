@@ -30,6 +30,13 @@ export interface JwtValidationConfig {
   logger?: Logger
 }
 
+const ACCEPTED_JWT_ALGORITHMS = ['RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512', 'ES256', 'ES384', 'ES512', 'EdDSA']
+
+/** jose error names that mean "this token cannot be verified", as opposed to "the JWKS could not be fetched". */
+const UNVERIFIABLE_TOKEN_ERRORS: ReadonlySet<string> = new Set([
+  'JWKSNoMatchingKey', 'JWKSMultipleMatchingKeys', 'JOSEAlgNotAllowed', 'JOSENotSupported', 'JWTInvalid'
+])
+
 export class JwtValidationStrategy implements AuthStrategy {
   readonly name = AUTH_TYPE.JWT_VALIDATION
   readonly tokenRefreshBufferSec = undefined
@@ -60,6 +67,10 @@ export class JwtValidationStrategy implements AuthStrategy {
         issuer: this.config.issuer,
         audience: this.config.audience,
         clockTolerance: this.config.clockToleranceSec ?? 30,
+        // A token without exp never expires: refuse it rather than grant it an hour on every validation.
+        requiredClaims: ['exp'],
+        // Asymmetric only: the JWKS publishes public keys, so HS* or none can only be a forgery attempt.
+        algorithms: ACCEPTED_JWT_ALGORITHMS,
       })
       return this.mapClaims(payload as Record<string, unknown>, rawToken)
     } catch (err) {
@@ -76,15 +87,19 @@ export class JwtValidationStrategy implements AuthStrategy {
       }
       if (name === 'JWSSignatureVerificationFailed') throw new TokenInvalidError('signature invalid')
       if (name === 'JWSInvalid')                     throw new TokenInvalidError('malformed JWT structure')
+      // Not verifiable with the issuer's keys (unknown kid, alg none / HS* / not allowed, malformed
+      // claims): the token is bad, not the auth server — so not retryable and not "unreachable".
+      if (UNVERIFIABLE_TOKEN_ERRORS.has(name))       throw new TokenInvalidError('token cannot be verified with the issuer keys')
       this.logger?.error({ err }, 'Unexpected JWT validation error')
       throw new TokenIntrospectionError()
     }
   }
 
   private mapClaims(payload: Record<string, unknown>, rawToken: string): TokenPayload {
-    const exp = payload['exp'] as number | undefined
+    const exp = payload['exp']
+    if (typeof exp !== 'number') throw new TokenInvalidError('JWT has no numeric exp claim')
     const now = Math.floor(Date.now() / 1000)
-    const expiresIn = exp !== undefined ? exp - now : 3600
+    const expiresIn = exp - now
 
     if (expiresIn <= 0) throw new TokenExpiredError('JWT already expired at validation time')
 

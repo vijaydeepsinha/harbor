@@ -220,6 +220,26 @@ describe('JwtValidationStrategy', () => {
       await expect(strategy.validate('garbage')).rejects.toBeInstanceOf(TokenInvalidError)
     })
 
+    it('JWT without exp → TokenInvalidError (it would otherwise never expire)', async () => {
+      await expect(strategy.validate(await sign({ sub: 'u' }, { noExp: true }))).rejects.toBeInstanceOf(TokenInvalidError)
+    })
+
+    it('a token the issuer keys cannot verify is invalid, not "auth server unreachable"', async () => {
+      const now = Math.floor(Date.now() / 1000)
+      const unknownKid = await new SignJWT({ sub: 'u' }).setProtectedHeader({ alg: 'RS256', kid: 'not-published' })
+        .setIssuer(ISSUER).setAudience(AUDIENCE).setIssuedAt(now).setExpirationTime(now + 3600).sign(otherPrivateKey)
+      const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+      const claims = b64({ sub: 'u', iss: ISSUER, aud: AUDIENCE, exp: now + 3600 })
+      const algNone = `${b64({ alg: 'none', typ: 'JWT' })}.${claims}.`
+      const hs256 = await new SignJWT({ sub: 'u' }).setProtectedHeader({ alg: 'HS256', kid: 'k1' })
+        .setIssuer(ISSUER).setAudience(AUDIENCE).setIssuedAt(now).setExpirationTime(now + 3600).sign(new TextEncoder().encode('x'.repeat(32)))
+      for (const [label, token] of [['unknown kid', unknownKid], ['alg none', algNone], ['HS256', hs256]] as const) {
+        const err = await strategy.validate(token).catch((e: unknown) => e)
+        expect(err, label).toBeInstanceOf(TokenInvalidError)
+        expect((err as TokenInvalidError).retryable, label).toBe(false)
+      }
+    })
+
     it('JWKS endpoint unreachable → TokenIntrospectionError', async () => {
       const s = new JwtValidationStrategy({
         jwksUri: 'http://127.0.0.1:1/.well-known/jwks.json',
