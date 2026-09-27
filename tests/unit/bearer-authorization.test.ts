@@ -7,12 +7,12 @@ import {
   extractBearerFromHeader,
   extractBearerFromRequest,
   bearerFailureToHttpResponse
-} from '../../spi/auth/bearer-authorization.js'
+} from '../../src/spi/auth/bearer-authorization.js'
 import {
   MissingTokenError,
   TokenInvalidError
-} from '../../core/types/auth.types.js'
-import { ERR, BEARER_CREDENTIAL_MAX_OCTETS } from '../../core/constants.js'
+} from '../../src/core/types/auth.types.js'
+import { ERR, BEARER_CREDENTIAL_MAX_OCTETS } from '../../src/core/constants.js'
 
 describe('extractBearerFromHeader', () => {
   it('returns ok with token on a valid Bearer header', () => {

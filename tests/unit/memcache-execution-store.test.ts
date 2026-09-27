@@ -2,11 +2,11 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect } from 'vitest'
-import { MemcacheCodeModeStore, DEFAULT_MEMCACHE_LOCK_TTL_SEC } from '../../adapters/execution/memcache-execution-store.js'
-import { buildExecutionStore } from '../../wiring/strategy-builders.js'
+import { MemcacheCodeModeStore, DEFAULT_MEMCACHE_LOCK_TTL_SEC } from '../../src/adapters/execution/memcache-execution-store.js'
+import { buildExecutionStore } from '../../src/wiring/strategy-builders.js'
 import { FakeMemcache } from './fake-memcache.js'
-import { EXECUTION_STATUS, ACTIVITY_STATUS } from '../../core/constants.js'
-import type { ExecutionRecord } from '../../core/types/execution.types.js'
+import { EXECUTION_STATUS, ACTIVITY_STATUS } from '../../src/core/constants.js'
+import type { ExecutionRecord } from '../../src/core/types/execution.types.js'
 
 const T0 = Date.parse('2026-01-01T00:00:00.000Z')
 

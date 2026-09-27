@@ -5,13 +5,13 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { generateKeyPair, SignJWT, exportJWK, type KeyLike } from 'jose'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { JwtValidationStrategy, jwtValidation } from '../../adapters/auth/strategies/jwt-validation.strategy.js'
+import { JwtValidationStrategy, jwtValidation } from '../../src/adapters/auth/strategies/jwt-validation.strategy.js'
 import {
   TokenExpiredError,
   TokenInvalidError,
   TokenIntrospectionError
-} from '../../core/types/auth.types.js'
-import { AUTH_TYPE } from '../../core/constants.js'
+} from '../../src/core/types/auth.types.js'
+import { AUTH_TYPE } from '../../src/core/constants.js'
 
 let privateKey: KeyLike
 let otherPrivateKey: KeyLike

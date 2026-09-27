@@ -6,7 +6,7 @@
  * file must refuse to start — a typo can never silently become "no rule".
  *
  * Runs the *real* gateway: the Docker image when the orchestrator provides
- * HARBOR_IMAGE (compose mode), otherwise `node --import tsx index.ts` from
+ * HARBOR_IMAGE (compose mode), otherwise `node --import tsx src/index.ts` from
  * the repository (local mode). Both must exit non-zero and say why.
  */
 import { describe, it, expect } from 'vitest'
@@ -32,7 +32,7 @@ function bootWithInvalidRules(): { status: number | null; output: string } {
   const services = join(env.repoRoot, 'artifacts', 'e2e', 'boot-services')
   mkdirSync(join(env.repoRoot, 'artifacts', 'e2e'), { recursive: true })
   if (!existsSync(services)) materializeServices(SERVICES, services, { host: '127.0.0.1', port: 4010 })
-  const r = spawnSync(process.execPath, ['--import', 'tsx', 'index.ts'], {
+  const r = spawnSync(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: env.repoRoot, encoding: 'utf8', timeout: 120_000,
     env: { ...process.env, GOVERNANCE_RULES_DIR: INVALID_RULES, SERVICES_DIR: services, MCP_PORT: '3999', LOG_LEVEL: 'error', EXECUTION_STORE_TYPE: 'in-memory' }
   })

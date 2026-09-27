@@ -6,14 +6,14 @@ import {
   makeConnector, makeResources, makeRuntime, registerGoverned, makeCtx, retryCtx, parseContent,
   makeFakeServer, makeRegistry, globalConfig, silentLogger
 } from './code-mode-harness.js'
-import { registerExecuteApiTool } from '../../tools/execute-api.tool.js'
-import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
-import { MemcacheCodeModeStore } from '../../adapters/execution/memcache-execution-store.js'
+import { registerExecuteApiTool } from '../../src/tools/execute-api.tool.js'
+import type { MetricsRegistry } from '../../src/runtime/observability/metrics.js'
+import { MemcacheCodeModeStore } from '../../src/adapters/execution/memcache-execution-store.js'
 import { FakeMemcache } from './fake-memcache.js'
 import {
   ERR, EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS, GOVERNANCE_DECISION, GOVERNANCE_REASON, TOOL,
   EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY, APPROVAL_ID_META_KEY, APPROVAL_INPUT_KEY
-} from '../../core/constants.js'
+} from '../../src/core/constants.js'
 
 const APPROVAL_RULE = {
   name: 'activate-needs-approval', match: { service: 'trafficking', operation: 'activateCampaign' },

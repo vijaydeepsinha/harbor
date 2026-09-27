@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect } from 'vitest'
-import { safeHeaderValue } from '../../core/utils/header-value.js'
+import { safeHeaderValue } from '../../src/core/utils/header-value.js'
 
 describe('safeHeaderValue', () => {
   it.each(['HARBOR_GATEWAY', 'agent-7', 'a', 'harbor eu 1', 'x'.repeat(128)])('accepts %s', v => {

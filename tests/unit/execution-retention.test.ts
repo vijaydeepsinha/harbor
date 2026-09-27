@@ -3,12 +3,12 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import pino from 'pino'
-import { ExecutionRetentionSweeper } from '../../runtime/execution/execution-retention.js'
-import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
-import { buildCodeModeRuntime } from '../../runtime/execution/code-mode-runtime.js'
-import type { CodeModeStore } from '../../spi/execution/execution-store.js'
-import type { Logger } from '../../core/types/logger.types.js'
-import { EXECUTION_STATUS, GOVERNANCE_DECISION } from '../../core/constants.js'
+import { ExecutionRetentionSweeper } from '../../src/runtime/execution/execution-retention.js'
+import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { buildCodeModeRuntime } from '../../src/runtime/execution/code-mode-runtime.js'
+import type { CodeModeStore } from '../../src/spi/execution/execution-store.js'
+import type { Logger } from '../../src/core/types/logger.types.js'
+import { EXECUTION_STATUS, GOVERNANCE_DECISION } from '../../src/core/constants.js'
 
 const silent = pino({ level: 'silent' }) as unknown as Logger
 const NOW = '2026-06-01T00:00:00.000Z'

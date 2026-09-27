@@ -3,10 +3,10 @@
 
 import { describe, it, expect } from 'vitest'
 import pino from 'pino'
-import { buildCodeModeRuntime } from '../../runtime/execution/code-mode-runtime.js'
-import type { CodeModeConfig } from '../../core/types/config.types.js'
-import type { Logger } from '../../core/types/logger.types.js'
-import { GOVERNANCE_DECISION, EXECUTION_CODE_RETENTION } from '../../core/constants.js'
+import { buildCodeModeRuntime } from '../../src/runtime/execution/code-mode-runtime.js'
+import type { CodeModeConfig } from '../../src/core/types/config.types.js'
+import type { Logger } from '../../src/core/types/logger.types.js'
+import { GOVERNANCE_DECISION, EXECUTION_CODE_RETENTION } from '../../src/core/constants.js'
 
 const silent = pino({ level: 'silent' }) as unknown as Logger
 const config = (retention?: CodeModeConfig['retention']): CodeModeConfig => ({

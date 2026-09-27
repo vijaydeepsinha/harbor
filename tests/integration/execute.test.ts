@@ -3,14 +3,14 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import axios from 'axios'
-import { ApiClient, type ExecuteRequestContext } from '../../runtime/api-client/api-client.js'
-import { CountBasedCircuitBreakerStrategy } from '../../adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
-import { InMemoryIdempotencyStrategy } from '../../adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
-import { runApiInSandbox, type SandboxExecutionContext } from '../../runtime/sandbox/execute-api-in-sandbox.js'
-import { AuditCollector } from '../../runtime/observability/audit.js'
-import { CallLog } from '../../runtime/execution/activity-journal.js'
-import { forwardTokenPermissionGuard } from '../../spi/permissions/strategies/forward-token-permission-guard.strategy.js'
-import type { TokenPayload } from '../../core/types/auth.types.js'
+import { ApiClient, type ExecuteRequestContext } from '../../src/runtime/api-client/api-client.js'
+import { CountBasedCircuitBreakerStrategy } from '../../src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
+import { InMemoryIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
+import { runApiInSandbox, type SandboxExecutionContext } from '../../src/runtime/sandbox/execute-api-in-sandbox.js'
+import { AuditCollector } from '../../src/runtime/observability/audit.js'
+import { CallLog } from '../../src/runtime/execution/activity-journal.js'
+import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import type { TokenPayload } from '../../src/core/types/auth.types.js'
 import pino from 'pino'
 
 vi.mock('axios')

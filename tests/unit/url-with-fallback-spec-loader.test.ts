@@ -2,22 +2,22 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { SpecLoaderStrategy, OpenAPISpec } from '../../core/types/spec.types.js'
-import { SpecLoadError } from '../../core/types/spec.types.js'
+import type { SpecLoaderStrategy, OpenAPISpec } from '../../src/core/types/spec.types.js'
+import { SpecLoadError } from '../../src/core/types/spec.types.js'
 
 const urlLoadMock = vi.fn<[], Promise<OpenAPISpec>>()
 const fileLoadMock = vi.fn<[], Promise<OpenAPISpec>>()
 
-vi.mock('../../spi/spec/strategies/url-spec-loader.strategy.js', () => ({
+vi.mock('../../src/spi/spec/strategies/url-spec-loader.strategy.js', () => ({
   urlSpec: (): SpecLoaderStrategy => ({ name: 'url-spec-loader', load: urlLoadMock })
 }))
 
-vi.mock('../../spi/spec/strategies/file-spec-loader.strategy.js', () => ({
+vi.mock('../../src/spi/spec/strategies/file-spec-loader.strategy.js', () => ({
   fileSpec: (): SpecLoaderStrategy => ({ name: 'file-spec-loader', load: fileLoadMock })
 }))
 
 const { UrlWithFallbackSpecLoaderStrategy, urlWithFallback } =
-  await import('../../spi/spec/strategies/url-with-fallback-spec-loader.strategy.js')
+  await import('../../src/spi/spec/strategies/url-with-fallback-spec-loader.strategy.js')
 
 function spec(): OpenAPISpec {
   return {

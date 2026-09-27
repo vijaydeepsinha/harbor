@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect } from 'vitest'
-import { HttpError } from '../../runtime/http/http-error.js'
+import { HttpError } from '../../src/runtime/http/http-error.js'
 
 describe('HttpError', () => {
   it('carries status, code, message, body, and logContext verbatim', () => {

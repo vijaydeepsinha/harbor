@@ -5,8 +5,8 @@ import { describe, it, expect } from 'vitest'
 import {
   StaticTokenAuthStrategy,
   staticToken
-} from '../../adapters/auth/strategies/static-token.strategy.js'
-import { AUTH_TYPE } from '../../core/constants.js'
+} from '../../src/adapters/auth/strategies/static-token.strategy.js'
+import { AUTH_TYPE } from '../../src/core/constants.js'
 
 describe('StaticTokenAuthStrategy', () => {
   it('advertises the static-token strategy name', () => {

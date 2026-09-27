@@ -15,10 +15,10 @@ import {
   validateAuth,
   runSandboxTool,
   type ToolResponse
-} from '../../tools/tool-helpers.js'
-import type { ServiceRegistry, ServiceResources } from '../../runtime/registry/service-registry.js'
-import { MissingTokenError, SessionExpiredError, type TokenPayload } from '../../core/types/auth.types.js'
-import { ERR, METRIC, OUTCOME, GATEWAY_NAME, GATEWAY_VERSION, SERVER_INFO_META_KEY } from '../../core/constants.js'
+} from '../../src/tools/tool-helpers.js'
+import type { ServiceRegistry, ServiceResources } from '../../src/runtime/registry/service-registry.js'
+import { MissingTokenError, SessionExpiredError, type TokenPayload } from '../../src/core/types/auth.types.js'
+import { ERR, METRIC, OUTCOME, GATEWAY_NAME, GATEWAY_VERSION, SERVER_INFO_META_KEY } from '../../src/core/constants.js'
 
 const silentLogger = pino({ level: 'silent' })
 

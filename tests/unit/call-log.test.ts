@@ -2,11 +2,11 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect } from 'vitest'
-import { ActivityJournal, CallLog } from '../../runtime/execution/activity-journal.js'
-import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
-import { AuditCollector } from '../../runtime/observability/audit.js'
-import { ProgressCollector } from '../../runtime/observability/progress.js'
-import { ACTIVITY_STATUS } from '../../core/constants.js'
+import { ActivityJournal, CallLog } from '../../src/runtime/execution/activity-journal.js'
+import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { AuditCollector } from '../../src/runtime/observability/audit.js'
+import { ProgressCollector } from '../../src/runtime/observability/progress.js'
+import { ACTIVITY_STATUS } from '../../src/core/constants.js'
 
 const LIST = { method: 'GET', endpoint: '/campaigns' } as const
 const CREATE = { method: 'POST', endpoint: '/campaigns' } as const

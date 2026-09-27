@@ -3,16 +3,16 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import axios from 'axios'
-import { AuthMiddleware } from '../../spi/auth/auth-middleware.js'
-import { OAuthIntrospectionStrategy } from '../../adapters/auth/strategies/oauth-introspection.strategy.js'
-import { InMemoryTokenCache } from '../../adapters/auth/strategies/in-memory-token-cache.strategy.js'
-import { CouchbaseTokenCache } from '../../adapters/auth/strategies/couchbase-token-cache.strategy.js'
-import type { TokenPayload, AuthStrategy } from '../../core/types/auth.types.js'
+import { AuthMiddleware } from '../../src/spi/auth/auth-middleware.js'
+import { OAuthIntrospectionStrategy } from '../../src/adapters/auth/strategies/oauth-introspection.strategy.js'
+import { InMemoryTokenCache } from '../../src/adapters/auth/strategies/in-memory-token-cache.strategy.js'
+import { CouchbaseTokenCache } from '../../src/adapters/auth/strategies/couchbase-token-cache.strategy.js'
+import type { TokenPayload, AuthStrategy } from '../../src/core/types/auth.types.js'
 import {
   TokenExpiredError,
   SessionExpiredError,
   TokenIntrospectionError
-} from '../../core/types/auth.types.js'
+} from '../../src/core/types/auth.types.js'
 
 vi.mock('axios')
 
@@ -730,7 +730,7 @@ const cbMocks = {
   deleteDoc: vi.fn()
 }
 
-vi.mock('../../adapters/infra/couchbase-client.js', () => ({
+vi.mock('../../src/adapters/infra/couchbase-client.js', () => ({
   CouchbaseRestClient: vi.fn().mockImplementation(() => cbMocks)
 }))
 

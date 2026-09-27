@@ -11,11 +11,11 @@
  */
 import { describe, it, expect } from 'vitest'
 import { createMcpHandler } from '@modelcontextprotocol/server'
-import { buildMcpServerFactory } from '../../runtime/http/mcp-server-factory.js'
-import { ServiceRegistry } from '../../runtime/registry/service-registry.js'
-import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
+import { buildMcpServerFactory } from '../../src/runtime/http/mcp-server-factory.js'
+import { ServiceRegistry } from '../../src/runtime/registry/service-registry.js'
+import type { MetricsRegistry } from '../../src/runtime/observability/metrics.js'
 import { makeConnector, makeResources, makeRuntime, globalConfig, silentLogger } from '../unit/code-mode-harness.js'
-import { EXECUTION_ID_META_KEY, APPROVAL_INPUT_KEY, ERR, EXECUTION_STATUS } from '../../core/constants.js'
+import { EXECUTION_ID_META_KEY, APPROVAL_INPUT_KEY, ERR, EXECUTION_STATUS } from '../../src/core/constants.js'
 
 const PROGRAM = `async () => {
   const c = await api.request({ method: 'GET', path: '/campaigns' })

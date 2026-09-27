@@ -2,8 +2,8 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, vi } from 'vitest'
-import { runSpecSearchInSandbox } from '../../runtime/sandbox/spec-search-in-sandbox.js'
-import { runApiInSandbox } from '../../runtime/sandbox/execute-api-in-sandbox.js'
+import { runSpecSearchInSandbox } from '../../src/runtime/sandbox/spec-search-in-sandbox.js'
+import { runApiInSandbox } from '../../src/runtime/sandbox/execute-api-in-sandbox.js'
 import {
   SandboxSyntaxError,
   SandboxTimeoutError,
@@ -11,13 +11,13 @@ import {
   SandboxCallLimitError,
   SandboxConcurrentLimitError,
   type InvalidApiRequestReason
-} from '../../core/types/sandbox-error.types.js'
-import type { SandboxLimits } from '../../core/types/config.types.js'
-import type { TokenPayload } from '../../core/types/auth.types.js'
-import type { ApiClient } from '../../runtime/api-client/api-client.js'
-import type { CircuitBreakerStrategy } from '../../core/types/circuit-breaker.types.js'
-import type { SandboxExecutionContext } from '../../runtime/sandbox/execute-api-in-sandbox.js'
-import { forwardTokenPermissionGuard } from '../../spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+} from '../../src/core/types/sandbox-error.types.js'
+import type { SandboxLimits } from '../../src/core/types/config.types.js'
+import type { TokenPayload } from '../../src/core/types/auth.types.js'
+import type { ApiClient } from '../../src/runtime/api-client/api-client.js'
+import type { CircuitBreakerStrategy } from '../../src/core/types/circuit-breaker.types.js'
+import type { SandboxExecutionContext } from '../../src/runtime/sandbox/execute-api-in-sandbox.js'
+import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
 
 const testSandboxLimits: SandboxLimits = {
   memoryLimitMb: 64,
@@ -291,7 +291,7 @@ describe('execute sandbox', () => {
 
 describe('execute sandbox — permissionGuard enforcement', () => {
   it('denied canExecute surfaces PermissionDeniedError even if user code swallows the bridge error', async () => {
-    const { PermissionDeniedError } = await import('../../core/types/permission.types.js')
+    const { PermissionDeniedError } = await import('../../src/core/types/permission.types.js')
     const mockApiClient = {
       request: vi.fn().mockResolvedValue({ data: {}, status: 200, ok: true })
     } as unknown as ApiClient
@@ -375,11 +375,11 @@ describe('execute sandbox — error sanitization', () => {
   // Re-imports runner + error module together so `instanceof` uses matching class identity.
   async function loadRunnerWithFailure(err: unknown) {
     vi.resetModules()
-    vi.doMock('../../runtime/sandbox/sandbox-core.js', () => ({
+    vi.doMock('../../src/runtime/sandbox/sandbox-core.js', () => ({
       runInSandbox: vi.fn().mockRejectedValue(err)
     }))
-    const runnerMod = await import('../../runtime/sandbox/execute-api-in-sandbox.js')
-    const errorsMod = await import('../../core/types/sandbox-error.types.js')
+    const runnerMod = await import('../../src/runtime/sandbox/execute-api-in-sandbox.js')
+    const errorsMod = await import('../../src/core/types/sandbox-error.types.js')
     return { runner: runnerMod.runApiInSandbox, errors: errorsMod }
   }
 
@@ -402,19 +402,19 @@ describe('execute sandbox — error sanitization', () => {
     expect(err.message).toContain('internal error')
     expect(err.cause).toBe(rawInternalError)
 
-    vi.doUnmock('../../runtime/sandbox/sandbox-core.js')
+    vi.doUnmock('../../src/runtime/sandbox/sandbox-core.js')
     vi.resetModules()
   })
 
   it('passes typed SandboxError subclasses through unchanged (no double-wrap)', async () => {
     vi.resetModules()
-    const errors = await import('../../core/types/sandbox-error.types.js')
+    const errors = await import('../../src/core/types/sandbox-error.types.js')
     const typedError = new errors.SandboxRuntimeError('user code returned null.foo')
 
-    vi.doMock('../../runtime/sandbox/sandbox-core.js', () => ({
+    vi.doMock('../../src/runtime/sandbox/sandbox-core.js', () => ({
       runInSandbox: vi.fn().mockRejectedValue(typedError)
     }))
-    const { runApiInSandbox: runner } = await import('../../runtime/sandbox/execute-api-in-sandbox.js')
+    const { runApiInSandbox: runner } = await import('../../src/runtime/sandbox/execute-api-in-sandbox.js')
 
     let thrown: unknown
     try {
@@ -426,7 +426,7 @@ describe('execute sandbox — error sanitization', () => {
     expect(thrown).toBe(typedError)
     expect(thrown).not.toBeInstanceOf(errors.SandboxExecutionError)
 
-    vi.doUnmock('../../runtime/sandbox/sandbox-core.js')
+    vi.doUnmock('../../src/runtime/sandbox/sandbox-core.js')
     vi.resetModules()
   })
 })

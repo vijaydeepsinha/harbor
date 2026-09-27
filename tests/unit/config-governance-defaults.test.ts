@@ -2,8 +2,8 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { validateGlobalConfig } from '../../core/config/config.js'
-import { GOVERNANCE_DECISION } from '../../core/constants.js'
+import { validateGlobalConfig } from '../../src/core/config/config.js'
+import { GOVERNANCE_DECISION } from '../../src/core/constants.js'
 
 describe('governance configuration defaults', () => {
   const KEYS = ['GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',

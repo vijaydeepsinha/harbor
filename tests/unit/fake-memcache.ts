@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { MemcacheKv } from '../../adapters/execution/memcache-execution-store.js'
+import type { MemcacheKv } from '../../src/adapters/execution/memcache-execution-store.js'
 
 /**
  * An in-memory memcache with the semantics the memcache execution store relies

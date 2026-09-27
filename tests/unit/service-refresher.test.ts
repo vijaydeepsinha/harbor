@@ -2,11 +2,11 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { ServiceRefresher } from '../../runtime/spec/service-refresher.js'
-import { SpecStore } from '../../runtime/spec/spec-store.js'
-import { SkillStore } from '../../runtime/registry/skill-store.js'
-import type { SpecLoaderStrategy, OpenAPISpec } from '../../core/types/spec.types.js'
-import { SpecLoadError } from '../../core/types/spec.types.js'
+import { ServiceRefresher } from '../../src/runtime/spec/service-refresher.js'
+import { SpecStore } from '../../src/runtime/spec/spec-store.js'
+import { SkillStore } from '../../src/runtime/registry/skill-store.js'
+import type { SpecLoaderStrategy, OpenAPISpec } from '../../src/core/types/spec.types.js'
+import { SpecLoadError } from '../../src/core/types/spec.types.js'
 import pino from 'pino'
 
 const silentLogger = pino({ level: 'silent' })

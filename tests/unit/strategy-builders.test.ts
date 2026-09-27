@@ -8,11 +8,11 @@ import {
   buildSpecLoader,
   registerTokenCacheBackend,
   registerIdempotencyBackend
-} from '../../wiring/strategy-builders.js'
-import { STORE_TYPE } from '../../core/constants.js'
-import { InMemoryTokenCache } from '../../adapters/auth/strategies/in-memory-token-cache.strategy.js'
-import { InMemoryIdempotencyStrategy } from '../../adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
-import { NoopIdempotencyStrategy } from '../../spi/idempotency/strategies/noop-idempotency.strategy.js'
+} from '../../src/wiring/strategy-builders.js'
+import { STORE_TYPE } from '../../src/core/constants.js'
+import { InMemoryTokenCache } from '../../src/adapters/auth/strategies/in-memory-token-cache.strategy.js'
+import { InMemoryIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
+import { NoopIdempotencyStrategy } from '../../src/spi/idempotency/strategies/noop-idempotency.strategy.js'
 
 vi.mock('memjs', () => ({
   default: { Client: { create: vi.fn(() => ({ get: vi.fn(), set: vi.fn() })) } }

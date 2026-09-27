@@ -66,7 +66,7 @@ export const WIRE = {
   TOOLS: ['discover_services', 'discover_skills', 'get_skill_details', 'search_code', 'api_execute'] as const
 } as const
 
-/** Error codes the gateway returns inside `isError` tool results (`core/constants.ts ERR`). */
+/** Error codes the gateway returns inside `isError` tool results (`src/core/constants.ts ERR`). */
 export const ERR = {
   UNKNOWN_SERVICE: 'UNKNOWN_SERVICE',
   API_ERROR: 'API_ERROR',

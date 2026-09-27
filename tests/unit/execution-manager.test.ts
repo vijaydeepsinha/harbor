@@ -2,13 +2,13 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ExecutionManager, buildHistory } from '../../runtime/execution/execution-manager.js'
-import { InMemoryCodeModeStore } from '../../adapters/execution/in-memory-execution-store.js'
-import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, GOVERNANCE_DECISION, ERR, EXECUTION_CODE_RETENTION } from '../../core/constants.js'
+import { ExecutionManager, buildHistory } from '../../src/runtime/execution/execution-manager.js'
+import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, GOVERNANCE_DECISION, ERR, EXECUTION_CODE_RETENTION } from '../../src/core/constants.js'
 import {
   ExecutionNotFoundError, ExecutionLockedError, ExecutionNotResumableError,
   ApprovalPendingError, ApprovalRequiredError
-} from '../../core/types/execution.types.js'
+} from '../../src/core/types/execution.types.js'
 
 let tick = 0
 const clock = () => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++)).toISOString()

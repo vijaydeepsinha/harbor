@@ -2,11 +2,11 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, vi } from 'vitest'
-import { runSpecSearchInSandbox } from '../../runtime/sandbox/spec-search-in-sandbox.js'
-import { SpecStore } from '../../runtime/spec/spec-store.js'
-import { forwardTokenPermissionGuard } from '../../spi/permissions/strategies/forward-token-permission-guard.strategy.js'
-import type { SandboxLimits } from '../../core/types/config.types.js'
-import type { TokenPayload } from '../../core/types/auth.types.js'
+import { runSpecSearchInSandbox } from '../../src/runtime/sandbox/spec-search-in-sandbox.js'
+import { SpecStore } from '../../src/runtime/spec/spec-store.js'
+import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import type { SandboxLimits } from '../../src/core/types/config.types.js'
+import type { TokenPayload } from '../../src/core/types/auth.types.js'
 import sampleSpec from '../fixtures/sample-spec.json' assert { type: 'json' }
 
 const testLimits: SandboxLimits = {

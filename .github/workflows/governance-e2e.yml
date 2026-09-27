@@ -7,14 +7,8 @@ name: Governance E2E
 on:
   push:
     paths:
-      - 'core/**'
-      - 'runtime/**'
-      - 'tools/**'
-      - 'spi/**'
-      - 'adapters/**'
-      - 'wiring/**'
+      - 'src/**'
       - 'governance/**'
-      - 'index.ts'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
@@ -29,14 +23,8 @@ on:
       - '.github/workflows/governance-e2e.yml'
   pull_request:
     paths:
-      - 'core/**'
-      - 'runtime/**'
-      - 'tools/**'
-      - 'spi/**'
-      - 'adapters/**'
-      - 'wiring/**'
+      - 'src/**'
       - 'governance/**'
-      - 'index.ts'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'

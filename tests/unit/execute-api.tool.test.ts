@@ -7,37 +7,37 @@ import pino from 'pino'
 import { type ZodObject } from 'zod'
 import { makeServerCtx } from './mcp-test-context.js'
 
-vi.mock('../../runtime/sandbox/execute-api-in-sandbox.js', () => ({
+vi.mock('../../src/runtime/sandbox/execute-api-in-sandbox.js', () => ({
   runApiInSandbox: vi.fn()
 }))
 
-vi.mock('../../runtime/observability/audit.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../runtime/observability/audit.js')>()
+vi.mock('../../src/runtime/observability/audit.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/runtime/observability/audit.js')>()
   return {
     ...actual,
     writeAuditRecord: vi.fn()
   }
 })
 
-import { runApiInSandbox } from '../../runtime/sandbox/execute-api-in-sandbox.js'
-import { writeAuditRecord } from '../../runtime/observability/audit.js'
-import { CallLog } from '../../runtime/execution/activity-journal.js'
-import { registerExecuteApiTool } from '../../tools/execute-api.tool.js'
-import { TOOL, METRIC, OUTCOME, ERR, ENV } from '../../core/constants.js'
-import type { ServiceRegistry, ServiceResources } from '../../runtime/registry/service-registry.js'
+import { runApiInSandbox } from '../../src/runtime/sandbox/execute-api-in-sandbox.js'
+import { writeAuditRecord } from '../../src/runtime/observability/audit.js'
+import { CallLog } from '../../src/runtime/execution/activity-journal.js'
+import { registerExecuteApiTool } from '../../src/tools/execute-api.tool.js'
+import { TOOL, METRIC, OUTCOME, ERR, ENV } from '../../src/core/constants.js'
+import type { ServiceRegistry, ServiceResources } from '../../src/runtime/registry/service-registry.js'
 import type { McpServer } from '@modelcontextprotocol/server'
-import type { MetricsRegistry } from '../../runtime/observability/metrics.js'
-import type { GlobalConfig } from '../../core/types/config.types.js'
-import type { TokenPayload } from '../../core/types/auth.types.js'
-import { SessionExpiredError, MissingTokenError } from '../../core/types/auth.types.js'
-import { PermissionDeniedError } from '../../core/types/permission.types.js'
-import { CircuitOpenError } from '../../core/types/circuit-breaker.types.js'
+import type { MetricsRegistry } from '../../src/runtime/observability/metrics.js'
+import type { GlobalConfig } from '../../src/core/types/config.types.js'
+import type { TokenPayload } from '../../src/core/types/auth.types.js'
+import { SessionExpiredError, MissingTokenError } from '../../src/core/types/auth.types.js'
+import { PermissionDeniedError } from '../../src/core/types/permission.types.js'
+import { CircuitOpenError } from '../../src/core/types/circuit-breaker.types.js'
 import {
   SandboxCallLimitError,
   SandboxConcurrentLimitError,
   SandboxExecutionError,
   SandboxRuntimeError
-} from '../../core/types/sandbox-error.types.js'
+} from '../../src/core/types/sandbox-error.types.js'
 
 const silentLogger = pino({ level: 'silent' })
 

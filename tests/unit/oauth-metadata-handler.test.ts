@@ -3,11 +3,11 @@
 
 import { describe, it, expect, afterEach } from 'vitest'
 import type { AddressInfo } from 'node:net'
-import { startHttpGateway, type HttpGatewayHandle } from '../../runtime/http/http-gateway.js'
-import { ServiceRegistry } from '../../runtime/registry/service-registry.js'
-import type { Logger } from '../../runtime/observability/logger.js'
-import type { OAuthResourceConfig } from '../../core/types/oauth.types.js'
-import { HTTP_ROUTES } from '../../core/constants.js'
+import { startHttpGateway, type HttpGatewayHandle } from '../../src/runtime/http/http-gateway.js'
+import { ServiceRegistry } from '../../src/runtime/registry/service-registry.js'
+import type { Logger } from '../../src/runtime/observability/logger.js'
+import type { OAuthResourceConfig } from '../../src/core/types/oauth.types.js'
+import { HTTP_ROUTES } from '../../src/core/constants.js'
 
 function makeLogger(): Logger {
   const noop = () => {}

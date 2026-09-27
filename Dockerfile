@@ -14,13 +14,8 @@ RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 RUN npm ci
 
-COPY tsconfig.json index.ts ./
-COPY core/       ./core/
-COPY runtime/    ./runtime/
-COPY tools/      ./tools/
-COPY wiring/     ./wiring/
-COPY spi/        ./spi/
-COPY adapters/   ./adapters/
+COPY tsconfig.json ./
+COPY src/        ./src/
 
 RUN npm run build && npm prune --omit=dev
 
@@ -52,8 +47,8 @@ COPY --chown=harbor:harbor services/ ./services/
 
 USER harbor
 
-# dist/index.js resolves services relative to __dirname (/app/dist/) by default.
-# SERVICES_DIR overrides that to the correct location inside the container.
+# dist/index.js defaults to ../services (/app/services); SERVICES_DIR pins it
+# explicitly so a mounted directory elsewhere only needs this variable changed.
 # MCP_HOST must be 0.0.0.0 — 127.0.0.1 is unreachable from outside the container.
 ENV MCP_HOST=0.0.0.0 \
     MCP_PORT=3333 \

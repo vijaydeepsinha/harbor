@@ -3,8 +3,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { McpRequestContext } from '@modelcontextprotocol/server'
-import type { GlobalConfig } from '../../core/types/config.types.js'
-import type { Logger } from '../../runtime/observability/logger.js'
+import type { GlobalConfig } from '../../src/core/types/config.types.js'
+import type { Logger } from '../../src/runtime/observability/logger.js'
 
 const {
   registerDiscoverServicesToolMock,
@@ -20,24 +20,24 @@ const {
   registerExecuteApiToolMock: vi.fn()
 }))
 
-vi.mock('../../tools/discover-services.tool.js', () => ({
+vi.mock('../../src/tools/discover-services.tool.js', () => ({
   registerDiscoverServicesTool: registerDiscoverServicesToolMock
 }))
-vi.mock('../../tools/discover-skills.tool.js', () => ({
+vi.mock('../../src/tools/discover-skills.tool.js', () => ({
   registerDiscoverSkillsTool: registerDiscoverSkillsToolMock
 }))
-vi.mock('../../tools/get-skill-details.tool.js', () => ({
+vi.mock('../../src/tools/get-skill-details.tool.js', () => ({
   registerGetSkillDetailsTool: registerGetSkillDetailsToolMock
 }))
-vi.mock('../../tools/search-code.tool.js', () => ({
+vi.mock('../../src/tools/search-code.tool.js', () => ({
   registerSearchCodeTool: registerSearchCodeToolMock
 }))
-vi.mock('../../tools/execute-api.tool.js', () => ({
+vi.mock('../../src/tools/execute-api.tool.js', () => ({
   registerExecuteApiTool: registerExecuteApiToolMock
 }))
 
-import { buildMcpServerOptions, buildMcpServerFactory } from '../../runtime/http/mcp-server-factory.js'
-import { ServiceRegistry } from '../../runtime/registry/service-registry.js'
+import { buildMcpServerOptions, buildMcpServerFactory } from '../../src/runtime/http/mcp-server-factory.js'
+import { ServiceRegistry } from '../../src/runtime/registry/service-registry.js'
 
 function makeLogger(): Logger {
   const noop = () => {}
