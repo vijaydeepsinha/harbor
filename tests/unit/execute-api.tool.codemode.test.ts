@@ -348,6 +348,11 @@ describe('api_execute under the Code Mode governance layer', () => {
       const accepted = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'accept' }))
       expect(accepted['isError']).toBeUndefined()
       expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
+
+      // Once finished, a late conflicting answer is refused as not resumable, and changes nothing.
+      const late = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'decline' }))
+      expect((parseContent(late) as { code: string }).code).toBe(ERR.EXECUTION_NOT_RESUMABLE)
+      expect((await rt.manager.load(meta[EXECUTION_ID_META_KEY]!)).status).toBe(EXECUTION_STATUS.COMPLETED)
     })
 
     it('a refused resume reports the stored status in _meta, not the status of a run that never started', async () => {

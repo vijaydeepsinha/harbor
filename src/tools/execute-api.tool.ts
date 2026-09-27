@@ -411,6 +411,10 @@ async () => {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  EXECUTION_STATUS.COMPLETED, EXECUTION_STATUS.FAILED, EXECUTION_STATUS.DENIED, EXECUTION_STATUS.CANCELLED
+])
+
 /** Loose view of the handler context fields the governance layer reads (all untrusted, all optional). */
 interface ResumeContextView {
   mcpReq?: {
@@ -517,7 +521,8 @@ async function resolveExecution(
         const asked = answer.action === 'cancel' ? APPROVAL_STATUS.CANCELLED
           : answer.action === 'decline' || answer.content?.['approve'] === false ? APPROVAL_STATUS.REJECTED
           : APPROVAL_STATUS.APPROVED
-        if (recorded !== asked) {
+        // Only while the execution could still run: a finished one is refused below as not resumable.
+        if (recorded !== asked && !TERMINAL_STATUSES.has(execution.status)) {
           return { error: mcpError(
             `${err.message}; this answer (${asked}) was not applied and nothing was executed.`,
             ERR.APPROVAL_ALREADY_DECIDED, false, { executionId: resumeId, approvalId: state.approvalId },
