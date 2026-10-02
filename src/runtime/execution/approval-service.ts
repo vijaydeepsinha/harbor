@@ -14,7 +14,7 @@ import {
   ApprovalStaleError,
   ExecutionLockedError
 } from '../../core/types/execution.types.js'
-import { APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR, GOVERNANCE_REASON, type ApprovalStatus } from '../../core/constants.js'
+import { APPROVAL_STATUS, APPROVAL_ANSWER_WORDS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR, GOVERNANCE_REASON, type ApprovalStatus } from '../../core/constants.js'
 
 /** The three outcomes MCP elicitation distinguishes (§24), plus the form content. */
 const TERMINAL_EXECUTION_STATUSES: ReadonlySet<string> = new Set([
@@ -23,7 +23,10 @@ const TERMINAL_EXECUTION_STATUSES: ReadonlySet<string> = new Set([
 
 export interface ApprovalDecisionInput {
   action: 'accept' | 'decline' | 'cancel'
-  /** Form field: `accept` approves only with `approve: true`; `approve: false` rejects; anything else is refused. */
+  /**
+   * Form field, already read with {@link readApprovalAnswer}: `accept` approves only with `true`,
+   * rejects with `false`; absent (no answer, or one that is not recognised) is refused.
+   */
   approve?: boolean
   comment?: string
   via: 'mcp-elicitation' | 'http'
@@ -196,10 +199,30 @@ export class ApprovalService {
   }
 }
 
+const APPROVE_WORDS: ReadonlySet<string> = new Set(APPROVAL_ANSWER_WORDS.APPROVE)
+const REJECT_WORDS: ReadonlySet<string> = new Set(APPROVAL_ANSWER_WORDS.REJECT)
+
+/**
+ * Reads the `approve` answer as it arrives from a client: a boolean, or one
+ * of the words in `APPROVAL_ANSWER_WORDS` ("yes", "approved", "no", …).
+ * `undefined` means "not an answer" — numbers, null, the strings "true" and
+ * "false", and any other text. Both approval channels (MCP elicitation and
+ * HTTP) read the field through this one function, so they cannot disagree
+ * about what counts as a yes.
+ */
+export function readApprovalAnswer(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  if (typeof value !== 'string') return undefined
+  const word = value.trim().toLowerCase()
+  if (APPROVE_WORDS.has(word)) return true
+  if (REJECT_WORDS.has(word)) return false
+  return undefined
+}
+
 /**
  * `accept` is a form submission, not a decision: its `approve` field is.
- * Only `approve: true` approves; a missing or non-boolean value is refused
- * rather than read as a yes (the form declares the field required).
+ * Only an affirmative answer approves; a missing or unrecognised value is
+ * refused rather than read as a yes (the form declares the field required).
  */
 function mapDecision(approvalId: string, input: ApprovalDecisionInput): ApprovalDecisionResult['outcome'] {
   switch (input.action) {

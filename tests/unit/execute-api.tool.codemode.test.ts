@@ -119,6 +119,28 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
   })
 
+  it('an elicitation answer in words: "yes" resumes and executes once, "no" denies, an unlisted word is refused and stays pending', async () => {
+    for (const [approve, expected] of [['yes', 'approved'], ['Proceed', 'approved'], ['no', 'denied'], ['ok then', 'refused']] as const) {
+      const governanceRuntime = makeRuntime([FINALIZE_RULE])
+      const { connector, count } = makeConnector()
+      const handler = registerGoverned(governanceRuntime, makeResources('trafficking', connector))
+      const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+      const meta = paused['_meta'] as Record<string, string>
+      const r = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(governanceRuntime, paused, { action: 'accept', approve }))
+      const approval = await governanceRuntime.approvals.get(meta[APPROVAL_ID_META_KEY]!)
+      if (expected === 'approved') {
+        expect(r['isError'], `approve=${approve}`).toBeUndefined()
+        expect(approval.status).toBe(APPROVAL_STATUS.APPROVED)
+        expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
+      } else {
+        expect((parseContent(r) as { code: string }).code, `approve=${approve}`)
+          .toBe(expected === 'denied' ? ERR.GOVERNANCE_DENIED : ERR.INVALID_API_REQUEST)
+        expect(approval.status).toBe(expected === 'denied' ? APPROVAL_STATUS.REJECTED : APPROVAL_STATUS.PENDING)
+        expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
+      }
+    }
+  })
+
   it('retrying without an answer re-asks instead of resuming', async () => {
     const governanceRuntime = makeRuntime([FINALIZE_RULE])
     const { connector, count } = makeConnector()

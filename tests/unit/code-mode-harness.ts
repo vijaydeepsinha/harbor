@@ -160,7 +160,8 @@ export function makeCtx(opts: FakeCtxOptions = {}): ServerContext {
 export async function retryCtx(
   governanceRuntime: GovernanceRuntime,
   inputRequiredResult: Record<string, unknown>,
-  answer: { action: 'accept' | 'decline' | 'cancel'; approve?: boolean; comment?: string } | undefined,
+  /** `approve` may be a word ("yes") as well as a boolean — see readApprovalAnswer. */
+  answer: { action: 'accept' | 'decline' | 'cancel'; approve?: boolean | string; comment?: string } | undefined,
   requestId = '2'
 ): Promise<ServerContext> {
   const wire = inputRequiredResult['requestState'] as string

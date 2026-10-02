@@ -12,6 +12,7 @@
 
 import {
   ERR,
+  APPROVAL_ANSWER_WORDS,
   type ExecutionStatus,
   type ActivityStatus,
   type ApprovalStatus,
@@ -274,10 +275,17 @@ export class ApprovalNotFoundError extends ExecutionError {
   }
 }
 
-/** An `accept` must say `approve: true` or `approve: false`; anything else is not a decision (fail closed). */
+/**
+ * An `accept` must say yes or no — `approve: true` / `false`, or one of the
+ * words in `APPROVAL_ANSWER_WORDS`; anything else is not a decision (fail closed).
+ */
 export class ApprovalAnswerInvalidError extends ExecutionError {
   constructor(readonly approvalId: string) {
-    super(`Approval ${approvalId}: an accept must carry approve: true or approve: false`, ERR.INVALID_API_REQUEST, false)
+    super(
+      `Approval ${approvalId}: an accept must carry approve: true or approve: false ` +
+      `(also accepted: ${APPROVAL_ANSWER_WORDS.APPROVE.join(', ')} / ${APPROVAL_ANSWER_WORDS.REJECT.join(', ')})`,
+      ERR.INVALID_API_REQUEST, false
+    )
     this.name = 'ApprovalAnswerInvalidError'
   }
 }

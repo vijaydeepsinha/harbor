@@ -213,6 +213,27 @@ describe('execution routes', () => {
     await governanceRuntime.persistence.releaseLock(executionId)
   })
 
+  it('an accept may answer in words: "approved" approves, "no" rejects, an unlisted word is refused', async () => {
+    const post = (baseUrl: string, executionId: string, approvalId: string, approve: unknown) => fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'accept', approve })
+    })
+    const governanceRuntime = makeRuntime()
+    const { baseUrl, close } = await start(governanceRuntime); cleanup = close
+
+    const first = await seedPaused(governanceRuntime)
+    const refused = await post(baseUrl, first.executionId, first.approvalId, 'maybe')
+    expect(refused.status).toBe(400)
+    expect((await refused.json() as { error: string }).error).toContain('yes, sure, proceed')
+    expect((await governanceRuntime.approvals.get(first.approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+    const approved = await post(baseUrl, first.executionId, first.approvalId, 'Approved')
+    expect(approved.status).toBe(200)
+    expect(await approved.json()).toMatchObject({ outcome: 'APPROVED', executionStatus: EXECUTION_STATUS.WAITING_APPROVAL })
+
+    const second = await seedPaused(governanceRuntime)
+    const rejected = await post(baseUrl, second.executionId, second.approvalId, 'no')
+    expect(await rejected.json()).toMatchObject({ outcome: 'REJECTED', executionStatus: EXECUTION_STATUS.DENIED })
+  })
+
   it('decline over HTTP denies the execution', async () => {
     const governanceRuntime = makeRuntime()
     const { executionId, approvalId } = await seedPaused(governanceRuntime)

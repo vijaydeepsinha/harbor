@@ -32,6 +32,7 @@ import {
   ApprovalAlreadyDecidedError
 } from '../core/types/execution.types.js'
 import type { GovernanceRuntime } from '../runtime/execution/governance-runtime.js'
+import { readApprovalAnswer } from '../runtime/execution/approval-service.js'
 import type { ResumeState } from '../runtime/execution/request-state.js'
 import { ActivityJournal, CallLog, type CallLogSource } from '../runtime/execution/activity-journal.js'
 import { resolveOperation } from '../runtime/governance/operation-resolver.js'
@@ -510,10 +511,11 @@ async function resolveExecution(
     if (answer.kind === 'elicit') {
       try {
         const content = answer.content ?? {}
+        const approve = readApprovalAnswer(content['approve'])
         const decided = await governanceRuntime.approvals.decide(state.approvalId, {
           action: answer.action,
           executionId: state.executionId,
-          ...(typeof content['approve'] === 'boolean' ? { approve: content['approve'] } : {}),
+          ...(approve !== undefined ? { approve } : {}),
           ...(typeof content['comment'] === 'string' && content['comment'] ? { comment: content['comment'] } : {}),
           via: 'mcp-elicitation'
         })
@@ -543,7 +545,7 @@ async function resolveExecution(
         // approved call on the decliner's behalf.
         const recorded = err.status
         const asked = answer.action === 'cancel' ? APPROVAL_STATUS.CANCELLED
-          : answer.action === 'decline' || answer.content?.['approve'] === false ? APPROVAL_STATUS.REJECTED
+          : answer.action === 'decline' || readApprovalAnswer(answer.content?.['approve']) === false ? APPROVAL_STATUS.REJECTED
           : APPROVAL_STATUS.APPROVED
         // Only while the execution could still run: a finished one is refused below as not resumable.
         if (recorded !== asked && !TERMINAL_STATUSES.has(execution.status)) {

@@ -362,6 +362,17 @@ export const APPROVAL_STATUS = {
 } as const
 export type ApprovalStatus = (typeof APPROVAL_STATUS)[keyof typeof APPROVAL_STATUS]
 
+/**
+ * Words an approver may send as the `approve` answer in place of a boolean —
+ * a person answering in a chat client says "yes", not `true`. A closed list,
+ * matched whole (trimmed, case-insensitive): anything outside it is still not
+ * a decision, so a stray truthy value never approves.
+ */
+export const APPROVAL_ANSWER_WORDS = {
+  APPROVE: ['yes', 'sure', 'proceed', 'approve', 'approved'],
+  REJECT: ['no', 'reject', 'rejected', 'deny', 'denied', 'decline', 'declined'],
+} as const
+
 export const EXECUTION_STORE_TYPE = {
   IN_MEMORY: 'in-memory',
   FILE: 'file',
