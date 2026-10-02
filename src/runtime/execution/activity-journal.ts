@@ -120,21 +120,32 @@ export class ActivityJournal extends CallLog {
    * a program that reaches the same sequence with another resource, amount
    * or filter (a clock-dependent branch, or `Promise.all` siblings arriving
    * in a different order) must not inherit it.
+   *
+   * A COMPLETED record replays when only its query or body drifted (a
+   * timestamp in a body must not make a sequential program unresumable) —
+   * unless it was admitted concurrently. Then a different query or body at
+   * its sequence is a sibling that arrived first this time: handing it this
+   * record's response would give it another call's result (another
+   * resource's id) and the run would carry on with it. That stops the run.
    */
   async next(request: ActivityRequestRecord): Promise<{ sequence: number; existing?: ActivityRecord }> {
     const sequence = ++this.cursor
     const existing = await this.persistence.getActivity(this.executionId, sequence)
     if (!existing) return { sequence }
     const existingRequest = existing.request
+    const contentBound = CONTENT_BOUND.has(existing.status) || existing.admittedConcurrently === true
     const diverged =
       existingRequest.method !== request.method || existingRequest.specPath !== request.specPath || existingRequest.rawPath !== request.rawPath
         ? 'path'
-        : CONTENT_BOUND.has(existing.status) &&
+        : contentBound &&
           (canonicalJson(existingRequest.query) !== canonicalJson(request.query) || canonicalJson(existingRequest.body) !== canonicalJson(request.body))
           ? 'content'
           : undefined
     if (diverged) {
-      const suffix = diverged === 'content' ? ' (query/body differ from the recorded request)' : ''
+      const suffix = diverged !== 'content' ? ''
+        : existing.admittedConcurrently === true && existing.status === ACTIVITY_STATUS.COMPLETED
+          ? ' (query/body differ from the recorded request: calls started together arrived in another order)'
+          : ' (query/body differ from the recorded request)'
       throw new ReplayDivergedError(
         this.executionId, sequence,
         `${existingRequest.method} ${existingRequest.rawPath}`,
@@ -144,9 +155,13 @@ export class ActivityJournal extends CallLog {
     return { sequence, existing }
   }
 
-  /** Journals a call the bridge is about to make. Present on resume ⇒ the previous run died mid-call. */
-  async markExecuting(sequence: number, request: ActivityRequestRecord, approvalId?: string): Promise<ActivityRecord> {
-    return this.put(sequence, request, ACTIVITY_STATUS.EXECUTING, approvalId)
+  /**
+   * Journals a call the bridge is about to make. Present on resume ⇒ the
+   * previous run died mid-call. `admittedConcurrently`: another call of this
+   * run was in flight — see {@link ActivityRecord.admittedConcurrently}.
+   */
+  async markExecuting(sequence: number, request: ActivityRequestRecord, approvalId?: string, admittedConcurrently = false): Promise<ActivityRecord> {
+    return this.put(sequence, request, ACTIVITY_STATUS.EXECUTING, approvalId, admittedConcurrently)
   }
 
   /** Journaled activity ⇒ EXECUTING → COMPLETED with the response (replayable from now on); then the run's log. */
@@ -192,7 +207,8 @@ export class ActivityJournal extends CallLog {
     sequence: number,
     request: ActivityRequestRecord,
     status: ActivityRecord['status'],
-    approvalId?: string
+    approvalId?: string,
+    admittedConcurrently = false
   ): Promise<ActivityRecord> {
     const existing = await this.persistence.getActivity(this.executionId, sequence)
     const at = this.now()
@@ -205,7 +221,8 @@ export class ActivityJournal extends CallLog {
       runIndex: existing?.runIndex ?? this.runIndex,
       createdAt: existing?.createdAt ?? at,
       updatedAt: at,
-      ...(approvalId ?? existing?.approvalId ? { approvalId: approvalId ?? existing?.approvalId } : {})
+      ...(approvalId ?? existing?.approvalId ? { approvalId: approvalId ?? existing?.approvalId } : {}),
+      ...(admittedConcurrently ? { admittedConcurrently: true } : {})
     }
     await this.persistence.putActivity(record)
     return record

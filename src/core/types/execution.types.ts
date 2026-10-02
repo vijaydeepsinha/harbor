@@ -91,6 +91,14 @@ export interface ActivityRecord {
   updatedAt: string
   /** Approval bound to this activity, if governance required one. */
   approvalId?: string
+  /**
+   * Another call of the same run was in flight when this one was admitted, so
+   * its place in the sequence depended on timing (`Promise.all` siblings, or
+   * chains racing on their responses). Replay then binds its query and body
+   * even once it is COMPLETED: on resume a sibling may reach this sequence
+   * first, and must not be handed this call's response.
+   */
+  admittedConcurrently?: boolean
 }
 
 export interface GovernanceDecisionRecord {

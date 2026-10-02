@@ -230,7 +230,10 @@ export class BridgeRequestHandler {
           }
           const unauthorized = this.authorize(apiRequest.method, endpoint)
           if (unauthorized !== undefined) return { reply: unauthorized }
-          await gate.begin(decision)
+          // Another call of this run between arrival and reply (queued here,
+          // going out, or being replayed) ⇒ this call's sequence depended on
+          // timing, and replay must bind its content (see ActivityJournal.next).
+          await gate.begin(decision, this.inFlight > 1)
           return { admitted: decision }
         })
         if ('reply' in gated) return gated.reply

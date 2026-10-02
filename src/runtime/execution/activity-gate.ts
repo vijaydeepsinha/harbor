@@ -143,10 +143,11 @@ export class ActivityGate {
   /**
    * Journals the call as EXECUTING — before it goes out (Invariant: journal
    * before call). How it ends (COMPLETED / FAILED) is recorded by the journal
-   * itself, together with the run's other call outcomes.
+   * itself, together with the run's other call outcomes. `admittedConcurrently`
+   * comes from the bridge, the only place that sees the run's other calls.
    */
-  async begin(admission: Extract<ActivityAdmission, { kind: 'execute' }>): Promise<void> {
-    await this.bridge.journal.markExecuting(admission.sequence, admission.request, admission.approvalId)
+  async begin(admission: Extract<ActivityAdmission, { kind: 'execute' }>, admittedConcurrently = false): Promise<void> {
+    await this.bridge.journal.markExecuting(admission.sequence, admission.request, admission.approvalId, admittedConcurrently)
   }
 }
 
