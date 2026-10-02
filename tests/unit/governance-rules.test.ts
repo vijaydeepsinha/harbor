@@ -206,6 +206,25 @@ describe('governance rule loader', () => {
     expect(loaded.find(l => l.rule.name === 'never-delete-campaigns')?.rule.match.path).toBe('/campaigns/{id}')
   })
 
+  it('the example bid rules judge only what the request states, and a request that omits the current bid is still reviewed', () => {
+    // The owner's PR #4 question: a request carries the new bid, so how is the previous one known? It is not —
+    // the rule compares two fields of the same request, and must not be skippable by leaving one out.
+    const examples = loadGovernanceRules(join(process.cwd(), 'governance/rules/examples'))
+    const update = (body: Record<string, unknown>): GovernanceRequest => ({
+      executionId: 'e', activitySequence: 1, service: 'trafficking', method: 'POST',
+      specPath: '/campaigns/{id}', operationId: 'updateCampaign', pathParams: { id: 'C1' }, body: { owner: 'growth', ...body }
+    })
+    const decide = (body: Record<string, unknown>) => evaluateGovernance(examples, update(body), GOVERNANCE_DECISION.DENY)
+    expect(decide({ bid: 13.1, currentBid: 10 })).toMatchObject({ decision: 'REQUIRE_APPROVAL', matchedRules: ['bid-jump', 'trafficking-baseline'] })
+    expect(decide({ bid: 12, currentBid: 10 }).decision).toBe('ALLOW') // +20%: the service baseline allows it
+    // Not stating the bid it replaces used to make the ratio uncomputable — the rule did not fire and the baseline allowed it.
+    expect(decide({ bid: 40 })).toMatchObject({ decision: 'REQUIRE_APPROVAL', matchedRules: expect.arrayContaining(['bid-jump']) })
+    // A claimed current bid cannot lift a bid past the absolute ceiling.
+    expect(decide({ bid: 60, currentBid: 59 })).toMatchObject({ decision: 'REQUIRE_APPROVAL', matchedRules: expect.arrayContaining(['bid-ceiling']) })
+    // An update that does not touch the bid is not a bid change.
+    expect(decide({ name: 'Q4 renamed' }).decision).toBe('ALLOW')
+  })
+
   it('rule store swaps atomically and describes itself', () => {
     const store = new GovernanceRuleStore()
     expect(store.describe()).toEqual({ count: 0, rules: [] })

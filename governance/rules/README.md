@@ -106,7 +106,7 @@ must hold):
 | Operand | Value compared |
 |---|---|
 | `field: body.budget` | a request value — `budget` ≡ `body.budget`; `body.a.b`, `query.x`, `path.id` select explicitly; arrays may be indexed (`body.tags.0`) |
-| `ratio: { numerator: body.bid, denominator: body.currentBid }` | numerator ÷ denominator — *"bid > 1.3× the current bid"* → `greater_than: 1.3` |
+| `ratio: { numerator: body.bid, denominator: body.currentBid }` | numerator ÷ denominator — *"bid > 1.3× the current bid the request states"* → `greater_than: 1.3` (both values come from the request — see *A rule sees one request*) |
 | `percent_of: { part: body.budget, whole: body.totalBudget }` | 100 × part ÷ whole — *"budget > 20% of the total"* → `greater_than: 20` |
 | `days_between: { from: body.startDate, to: body.endDate }` | days from `from` to `to` (negative if `to` is earlier) — *"end is 30 days after start"* → `equals: 30` |
 
@@ -134,6 +134,21 @@ Evaluation is a pure function of the rule and the request — no I/O, no clock:
 - A computed operand that **cannot be computed** — a missing or non-number
   field, a zero denominator, a date that is not strict ISO 8601 — is treated
   exactly like a missing field.
+- **A rule sees one request.** It reads the request Harbor is about to send —
+  path parameters, query and body — and nothing else: Harbor does not fetch
+  the resource's current state, and earlier calls' responses are not visible
+  to a rule. A computed operand therefore compares two values *of the same
+  request*. *"Bid raised by more than 30%"* can be written only when the
+  API's request carries the old value as well (an update that sends `bid`
+  and the `currentBid` it replaces); when the request has only the new
+  value, no rule can see the change — compare against a fixed threshold, or
+  leave the relative check to the backend, which holds the current state.
+  The program writes the request, so such a value is its claim: also cover
+  the request that omits it (`{ field: body.currentBid, exists: false }`
+  under an `anyOf` — otherwise the ratio does not compute and the rule does
+  not fire), and keep an absolute limit the claim cannot move.
+  `governance/rules/examples/campaign-governance.yaml` (`bid-jump`,
+  `bid-ceiling`) shows both.
 - Dates are `YYYY-MM-DD` or date-times **with a zone** (`2026-03-01T09:00:00Z`,
   `…+05:30`). A zone-less date-time or an impossible date (`2026-02-30`) does
   not compute: JavaScript would read the first in the host's time zone and roll
