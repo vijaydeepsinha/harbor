@@ -4,7 +4,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { v4 as uuidv4 } from 'uuid'
 import type { Logger } from '../observability/logger.js'
-import type { DurableExecutionRuntime } from '../execution/durable-execution-runtime.js'
+import type { GovernanceRuntime } from '../execution/governance-runtime.js'
 import type { ServiceRegistry } from '../registry/service-registry.js'
 import type { OAuthResourceConfig } from '../../core/types/oauth.types.js'
 import { extractBearerFromRequest, bearerFailureToHttpResponse } from '../../spi/auth/bearer-authorization.js'
@@ -33,7 +33,7 @@ export async function handleExecutionRoutes(
   req: IncomingMessage,
   res: ServerResponse,
   url: string,
-  durableExecutionRuntime: DurableExecutionRuntime,
+  governanceRuntime: GovernanceRuntime,
   registry: ServiceRegistry,
   logger: Logger,
   oauthConfig?: OAuthResourceConfig
@@ -53,9 +53,9 @@ export async function handleExecutionRoutes(
   try {
     if (approvalId === undefined) {
       if (req.method !== 'GET') throw new HttpError(405, ERR.NOT_FOUND, 'Method not allowed', undefined, { url })
-      const execution = await durableExecutionRuntime.executionManager.load(executionId)
+      const execution = await governanceRuntime.executionManager.load(executionId)
       await authorizeExecution(execution, extracted.token, registry, url)
-      const inspection = await durableExecutionRuntime.executionManager.inspect(executionId)
+      const inspection = await governanceRuntime.executionManager.inspect(executionId)
       sendJson(res, 200, inspection)
       return true
     }
@@ -69,13 +69,13 @@ export async function handleExecutionRoutes(
     // Authorize on the execution first; only then look at the approval, and
     // report one that belongs elsewhere exactly like an unknown one — the
     // reply must not confirm that some other execution's approval exists.
-    const execution = await durableExecutionRuntime.executionManager.load(executionId)
+    const execution = await governanceRuntime.executionManager.load(executionId)
     await authorizeExecution(execution, extracted.token, registry, url)
-    const approval = await durableExecutionRuntime.approvals.get(approvalId)
+    const approval = await governanceRuntime.approvals.get(approvalId)
     if (approval.executionId !== executionId) {
       throw new HttpError(404, ERR.APPROVAL_NOT_FOUND, `Unknown approval ${approvalId}`, undefined, { url, approvalExecutionId: approval.executionId })
     }
-    const result = await durableExecutionRuntime.approvals.decide(approvalId, {
+    const result = await governanceRuntime.approvals.decide(approvalId, {
       action,
       executionId,
       ...(typeof body['approve'] === 'boolean' ? { approve: body['approve'] } : {}),
@@ -83,7 +83,7 @@ export async function handleExecutionRoutes(
       via: 'http'
     })
     logger.info({ executionId, approvalId, outcome: result.outcome }, 'Approval decided via HTTP')
-    sendJson(res, 200, { approval: result.approval, outcome: result.outcome, executionStatus: (await durableExecutionRuntime.executionManager.load(executionId)).status })
+    sendJson(res, 200, { approval: result.approval, outcome: result.outcome, executionStatus: (await governanceRuntime.executionManager.load(executionId)).status })
     return true
   } catch (err) {
     if (err instanceof HttpError) throw err

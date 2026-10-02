@@ -7,7 +7,7 @@ import { AuditPipeline, executionStateOf } from '../../src/runtime/observability
 import { ConsoleAuditSink } from '../../src/adapters/observability/console-audit-sink.js'
 import { writeAuditRecord, type AuditRecord } from '../../src/runtime/observability/audit.js'
 import { buildAuditSinks, registerAuditSinkBackend } from '../../src/wiring/strategy-builders.js'
-import { buildDurableExecutionRuntime, type DurableExecutionRuntime } from '../../src/runtime/execution/durable-execution-runtime.js'
+import { buildGovernanceRuntime, type GovernanceRuntime } from '../../src/runtime/execution/governance-runtime.js'
 import { registerExecuteApiTool } from '../../src/tools/execute-api.tool.js'
 import type { AuditEvent, AuditSink } from '../../src/spi/observability/audit-sink.js'
 import type { ExecutionInspection } from '../../src/runtime/execution/execution-manager.js'
@@ -117,36 +117,36 @@ describe('audit pipeline', () => {
 
   it('the runtime publishes every persisted execution state change (runs and human decisions)', async () => {
     const { sink, events } = capturingSink()
-    const rt = await buildDurableExecutionRuntime({
+    const governanceRuntime = await buildGovernanceRuntime({
       store: { type: 'in-memory' },
       governance: { rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600 }
     }, silent, new AuditPipeline([sink], silent))
-    const rec = await rt.executionManager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
-    await rt.executionManager.beginRun(rec.executionId)
-    await rt.executionManager.endRun(rec.executionId, { kind: 'waitingApproval', approvalId: 'ap-1' })
-    await rt.executionManager.markApprovalDecided(rec.executionId, EXECUTION_STATUS.DENIED, { code: 'GOVERNANCE_DENIED', message: 'rejected' })
+    const rec = await governanceRuntime.executionManager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await governanceRuntime.executionManager.beginRun(rec.executionId)
+    await governanceRuntime.executionManager.endRun(rec.executionId, { kind: 'waitingApproval', approvalId: 'ap-1' })
+    await governanceRuntime.executionManager.markApprovalDecided(rec.executionId, EXECUTION_STATUS.DENIED, { code: 'GOVERNANCE_DENIED', message: 'rejected' })
     await vi.waitFor(() => expect(events).toHaveLength(2))
     expect(events.map(e => e.kind === 'execution' ? e.state.status : e.kind)).toEqual([EXECUTION_STATUS.WAITING_APPROVAL, EXECUTION_STATUS.DENIED])
-    await rt.shutdown()
+    await governanceRuntime.shutdown()
   })
 
   it('api_execute end to end: an audit record per call, and the execution state at the pause and at completion', async () => {
     const { sink, events } = capturingSink()
     const pipeline = new AuditPipeline([sink], silent)
-    // the manager publishes its state changes, as buildDurableExecutionRuntime wires it
-    const rt: DurableExecutionRuntime = makeRuntime(
+    // the manager publishes its state changes, as buildGovernanceRuntime wires it
+    const governanceRuntime: GovernanceRuntime = makeRuntime(
       [{ name: 'finalize-needs-approval', match: { service: 'trafficking', operation: 'finalizeCampaign' }, action: { type: 'REQUIRE_APPROVAL' } }],
       GOVERNANCE_DECISION.ALLOW, undefined,
-      { onStateChange: id => { void rt.executionManager.inspect(id).then(i => pipeline.publish({ kind: 'execution', state: executionStateOf(i) })) } }
+      { onStateChange: id => { void governanceRuntime.executionManager.inspect(id).then(i => pipeline.publish({ kind: 'execution', state: executionStateOf(i) })) } }
     )
     const { handlers, server } = makeFakeServer()
     const on = { ...globalConfig, observability: { ...globalConfig.observability, enableAudit: true } }
     const resources = makeResources('trafficking', makeConnector().connector)
-    registerExecuteApiTool(server, makeRegistry({ trafficking: resources }), on, silentLogger, { increment() {}, stop() {} } as unknown as MetricsRegistry, 'tok', rt, pipeline)
+    registerExecuteApiTool(server, makeRegistry({ trafficking: resources }), on, silentLogger, { increment() {}, stop() {} } as unknown as MetricsRegistry, 'tok', governanceRuntime, pipeline)
     const handler = handlers[TOOL.API_EXECUTE]!
     const program = `async () => { const c = await api.request({ method: 'GET', path: '/campaigns' }); return (await api.request({ method: 'POST', path: '/campaigns/' + c.data[0].id + '/finalize', body: { secret: 'SECRET-BODY' } })).data }`
     const paused = await handler({ service: 'trafficking', code: program }, makeCtx())
-    await handler({ service: 'trafficking', code: program }, await retryCtx(rt, paused, { action: 'accept', approve: true }))
+    await handler({ service: 'trafficking', code: program }, await retryCtx(governanceRuntime, paused, { action: 'accept', approve: true }))
     await vi.waitFor(() => expect(events.filter(e => e.kind === 'execution')).toHaveLength(2))
     const audits = events.filter((e): e is Extract<AuditEvent, { kind: 'audit' }> => e.kind === 'audit')
     expect(audits.map(e => e.record.outcome)).toEqual(['approval_required', 'success'])

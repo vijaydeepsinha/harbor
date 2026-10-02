@@ -42,13 +42,13 @@ async function readJsonRpc(res: Response): Promise<Record<string, unknown>> {
 }
 
 describe('MCP wire: approval via input_required + retry', () => {
-  const rt = makeRuntime([RULE])
+  const governanceRuntime = makeRuntime([RULE])
   const { connector, count } = makeConnector()
   const registry = new ServiceRegistry()
   registry.register('trafficking', makeResources('trafficking', connector))
   const metrics = { increment: () => {}, stop: () => {} } as unknown as MetricsRegistry
   const handler = createMcpHandler(
-    buildMcpServerFactory({ registry, globalConfig, logger: silentLogger, metrics, durableExecutionRuntime: rt }),
+    buildMcpServerFactory({ registry, globalConfig, logger: silentLogger, metrics, governanceRuntime: governanceRuntime }),
     { legacy: 'reject' }
   )
   let nextId = 1
@@ -103,7 +103,7 @@ describe('MCP wire: approval via input_required + retry', () => {
     expect(JSON.parse(content[0]!.text)).toEqual({ did: 'POST /campaigns/C1/finalize' })
     expect(count('GET', '/campaigns')).toBe(1)
     expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
-    expect((await rt.executionManager.load(executionId!)).status).toBe(EXECUTION_STATUS.COMPLETED)
+    expect((await governanceRuntime.executionManager.load(executionId!)).status).toBe(EXECUTION_STATUS.COMPLETED)
   })
 
   it('a client that does not declare elicitation gets APPROVAL_REQUIRED with the ids, never an elicitation', async () => {
@@ -115,6 +115,6 @@ describe('MCP wire: approval via input_required + retry', () => {
     const body = JSON.parse((r['content'] as Array<{ text: string }>)[0]!.text) as { code: string; executionId: string; approvalId: string }
     expect(body.code).toBe(ERR.APPROVAL_REQUIRED)
     expect((r['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY]).toBe(body.executionId)
-    expect((await rt.approvals.get(body.approvalId)).status).toBe('PENDING')
+    expect((await governanceRuntime.approvals.get(body.approvalId)).status).toBe('PENDING')
   })
 })

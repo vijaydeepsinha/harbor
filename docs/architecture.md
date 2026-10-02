@@ -196,7 +196,7 @@ src/runtime/
 │   ├── approval-service.ts        human approvals bound to one activity; decide() exactly once
 │   ├── request-state.ts           HMAC-sealed MRTR requestState codec (TTL, bound to the JSON-RPC method)
 │   ├── execution-retention.ts     sweeps terminal executions after EXECUTION_RETENTION_SEC
-│   └── durable-execution-runtime.ts       process-wide wiring of store, manager, approvals, rules, codec
+│   └── governance-runtime.ts       process-wide wiring of store, manager, approvals, rules, codec
 ├── governance/
 │   ├── operation-resolver.ts      canonical path + method → OpenAPI template, operationId, path params
 │   ├── rule-schema.ts             Zod schema of a Governance Rule (match, conditions, levels, final)
@@ -270,7 +270,7 @@ Five tools, registered on a fresh `McpServer` for every request by `src/runtime/
 
 ### `api_execute` — Full Path
 
-The booted gateway always builds a `DurableExecutionRuntime`, so every `api_execute` is a governed, durable execution. (Without a runtime — tests, or an embedder calling `registerExecuteApiTool` without one — the tool runs the legacy path: no execution, journal or governance, only the in-run `CallLog`.)
+The booted gateway always builds a `GovernanceRuntime`, so every `api_execute` is a governed, durable execution. (Without a runtime — tests, or an embedder calling `registerExecuteApiTool` without one — the tool runs the legacy path: no execution, journal or governance, only the in-run `CallLog`.)
 
 ```
 AI Agent
@@ -342,7 +342,7 @@ Every backend call carries `X-Idempotency-Key`, and the configured `IdempotencyS
 | Path | Key |
 |------|-----|
 | Governed (always, in the booted gateway) | `mcp-{service}-{executionId}-{sequence}` — two executions of one program never share a key; a resume keeps its keys |
-| Legacy (no `DurableExecutionRuntime`) | `mcp-{service}-{userIdHash12}-{codeHash16}-c{n}` — `n` is the call's arrival index in the run, so an agent retrying the identical tool call is deduplicated |
+| Legacy (no `GovernanceRuntime`) | `mcp-{service}-{userIdHash12}-{codeHash16}-c{n}` — `n` is the call's arrival index in the run, so an agent retrying the identical tool call is deduplicated |
 
 ### Read Path (`discover_services`, `discover_skills`, `get_skill_details`, `search_code`)
 
@@ -395,7 +395,7 @@ src/runtime/server-factory.ts
   │
   ├─ 4. AuditPipeline — buildAuditSinks(AUDIT_SINKS) when ENABLE_AUDIT, else no sinks
   │
-  ├─ 5. buildDurableExecutionRuntime(globalConfig.execution, logger, auditPipeline)
+  ├─ 5. buildGovernanceRuntime(globalConfig.execution, logger, auditPipeline)
   │         ├─ buildExecutionStore(EXECUTION_STORE_TYPE)
   │         ├─ ExecutionManager (state changes → audit pipeline) · retention sweeper · ApprovalService
   │         ├─ Governance Rules: buildGovernanceRuleSource → load → validate
@@ -403,14 +403,14 @@ src/runtime/server-factory.ts
   │         ├─ GovernanceRuleRefresher (GOVERNANCE_RULES_REFRESH_SEC; 0 = boot only)
   │         └─ requestState codec (GOVERNANCE_REQUEST_STATE_KEY, else a per-process random key)
   │
-  ├─ 6. buildMcpServerFactory({ registry, globalConfig, logger, metrics, stdioToken, durableExecutionRuntime, auditPipeline })
+  ├─ 6. buildMcpServerFactory({ registry, globalConfig, logger, metrics, stdioToken, governanceRuntime, auditPipeline })
   │
   └─ 7. start transport
           HTTP:  startHttpGateway({ host, port, maxBodyBytes, createMcpServer, registry, logger,
-                                   oauthConfig, durableExecutionRuntime })
+                                   oauthConfig, governanceRuntime })
           stdio: MCP_TOKEN required and must pass the bearer parser, else exit;
                  startStdioGateway({ createMcpServer, registry, logger })
-          SIGTERM / SIGINT: close the HTTP listener, then durableExecutionRuntime.shutdown(), auditPipeline.close(),
+          SIGTERM / SIGINT: close the HTTP listener, then governanceRuntime.shutdown(), auditPipeline.close(),
                  token cache destroy, registry.shutdownAll() (refreshers, metrics), gateway metrics stop
 ```
 

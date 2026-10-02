@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from 'vitest'
 import pino from 'pino'
 import { ExecutionRetentionSweeper } from '../../src/runtime/execution/execution-retention.js'
 import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-execution-store.js'
-import { buildDurableExecutionRuntime } from '../../src/runtime/execution/durable-execution-runtime.js'
+import { buildGovernanceRuntime } from '../../src/runtime/execution/governance-runtime.js'
 import type { ExecutionPersistence } from '../../src/spi/execution/execution-store.js'
 import type { Logger } from '../../src/core/types/logger.types.js'
 import { EXECUTION_STATUS, GOVERNANCE_DECISION } from '../../src/core/constants.js'
@@ -82,19 +82,19 @@ describe('ExecutionRetentionSweeper', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
     try {
-      const rt = await buildDurableExecutionRuntime({
+      const governanceRuntime = await buildGovernanceRuntime({
         store: { type: 'in-memory' },
         retention: { executionSec: 60 },
         governance: { rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600 }
       }, silent)
-      const rec = await rt.executionManager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
-      await rt.executionManager.beginRun(rec.executionId)
-      await rt.executionManager.endRun(rec.executionId, { kind: 'completed', result: 1 })
+      const rec = await governanceRuntime.executionManager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+      await governanceRuntime.executionManager.beginRun(rec.executionId)
+      await governanceRuntime.executionManager.endRun(rec.executionId, { kind: 'completed', result: 1 })
       await vi.advanceTimersByTimeAsync(59_000)
-      expect(await rt.persistence.getExecution(rec.executionId)).toBeDefined()
+      expect(await governanceRuntime.persistence.getExecution(rec.executionId)).toBeDefined()
       await vi.advanceTimersByTimeAsync(62_000)
-      expect(await rt.persistence.getExecution(rec.executionId)).toBeUndefined()
-      await rt.shutdown()
+      expect(await governanceRuntime.persistence.getExecution(rec.executionId)).toBeUndefined()
+      await governanceRuntime.shutdown()
     } finally {
       vi.useRealTimers()
     }

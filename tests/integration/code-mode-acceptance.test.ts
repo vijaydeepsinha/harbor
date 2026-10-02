@@ -50,9 +50,9 @@ const RULES = [
 
 describe('§47 acceptance: two approval rounds, every side effect exactly once', () => {
   it('runs the scenario', async () => {
-    const rt = makeRuntime(RULES)
+    const governanceRuntime = makeRuntime(RULES)
     const { connector, count, calls } = makeConnector()
-    const handler = registerGoverned(rt, makeResources('trafficking', connector))
+    const handler = registerGoverned(governanceRuntime, makeResources('trafficking', connector))
     const args = { service: 'trafficking', code: PROGRAM }
 
     // ── Initial execution ────────────────────────────────────────────────
@@ -62,25 +62,25 @@ describe('§47 acceptance: two approval rounds, every side effect exactly once',
     expect(count('GET', '/campaigns')).toBe(1)          // #1 executed
     expect(count('GET', '/campaigns/C1/creatives')).toBe(1) // #2 executed
     expect(count('POST', '/campaigns/C1')).toBe(0)      // #3 paused before executing
-    let acts = await rt.persistence.listActivities(executionId)
+    let acts = await governanceRuntime.persistence.listActivities(executionId)
     expect(acts.map(a => [a.sequence, a.status])).toEqual([[1, 'COMPLETED'], [2, 'COMPLETED'], [3, 'WAITING_APPROVAL']])
-    expect((await rt.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect((await governanceRuntime.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
 
     // ── First resume (approve activation) ────────────────────────────────
-    const run2 = await handler(args, await retryCtx(rt, run1, { action: 'accept', approve: true }, '2'))
+    const run2 = await handler(args, await retryCtx(governanceRuntime, run1, { action: 'accept', approve: true }, '2'))
     expect(run2['resultType']).toBe('input_required')
     expect(count('GET', '/campaigns')).toBe(1)          // #1 replayed
     expect(count('GET', '/campaigns/C1/creatives')).toBe(1) // #2 replayed
     expect(count('POST', '/campaigns/C1')).toBe(1)      // #3 executed after approval
     expect(count('POST', '/campaigns/C1/creative')).toBe(0) // #4 paused
-    acts = await rt.persistence.listActivities(executionId)
+    acts = await governanceRuntime.persistence.listActivities(executionId)
     expect(acts.map(a => [a.sequence, a.status])).toEqual([
       [1, 'COMPLETED'], [2, 'COMPLETED'], [3, 'COMPLETED'], [4, 'WAITING_APPROVAL']
     ])
-    expect((await rt.executionManager.load(executionId)).runCount).toBe(2)
+    expect((await governanceRuntime.executionManager.load(executionId)).runCount).toBe(2)
 
     // ── Second resume (approve creative) ─────────────────────────────────
-    const run3 = await handler(args, await retryCtx(rt, run2, { action: 'accept', approve: true }, '3'))
+    const run3 = await handler(args, await retryCtx(governanceRuntime, run2, { action: 'accept', approve: true }, '3'))
     expect(run3['isError']).toBeUndefined()
     expect(run3['resultType']).toBeUndefined()
     expect(parseContent(run3)).toEqual({
@@ -104,7 +104,7 @@ describe('§47 acceptance: two approval rounds, every side effect exactly once',
     ])
 
     // ── Records: journal, decisions, approvals, history ───────────────────
-    const { execution, activities, approvals, decisions, history } = await rt.executionManager.inspect(executionId)
+    const { execution, activities, approvals, decisions, history } = await governanceRuntime.executionManager.inspect(executionId)
     expect(execution.status).toBe(EXECUTION_STATUS.COMPLETED)
     expect(execution.runCount).toBe(3)
     // The persisted program drove all three isolates (call order above); once

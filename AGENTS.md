@@ -42,7 +42,7 @@ src/           all gateway source (tsconfig rootDir; builds to dist/)
   wiring/      env → strategy builders and backend registries (registerExecutionStoreBackend, …)
   runtime/     gateway boot (server-factory.ts), http (http-gateway.ts, execution-routes.ts, mcp-server-factory.ts),
                sandbox (runner, bridge-request-handler, request-path), execution (manager, activity-gate, journal,
-               approvals, request-state, durable-execution-runtime, retention),
+               approvals, request-state, governance-runtime, retention),
                governance (operation-resolver, rule-schema, rule-loader, rule-store, rule-evaluator, rule-refresher),
                registry, spec, observability, transport (stdio)
   tools/       the five MCP tools + tool-helpers (response _meta, request _meta reader)

@@ -171,7 +171,7 @@ Implement `ExecutionPersistence` from `src/spi/execution/execution-store.ts` —
 `ExecutionRecordStore` covers execution records; `ExecutionPersistence` combines it
 with the related stores and run locking. One adapter implements the combined contract.
 
-The runtime exposes this contract as `DurableExecutionRuntime.persistence`.
+The runtime exposes this contract as `GovernanceRuntime.persistence`.
 Its settings are in `GlobalConfig.execution`; the `store` setting selects the
 storage adapter and is configuration, not an `ExecutionPersistence` instance.
 

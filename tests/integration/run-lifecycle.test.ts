@@ -39,8 +39,8 @@ const executionIdOf = (res: Record<string, unknown>) => (res['_meta'] as Record<
 describe('run lifecycle — calls the program did not await', () => {
   it('finish and are journaled before the execution is reported COMPLETED; nothing changes afterwards', async () => {
     const { connector, calls } = makeConnector()
-    const runtime = makeRuntime([], GOVERNANCE_DECISION.ALLOW, laggyStore())
-    const tool = registerGoverned(runtime, makeResources('trafficking', slow(connector, 80)))
+    const governanceRuntime = makeRuntime([], GOVERNANCE_DECISION.ALLOW, laggyStore())
+    const tool = registerGoverned(governanceRuntime, makeResources('trafficking', slow(connector, 80)))
     const res = await tool({ service: 'trafficking', code: `async () => {
       ['C1', 'C2'].forEach(async id => { await api.request({ method: 'POST', path: '/campaigns/' + id + '/finalize' }) })
       return 'returned early'
@@ -48,23 +48,23 @@ describe('run lifecycle — calls the program did not await', () => {
     const id = executionIdOf(res)
     expect(JSON.stringify(res['content'])).toContain('returned early')
     expect(calls.map(c => c.req.path)).toEqual(['/campaigns/C1/finalize', '/campaigns/C2/finalize'])
-    const before = await runtime.executionManager.inspect(id)
+    const before = await governanceRuntime.executionManager.inspect(id)
     expect(before.execution.status).toBe(EXECUTION_STATUS.COMPLETED)
     expect(before.activities.map(a => a.status)).toEqual([ACTIVITY_STATUS.COMPLETED, ACTIVITY_STATUS.COMPLETED])
     await new Promise(r => setTimeout(r, 150))
-    expect(await runtime.executionManager.inspect(id)).toEqual(before)
+    expect(await governanceRuntime.executionManager.inspect(id)).toEqual(before)
   })
 
   it('an un-awaited call that needs approval pauses the execution instead of leaving an orphan approval on a finished one', async () => {
     const { connector, calls } = makeConnector()
-    const runtime = makeRuntime([FINALIZE_NEEDS_APPROVAL], GOVERNANCE_DECISION.ALLOW, laggyStore())
-    const tool = registerGoverned(runtime, makeResources('trafficking', connector))
+    const governanceRuntime = makeRuntime([FINALIZE_NEEDS_APPROVAL], GOVERNANCE_DECISION.ALLOW, laggyStore())
+    const tool = registerGoverned(governanceRuntime, makeResources('trafficking', connector))
     const res = await tool({ service: 'trafficking', code: `async () => {
       api.request({ method: 'POST', path: '/campaigns/C1/finalize' })
       return 'returned early'
     }` }, makeCtx())
     expect(res['resultType']).toBe('input_required')
-    const insp = await runtime.executionManager.inspect(executionIdOf(res))
+    const insp = await governanceRuntime.executionManager.inspect(executionIdOf(res))
     expect(insp.execution.status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
     expect(insp.approvals.map(a => a.status)).toEqual(['PENDING'])
     expect(calls).toHaveLength(0)
@@ -72,8 +72,8 @@ describe('run lifecycle — calls the program did not await', () => {
 
   it('a DENY stands when a concurrent sibling would have needed approval: the execution ends DENIED with no approval opened', async () => {
     const { connector, calls } = makeConnector()
-    const runtime = makeRuntime([DENY_CREATE, FINALIZE_NEEDS_APPROVAL], GOVERNANCE_DECISION.ALLOW, laggyStore())
-    const tool = registerGoverned(runtime, makeResources('trafficking', connector))
+    const governanceRuntime = makeRuntime([DENY_CREATE, FINALIZE_NEEDS_APPROVAL], GOVERNANCE_DECISION.ALLOW, laggyStore())
+    const tool = registerGoverned(governanceRuntime, makeResources('trafficking', connector))
     const res = await tool({ service: 'trafficking', code: `async () => {
       const r = await Promise.allSettled([
         api.request({ method: 'POST', path: '/campaigns', body: { name: 'x' } }),
@@ -81,7 +81,7 @@ describe('run lifecycle — calls the program did not await', () => {
       ])
       return r.map(x => x.status)
     }` }, makeCtx())
-    const insp = await runtime.executionManager.inspect(executionIdOf(res))
+    const insp = await governanceRuntime.executionManager.inspect(executionIdOf(res))
     expect(insp.execution.status).toBe(EXECUTION_STATUS.DENIED)
     expect(insp.approvals).toHaveLength(0)
     expect(insp.activities.map(a => [a.sequence, a.status])).toEqual([[1, ACTIVITY_STATUS.DENIED]])

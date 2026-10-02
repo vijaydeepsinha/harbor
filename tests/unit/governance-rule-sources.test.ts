@@ -15,7 +15,7 @@ import { parseRuleDocuments, GovernanceRuleLoadError } from '../../src/runtime/g
 import { GovernanceRuleStore } from '../../src/runtime/governance/rule-store.js'
 import { GovernanceRuleRefresher } from '../../src/runtime/governance/rule-refresher.js'
 import { buildGovernanceRuleSource, registerGovernanceRuleSourceBackend } from '../../src/wiring/strategy-builders.js'
-import { buildDurableExecutionRuntime } from '../../src/runtime/execution/durable-execution-runtime.js'
+import { buildGovernanceRuntime } from '../../src/runtime/execution/governance-runtime.js'
 import type { ExecutionConfig } from '../../src/core/types/config.types.js'
 import type { Logger } from '../../src/core/types/logger.types.js'
 import { GOVERNANCE_DECISION } from '../../src/core/constants.js'
@@ -102,13 +102,13 @@ describe('Governance Rule sources', () => {
   it('dir: boot tolerates a directory that does not exist yet — no rules, and says so', async () => {
     const warnings: string[] = []
     const logger = { ...silent, warn: (_o: unknown, msg: string) => { warnings.push(msg) }, info: () => {}, error: () => {}, debug: () => {}, child: () => logger } as unknown as Logger
-    const rt = await buildDurableExecutionRuntime({
+    const governanceRuntime = await buildGovernanceRuntime({
       store: { type: 'in-memory' },
       governance: { rulesDir: join(tmpdir(), 'harbor-no-such-rules-' + Date.now()), defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600 }
     } as ExecutionConfig, logger)
-    expect(rt.rules.getRules()).toEqual([])
+    expect(governanceRuntime.rules.getRules()).toEqual([])
     expect(warnings.some(w => w.includes('every call is ungoverned'))).toBe(true)
-    await rt.shutdown()
+    await governanceRuntime.shutdown()
   })
 
   describe('url', () => {
@@ -239,22 +239,22 @@ describe('Governance Rule sources', () => {
       dir = mkdtempSync(join(tmpdir(), 'harbor-src-'))
       writeFileSync(join(dir, 'bad.yaml'), 'name: bad\nmatch: { service: s }\naction: { type: MAYBE }\n')
       const config = (g: Partial<ExecutionConfig['governance']>): ExecutionConfig => ({ store: { type: 'in-memory' }, governance: governance(g) })
-      await expect(buildDurableExecutionRuntime(config({ rulesDir: dir }), silent)).rejects.toThrow(GovernanceRuleLoadError)
-      await expect(buildDurableExecutionRuntime(config({ rulesSource: 'url', rulesUrl: 'http://127.0.0.1:1/rules.yaml', rulesUrlTimeoutMs: 500 }), silent)).rejects.toThrow()
+      await expect(buildGovernanceRuntime(config({ rulesDir: dir }), silent)).rejects.toThrow(GovernanceRuleLoadError)
+      await expect(buildGovernanceRuntime(config({ rulesSource: 'url', rulesUrl: 'http://127.0.0.1:1/rules.yaml', rulesUrlTimeoutMs: 500 }), silent)).rejects.toThrow()
 
       const { source, set } = mutableSource([doc('a.yaml', ruleYaml('a'))])
       registerGovernanceRuleSourceBackend('test-mutable', () => source)
       vi.useFakeTimers()
       try {
-        const runtime = await buildDurableExecutionRuntime(config({ rulesSource: 'test-mutable', rulesRefreshSec: 5 }), silent)
-        expect(runtime.rules.getRules().map(r => r.rule.name)).toEqual(['a'])
+        const governanceRuntime = await buildGovernanceRuntime(config({ rulesSource: 'test-mutable', rulesRefreshSec: 5 }), silent)
+        expect(governanceRuntime.rules.getRules().map(r => r.rule.name)).toEqual(['a'])
         set([doc('a.yaml', ruleYaml('a')), doc('b.yaml', ruleYaml('b'))])
         await vi.advanceTimersByTimeAsync(5_000)
-        expect(runtime.rules.getRules().map(r => r.rule.name)).toEqual(['a', 'b'])
-        await runtime.shutdown()
+        expect(governanceRuntime.rules.getRules().map(r => r.rule.name)).toEqual(['a', 'b'])
+        await governanceRuntime.shutdown()
         set([doc('c.yaml', ruleYaml('c'))])
         await vi.advanceTimersByTimeAsync(10_000)
-        expect(runtime.rules.getRules().map(r => r.rule.name)).toEqual(['a', 'b']) // stopped with the runtime
+        expect(governanceRuntime.rules.getRules().map(r => r.rule.name)).toEqual(['a', 'b']) // stopped with the runtime
       } finally {
         vi.useRealTimers()
       }

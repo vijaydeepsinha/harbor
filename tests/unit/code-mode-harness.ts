@@ -4,7 +4,7 @@
 /**
  * Test harness for the governed `api_execute` tool: a fake McpServer that
  * captures the handler, service resources backed by a counting connector and
- * a small OpenAPI spec, a real in-memory durable execution runtime, and fake
+ * a small OpenAPI spec, a real in-memory governance runtime, and fake
  * ServerContexts for first calls and MRTR retries.
  */
 import pino from 'pino'
@@ -16,7 +16,7 @@ import { ApprovalService } from '../../src/runtime/execution/approval-service.js
 import { createResumeStateCodec, type ResumeState } from '../../src/runtime/execution/request-state.js'
 import { GovernanceRuleStore } from '../../src/runtime/governance/rule-store.js'
 import { governanceRuleSchema } from '../../src/runtime/governance/rule-schema.js'
-import type { DurableExecutionRuntime } from '../../src/runtime/execution/durable-execution-runtime.js'
+import type { GovernanceRuntime } from '../../src/runtime/execution/governance-runtime.js'
 import type { ExecutionPersistence } from '../../src/spi/execution/execution-store.js'
 import type { LoadedRule } from '../../src/runtime/governance/rule-loader.js'
 import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
@@ -108,7 +108,7 @@ export function makeRuntime(
   defaultDecision: GovernanceDecisionType = GOVERNANCE_DECISION.ALLOW,
   persistence: ExecutionPersistence = new InMemoryExecutionStore(),
   managerOptions: ExecutionManagerOptions = {}
-): DurableExecutionRuntime {
+): GovernanceRuntime {
   const manager = new ExecutionManager(persistence, undefined, undefined, managerOptions)
   const approvals = new ApprovalService(persistence, manager)
   const ruleStore = new GovernanceRuleStore()
@@ -122,10 +122,10 @@ export function makeRuntime(
 }
 
 /** Registers the governed tool and returns its handler. */
-export function registerGoverned(runtime: DurableExecutionRuntime, resources: ServiceResources): ToolHandler {
+export function registerGoverned(governanceRuntime: GovernanceRuntime, resources: ServiceResources): ToolHandler {
   const { handlers, server } = makeFakeServer()
   const metrics = { increment: () => {}, stop: () => {} } as unknown as MetricsRegistry
-  registerExecuteApiTool(server, makeRegistry({ [resources.name]: resources }), globalConfig, silentLogger, metrics, 'client-token', runtime)
+  registerExecuteApiTool(server, makeRegistry({ [resources.name]: resources }), globalConfig, silentLogger, metrics, 'client-token', governanceRuntime)
   return handlers[TOOL.API_EXECUTE]!
 }
 
@@ -158,13 +158,13 @@ export function makeCtx(opts: FakeCtxOptions = {}): ServerContext {
 
 /** Simulates the client's retry: verifies the wire requestState like the SDK seam and answers the approval. */
 export async function retryCtx(
-  runtime: DurableExecutionRuntime,
+  governanceRuntime: GovernanceRuntime,
   inputRequiredResult: Record<string, unknown>,
   answer: { action: 'accept' | 'decline' | 'cancel'; approve?: boolean; comment?: string } | undefined,
   requestId = '2'
 ): Promise<ServerContext> {
   const wire = inputRequiredResult['requestState'] as string
-  const state = await runtime.requestState.verify(wire, makeCtx({ requestId }))
+  const state = await governanceRuntime.requestState.verify(wire, makeCtx({ requestId }))
   const inputResponses = answer
     ? { approval: { action: answer.action, ...(answer.action === 'accept' ? { content: { approve: answer.approve ?? true, ...(answer.comment ? { comment: answer.comment } : {}) } } : {}) } }
     : undefined

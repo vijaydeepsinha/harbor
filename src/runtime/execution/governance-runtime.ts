@@ -18,11 +18,11 @@ import { AuditPipeline, executionStateOf } from '../observability/audit-pipeline
 import { errorMessage } from '../../core/utils/errors.js'
 
 /**
- * Everything durable execution needs at runtime, built once per
+ * Shared governance runtime dependencies for execution, approvals and rules, built once per
  * process (executions outlive MCP requests and V8 isolates, so none of this
  * may live in the per-request McpServer factory).
  */
-export interface DurableExecutionRuntime {
+export interface GovernanceRuntime {
   persistence: ExecutionPersistence
   executionManager: ExecutionManager
   approvals: ApprovalService
@@ -32,7 +32,7 @@ export interface DurableExecutionRuntime {
   shutdown(): Promise<void>
 }
 
-export async function buildDurableExecutionRuntime(config: ExecutionConfig, logger: Logger, audit?: AuditPipeline): Promise<DurableExecutionRuntime> {
+export async function buildGovernanceRuntime(config: ExecutionConfig, logger: Logger, audit?: AuditPipeline): Promise<GovernanceRuntime> {
   const persistence = buildExecutionStore(config.store, logger)
   const manager: ExecutionManager = new ExecutionManager(persistence, undefined, undefined, {
     ...(config.retention?.code !== undefined ? { codeRetention: config.retention.code } : {}),

@@ -31,7 +31,7 @@ import {
   ActivityOutcomeUnknownError,
   ApprovalAlreadyDecidedError
 } from '../core/types/execution.types.js'
-import type { DurableExecutionRuntime } from '../runtime/execution/durable-execution-runtime.js'
+import type { GovernanceRuntime } from '../runtime/execution/governance-runtime.js'
 import type { ResumeState } from '../runtime/execution/request-state.js'
 import { ActivityJournal, CallLog, type CallLogSource } from '../runtime/execution/activity-journal.js'
 import { resolveOperation } from '../runtime/governance/operation-resolver.js'
@@ -60,7 +60,7 @@ export function registerExecuteApiTool(
     metrics: MetricsCollector,
     clientToken?: string,
     /** Absent ⇒ legacy behaviour: no durable execution, no governance. */
-  durableExecutionRuntime?: DurableExecutionRuntime,
+  governanceRuntime?: GovernanceRuntime,
     /** Where audit records go (AUDIT_SINKS). Absent ⇒ written to the service logger, as before. */
   auditPipeline?: AuditPipeline,
     /** The caller's X-Harbor-Client-ID from the inbound request, forwarded on every backend call. */
@@ -244,8 +244,8 @@ async () => {
         let execution: ExecutionRecord | undefined
         let bridge: ExecutionBridge | undefined
         let pendingRetry: InputRequiredResult | undefined
-        if (durableExecutionRuntime) {
-          const resumed = await resolveExecution(durableExecutionRuntime, ctx, { service, code, userIdHash }, logger, correlationId)
+        if (governanceRuntime) {
+          const resumed = await resolveExecution(governanceRuntime, ctx, { service, code, userIdHash }, logger, correlationId)
           if ('error' in resumed) {
             // Refused, or the answer itself ended the execution (decline, cancel): nothing ran, but the
             // decision is part of the audit trail. codeSubmitted stays what this caller sent — never
@@ -262,9 +262,9 @@ async () => {
           execution = resumed.execution
           executionId = execution.executionId
           if (pendingRetry) return pendingRetry
-          execution = await durableExecutionRuntime.executionManager.beginRun(execution.executionId)
+          execution = await governanceRuntime.executionManager.beginRun(execution.executionId)
           runStarted = true
-          bridge = makeBridge(durableExecutionRuntime, execution, svcResources, userIdHash)
+          bridge = makeBridge(governanceRuntime, execution, svcResources, userIdHash)
           callLog = bridge.journal
         }
         program = execution?.originalCode ?? code
@@ -293,8 +293,8 @@ async () => {
         }
         const result = await runApiInSandbox(program, sandboxCtx)
 
-        if (durableExecutionRuntime && execution) {
-          await durableExecutionRuntime.executionManager.endRun(execution.executionId, { kind: 'completed', result })
+        if (governanceRuntime && execution) {
+          await governanceRuntime.executionManager.endRun(execution.executionId, { kind: 'completed', result })
         }
 
         const durationMs = Date.now() - startTime
@@ -371,7 +371,7 @@ async () => {
 
         // ── Persist the run outcome and, for approvals, hand the question to the client ──
         let approvalId: string | undefined
-        if (durableExecutionRuntime && executionId && status) {
+        if (governanceRuntime && executionId && status) {
           const outcomeForStore =
             err instanceof ApprovalRequiredError ? { kind: 'waitingApproval' as const, approvalId: err.approvalId }
             : status === EXECUTION_STATUS.DENIED ? { kind: 'denied' as const, code: errorCode, message: errObj.message }
@@ -382,13 +382,13 @@ async () => {
           // pending) — then no run started, there is no lock to release and the
           // stored execution must stay exactly as it was.
           if (runStarted) {
-            await durableExecutionRuntime.executionManager.endRun(executionId, outcomeForStore).catch(e =>
+            await governanceRuntime.executionManager.endRun(executionId, outcomeForStore).catch(e =>
               logger.error({ correlationId, executionId, error: ensureError(e).message }, 'Failed to persist run outcome'))
           }
           if (err instanceof ApprovalRequiredError) {
             approvalId = err.approvalId
             audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, program)
-            return await approvalResult(durableExecutionRuntime, ctx, err, userIdHash, logger, correlationId)
+            return await approvalResult(governanceRuntime, ctx, err, userIdHash, logger, correlationId)
           }
         }
 
@@ -407,9 +407,9 @@ async () => {
         // When no run started (beginRun refused: locked, finished, approval
         // still pending) nothing changed, so `_meta` reports the execution as
         // it is stored — not the status this error would have given a run.
-        const reportedStatus = runStarted || !durableExecutionRuntime || executionId === undefined
+        const reportedStatus = runStarted || !governanceRuntime || executionId === undefined
           ? status
-          : await durableExecutionRuntime.executionManager.load(executionId).then(r => r.status, () => undefined)
+          : await governanceRuntime.executionManager.load(executionId).then(r => r.status, () => undefined)
         return mcpError(
           errObj.message,
           errorCode,
@@ -470,7 +470,7 @@ type ResolvedExecution =
  * Incoming `code` is ignored on resume.
  */
 async function resolveExecution(
-  rt: DurableExecutionRuntime,
+  governanceRuntime: GovernanceRuntime,
   ctx: ServerContext,
   input: { service: string; code: string; userIdHash: string },
   logger: Logger,
@@ -482,14 +482,14 @@ async function resolveExecution(
   const resumeId = state?.executionId ?? (typeof metaId === 'string' ? metaId : undefined)
 
   if (resumeId === undefined) {
-    const execution = await rt.executionManager.create({ service: input.service, code: input.code, userIdHash: input.userIdHash })
+    const execution = await governanceRuntime.executionManager.create({ service: input.service, code: input.code, userIdHash: input.userIdHash })
     logger.info({ correlationId, executionId: execution.executionId }, 'Code Mode execution created')
     return { execution }
   }
 
   let execution: ExecutionRecord
   try {
-    execution = await rt.executionManager.load(resumeId)
+    execution = await governanceRuntime.executionManager.load(resumeId)
   } catch (err) {
     return { executionId: resumeId, error: mcpError(ensureError(err).message, getErrorCode(err), errorRetryable(err)) }
   }
@@ -510,7 +510,7 @@ async function resolveExecution(
     if (answer.kind === 'elicit') {
       try {
         const content = answer.content ?? {}
-        const decided = await rt.approvals.decide(state.approvalId, {
+        const decided = await governanceRuntime.approvals.decide(state.approvalId, {
           action: answer.action,
           executionId: state.executionId,
           ...(typeof content['approve'] === 'boolean' ? { approve: content['approve'] } : {}),
@@ -554,12 +554,12 @@ async function resolveExecution(
           ) }
         }
       }
-      execution = await rt.executionManager.load(resumeId)
+      execution = await governanceRuntime.executionManager.load(resumeId)
     } else if (execution.status === EXECUTION_STATUS.WAITING_APPROVAL) {
       // The client retried without answering: ask again (spec allows repeated input_required).
-      const approval = await rt.approvals.get(state.approvalId)
+      const approval = await governanceRuntime.approvals.get(state.approvalId)
       if (approval.status === 'PENDING') {
-        const reprompt = await buildInputRequired(rt, ctx, approval.approvalId, state)
+        const reprompt = await buildInputRequired(governanceRuntime, ctx, approval.approvalId, state)
         return { execution, reprompt }
       }
     }
@@ -580,28 +580,28 @@ function safeRequestState(view: ResumeContextView): ResumeState | undefined {
 }
 
 /** The hooks the bridge calls: OpenAPI resolution and governance for new activities. */
-function makeBridge(rt: DurableExecutionRuntime, execution: ExecutionRecord, svc: ServiceResources, _userIdHash: string): ExecutionBridge {
-  const journal = new ActivityJournal(rt.persistence, execution.executionId, svc.name, execution.runCount)
+function makeBridge(governanceRuntime: GovernanceRuntime, execution: ExecutionRecord, svc: ServiceResources, _userIdHash: string): ExecutionBridge {
+  const journal = new ActivityJournal(governanceRuntime.persistence, execution.executionId, svc.name, execution.runCount)
   return {
     journal,
     resolve: (method, rawPath) => resolveOperation(svc.specStore.getSpec(), method, rawPath),
     decide: async (sequence: number, request: ActivityRequestRecord): Promise<GovernanceVerdict> => {
-      const outcome = evaluateGovernance(rt.rules.getRules(), {
+      const outcome = evaluateGovernance(governanceRuntime.rules.getRules(), {
         executionId: execution.executionId, activitySequence: sequence, service: svc.name,
         method: request.method, specPath: request.specPath,
         ...(request.operationId !== undefined ? { operationId: request.operationId } : {}),
         ...(request.pathParams !== undefined ? { pathParams: request.pathParams } : {}),
         ...(request.query !== undefined ? { query: request.query } : {}),
         ...(request.body !== undefined ? { body: request.body } : {})
-      }, rt.executionConfig.governance.defaultDecision)
-      await rt.persistence.putDecision({
+      }, governanceRuntime.executionConfig.governance.defaultDecision)
+      await governanceRuntime.persistence.putDecision({
         executionId: execution.executionId, activitySequence: sequence,
         decision: outcome.decision, reason: outcome.reason,
         matchedRules: outcome.matchedRules, ruleVersions: outcome.ruleVersions,
         ...(outcome.decidingRule !== undefined ? { decidingRule: outcome.decidingRule } : {}),
         evaluatedAt: new Date().toISOString()
       })
-      await rt.executionManager.recordProgress(execution.executionId, sequence)
+      await governanceRuntime.executionManager.recordProgress(execution.executionId, sequence)
       switch (outcome.decision) {
         case GOVERNANCE_DECISION.ALLOW:
           return { decision: 'ALLOW' }
@@ -616,7 +616,7 @@ function makeBridge(rt: DurableExecutionRuntime, execution: ExecutionRecord, svc
             ...(request.body !== undefined ? { body: request.body } : {}),
             reason: outcome.reason, matchedRules: outcome.matchedRules
           }
-          const approval = await rt.approvals.request(execution.executionId, sequence, summary)
+          const approval = await governanceRuntime.approvals.request(execution.executionId, sequence, summary)
           return { decision: 'REQUIRE_APPROVAL', approvalId: approval.approvalId, summary }
         }
       }
@@ -626,7 +626,7 @@ function makeBridge(rt: DurableExecutionRuntime, execution: ExecutionRecord, svc
 
 /** Either an MRTR `input_required` (client supports elicitation) or an APPROVAL_REQUIRED error with the ids in `_meta`. */
 async function approvalResult(
-  rt: DurableExecutionRuntime,
+  governanceRuntime: GovernanceRuntime,
   ctx: ServerContext,
   err: ApprovalRequiredError,
   userIdHash: string,
@@ -637,7 +637,7 @@ async function approvalResult(
   const supportsElicitation = caps !== undefined && caps['elicitation'] !== undefined && caps['elicitation'] !== null
   if (supportsElicitation) {
     logger.info({ correlationId, executionId: err.executionId, approvalId: err.approvalId }, 'Execution paused — approval requested via MCP elicitation')
-    return buildInputRequired(rt, ctx, err.approvalId, {
+    return buildInputRequired(governanceRuntime, ctx, err.approvalId, {
       executionId: err.executionId, approvalId: err.approvalId, activitySequence: err.activitySequence, userIdHash
     })
   }
@@ -652,10 +652,10 @@ async function approvalResult(
   )
 }
 
-async function buildInputRequired(rt: DurableExecutionRuntime, ctx: ServerContext, approvalId: string, state: ResumeState): Promise<InputRequiredResult> {
-  const approval = await rt.approvals.get(approvalId)
-  const elicitation = rt.approvals.buildElicitation(approval)
-  const requestState = await rt.requestState.mint(state, ctx)
+async function buildInputRequired(governanceRuntime: GovernanceRuntime, ctx: ServerContext, approvalId: string, state: ResumeState): Promise<InputRequiredResult> {
+  const approval = await governanceRuntime.approvals.get(approvalId)
+  const elicitation = governanceRuntime.approvals.buildElicitation(approval)
+  const requestState = await governanceRuntime.requestState.mint(state, ctx)
   const result = inputRequired({
     inputRequests: { [APPROVAL_INPUT_KEY]: inputRequired.elicit({ mode: 'form', ...elicitation }) },
     requestState
