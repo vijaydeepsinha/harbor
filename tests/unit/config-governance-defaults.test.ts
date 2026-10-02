@@ -70,6 +70,10 @@ describe('governance configuration defaults', () => {
     expect(validateGlobalConfig().execution.retention).toMatchObject({ executionSec: 0 })
   })
 
+  it('EXECUTION_STORE_TYPE defaults to the in-memory store', () => {
+    expect(validateGlobalConfig().execution.store).toEqual({ type: 'in-memory' })
+  })
+
   it('EXECUTION_STORE_TYPE=memcache reads its connection like the token cache, plus key prefix and lock TTL', () => {
     process.env['EXECUTION_STORE_TYPE'] = 'memcache'
     process.env['EXECUTION_STORE_MEMCACHE_HOST'] = 'memcache.internal'

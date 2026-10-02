@@ -8,7 +8,8 @@ import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-e
 import { buildGovernanceRuntime } from '../../src/runtime/execution/governance-runtime.js'
 import type { ExecutionPersistence } from '../../src/spi/execution/execution-store.js'
 import type { Logger } from '../../src/core/types/logger.types.js'
-import { EXECUTION_STATUS, GOVERNANCE_DECISION } from '../../src/core/constants.js'
+import { ExecutionManager, type RunOutcome } from '../../src/runtime/execution/execution-manager.js'
+import { EXECUTION_STATUS, GOVERNANCE_DECISION, RUN_OUTCOME } from '../../src/core/constants.js'
 
 const silent = pino({ level: 'silent' }) as unknown as Logger
 const NOW = '2026-06-01T00:00:00.000Z'
@@ -35,6 +36,31 @@ describe('ExecutionRetentionSweeper', () => {
     expect(await persistence.getExecution('not-yet')).toBeDefined()
     expect(await persistence.getExecution('paused')).toBeDefined()
     expect(await sweeper.sweep()).toBe(0)
+  })
+
+  it('only a terminal execution gets an expiry: paused and interrupted executions are kept however long retention is', async () => {
+    const persistence = new InMemoryExecutionStore()
+    const manager = new ExecutionManager(persistence, undefined, undefined, { retentionSec: 1 })
+    const ended = async (outcome: RunOutcome) => {
+      const { executionId } = await manager.create({ service: 's', code: 'c', userIdHash: 'h' })
+      await manager.beginRun(executionId)
+      return manager.endRun(executionId, outcome)
+    }
+    const interrupted = await ended({ kind: RUN_OUTCOME.INTERRUPTED, code: 'CIRCUIT_OPEN', message: 'open' })
+    const paused = await ended({ kind: RUN_OUTCOME.WAITING_APPROVAL, approvalId: 'ap-1' })
+    const completed = await ended({ kind: RUN_OUTCOME.COMPLETED, result: 1 })
+    const failed = await ended({ kind: RUN_OUTCOME.FAILED, code: 'X', message: 'x' })
+    expect(interrupted.expiresAt).toBeUndefined()
+    expect(paused.expiresAt).toBeUndefined()
+    expect(completed.expiresAt).toBeDefined()
+    expect(failed.expiresAt).toBeDefined()
+
+    // A year later the sweep removes exactly the two finished executions.
+    const sweeper = new ExecutionRetentionSweeper(persistence, 1, silent, () => '2027-12-31T00:00:00.000Z')
+    expect(await sweeper.sweep()).toBe(2)
+    expect((await persistence.getExecution(interrupted.executionId))?.status).toBe(EXECUTION_STATUS.INTERRUPTED)
+    expect((await persistence.getExecution(paused.executionId))?.status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect(await persistence.getExecution(completed.executionId)).toBeUndefined()
   })
 
   it('works through more expired executions than one batch', async () => {

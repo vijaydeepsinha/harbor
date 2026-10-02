@@ -5,6 +5,8 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import pino from 'pino'
 import { scanServicesDirectory, scanSkills } from '../../src/runtime/registry/filesystem-scanner.js'
 import { buildIdempotencyStrategy } from '../../src/wiring/strategy-builders.js'
@@ -95,6 +97,34 @@ describe('scanServicesDirectory — one bad entry never takes the others down', 
       expect(byName).toEqual({ inherits: 'in-memory', own: 'noop' })
     } finally {
       cache.destroy()
+    }
+  })
+})
+
+describe('buildServiceResources — gateway settings reach the backend call', () => {
+  it('HARBOR_SERVER_ID (observability.serverId) is the X-Harbor-Server-ID the service\'s client sends', async () => {
+    const seen: Array<Record<string, string | string[] | undefined>> = []
+    const server = createServer((req, res) => { seen.push(req.headers); res.setHeader('Content-Type', 'application/json'); res.end('{}') })
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
+    const root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
+    const cache = new InMemoryTokenCache(60_000)
+    try {
+      service(root, 'svc', { api: { protocol: 'http', host: '127.0.0.1', port: (server.address() as AddressInfo).port } })
+      const [scanned] = await scanServicesDirectory(root, silent)
+      for (const serverId of ['harbor-eu-1', undefined]) {
+        const config = { ...globalConfig, observability: { ...globalConfig.observability, serverId } }
+        const resources = await buildServiceResources(scanned!, config, cache)
+        resources.refresher.stop()
+        await resources.apiClient.request({ method: 'GET', path: '/ping' }, {
+          tokenPayload: { access_token: 't', token_type: 'bearer', expires_in: 60, refresh_token: '', scope: '' },
+          invalidate: async () => {}, idempotencyKey: 'k', idempotencyKeyTtlMs: 1000, correlationId: 'c'
+        })
+      }
+      expect(seen.map(h => h['x-harbor-server-id'])).toEqual(['harbor-eu-1', 'HARBOR_GATEWAY'])
+    } finally {
+      cache.destroy()
+      rmSync(root, { recursive: true, force: true })
+      await new Promise(r => server.close(r))
     }
   })
 })
