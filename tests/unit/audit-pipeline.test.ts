@@ -121,10 +121,10 @@ describe('audit pipeline', () => {
       store: { type: 'in-memory' },
       governance: { rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600 }
     }, silent, new AuditPipeline([sink], silent))
-    const rec = await rt.manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
-    await rt.manager.beginRun(rec.executionId)
-    await rt.manager.endRun(rec.executionId, { kind: 'waitingApproval', approvalId: 'ap-1' })
-    await rt.manager.markApprovalDecided(rec.executionId, EXECUTION_STATUS.DENIED, { code: 'GOVERNANCE_DENIED', message: 'rejected' })
+    const rec = await rt.executionManager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await rt.executionManager.beginRun(rec.executionId)
+    await rt.executionManager.endRun(rec.executionId, { kind: 'waitingApproval', approvalId: 'ap-1' })
+    await rt.executionManager.markApprovalDecided(rec.executionId, EXECUTION_STATUS.DENIED, { code: 'GOVERNANCE_DENIED', message: 'rejected' })
     await vi.waitFor(() => expect(events).toHaveLength(2))
     expect(events.map(e => e.kind === 'execution' ? e.state.status : e.kind)).toEqual([EXECUTION_STATUS.WAITING_APPROVAL, EXECUTION_STATUS.DENIED])
     await rt.shutdown()
@@ -137,7 +137,7 @@ describe('audit pipeline', () => {
     const rt: DurableExecutionRuntime = makeRuntime(
       [{ name: 'finalize-needs-approval', match: { service: 'trafficking', operation: 'finalizeCampaign' }, action: { type: 'REQUIRE_APPROVAL' } }],
       GOVERNANCE_DECISION.ALLOW, undefined,
-      { onStateChange: id => { void rt.manager.inspect(id).then(i => pipeline.publish({ kind: 'execution', state: executionStateOf(i) })) } }
+      { onStateChange: id => { void rt.executionManager.inspect(id).then(i => pipeline.publish({ kind: 'execution', state: executionStateOf(i) })) } }
     )
     const { handlers, server } = makeFakeServer()
     const on = { ...globalConfig, observability: { ...globalConfig.observability, enableAudit: true } }

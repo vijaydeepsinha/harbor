@@ -114,9 +114,9 @@ export function makeRuntime(
   const ruleStore = new GovernanceRuleStore()
   ruleStore.swap(rules.map((r, i): LoadedRule => ({ rule: governanceRuleSchema.parse(r), source: `rule-${i}.yaml`, contentHash: 'deadbeefcafe0000' })))
   return {
-    persistence, manager, approvals, rules: ruleStore,
+    persistence, executionManager: manager, approvals, rules: ruleStore,
     requestState: createResumeStateCodec({ key: REQUEST_STATE_KEY, ttlSeconds: 600 }),
-    config: { store: { type: 'in-memory' }, governance: { rulesDir: '/nonexistent', defaultDecision, approvalTtlSec: 600 } },
+    executionConfig: { store: { type: 'in-memory' }, governance: { rulesDir: '/nonexistent', defaultDecision, approvalTtlSec: 600 } },
     async shutdown() {}
   }
 }

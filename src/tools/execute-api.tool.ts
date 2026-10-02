@@ -262,7 +262,7 @@ async () => {
           execution = resumed.execution
           executionId = execution.executionId
           if (pendingRetry) return pendingRetry
-          execution = await durableExecutionRuntime.manager.beginRun(execution.executionId)
+          execution = await durableExecutionRuntime.executionManager.beginRun(execution.executionId)
           runStarted = true
           bridge = makeBridge(durableExecutionRuntime, execution, svcResources, userIdHash)
           callLog = bridge.journal
@@ -294,7 +294,7 @@ async () => {
         const result = await runApiInSandbox(program, sandboxCtx)
 
         if (durableExecutionRuntime && execution) {
-          await durableExecutionRuntime.manager.endRun(execution.executionId, { kind: 'completed', result })
+          await durableExecutionRuntime.executionManager.endRun(execution.executionId, { kind: 'completed', result })
         }
 
         const durationMs = Date.now() - startTime
@@ -382,7 +382,7 @@ async () => {
           // pending) — then no run started, there is no lock to release and the
           // stored execution must stay exactly as it was.
           if (runStarted) {
-            await durableExecutionRuntime.manager.endRun(executionId, outcomeForStore).catch(e =>
+            await durableExecutionRuntime.executionManager.endRun(executionId, outcomeForStore).catch(e =>
               logger.error({ correlationId, executionId, error: ensureError(e).message }, 'Failed to persist run outcome'))
           }
           if (err instanceof ApprovalRequiredError) {
@@ -409,7 +409,7 @@ async () => {
         // it is stored — not the status this error would have given a run.
         const reportedStatus = runStarted || !durableExecutionRuntime || executionId === undefined
           ? status
-          : await durableExecutionRuntime.manager.load(executionId).then(r => r.status, () => undefined)
+          : await durableExecutionRuntime.executionManager.load(executionId).then(r => r.status, () => undefined)
         return mcpError(
           errObj.message,
           errorCode,
@@ -482,14 +482,14 @@ async function resolveExecution(
   const resumeId = state?.executionId ?? (typeof metaId === 'string' ? metaId : undefined)
 
   if (resumeId === undefined) {
-    const execution = await rt.manager.create({ service: input.service, code: input.code, userIdHash: input.userIdHash })
+    const execution = await rt.executionManager.create({ service: input.service, code: input.code, userIdHash: input.userIdHash })
     logger.info({ correlationId, executionId: execution.executionId }, 'Code Mode execution created')
     return { execution }
   }
 
   let execution: ExecutionRecord
   try {
-    execution = await rt.manager.load(resumeId)
+    execution = await rt.executionManager.load(resumeId)
   } catch (err) {
     return { executionId: resumeId, error: mcpError(ensureError(err).message, getErrorCode(err), errorRetryable(err)) }
   }
@@ -554,7 +554,7 @@ async function resolveExecution(
           ) }
         }
       }
-      execution = await rt.manager.load(resumeId)
+      execution = await rt.executionManager.load(resumeId)
     } else if (execution.status === EXECUTION_STATUS.WAITING_APPROVAL) {
       // The client retried without answering: ask again (spec allows repeated input_required).
       const approval = await rt.approvals.get(state.approvalId)
@@ -593,7 +593,7 @@ function makeBridge(rt: DurableExecutionRuntime, execution: ExecutionRecord, svc
         ...(request.pathParams !== undefined ? { pathParams: request.pathParams } : {}),
         ...(request.query !== undefined ? { query: request.query } : {}),
         ...(request.body !== undefined ? { body: request.body } : {})
-      }, rt.config.governance.defaultDecision)
+      }, rt.executionConfig.governance.defaultDecision)
       await rt.persistence.putDecision({
         executionId: execution.executionId, activitySequence: sequence,
         decision: outcome.decision, reason: outcome.reason,
@@ -601,7 +601,7 @@ function makeBridge(rt: DurableExecutionRuntime, execution: ExecutionRecord, svc
         ...(outcome.decidingRule !== undefined ? { decidingRule: outcome.decidingRule } : {}),
         evaluatedAt: new Date().toISOString()
       })
-      await rt.manager.recordProgress(execution.executionId, sequence)
+      await rt.executionManager.recordProgress(execution.executionId, sequence)
       switch (outcome.decision) {
         case GOVERNANCE_DECISION.ALLOW:
           return { decision: 'ALLOW' }

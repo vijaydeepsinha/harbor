@@ -48,11 +48,11 @@ describe('run lifecycle — calls the program did not await', () => {
     const id = executionIdOf(res)
     expect(JSON.stringify(res['content'])).toContain('returned early')
     expect(calls.map(c => c.req.path)).toEqual(['/campaigns/C1/finalize', '/campaigns/C2/finalize'])
-    const before = await runtime.manager.inspect(id)
+    const before = await runtime.executionManager.inspect(id)
     expect(before.execution.status).toBe(EXECUTION_STATUS.COMPLETED)
     expect(before.activities.map(a => a.status)).toEqual([ACTIVITY_STATUS.COMPLETED, ACTIVITY_STATUS.COMPLETED])
     await new Promise(r => setTimeout(r, 150))
-    expect(await runtime.manager.inspect(id)).toEqual(before)
+    expect(await runtime.executionManager.inspect(id)).toEqual(before)
   })
 
   it('an un-awaited call that needs approval pauses the execution instead of leaving an orphan approval on a finished one', async () => {
@@ -64,7 +64,7 @@ describe('run lifecycle — calls the program did not await', () => {
       return 'returned early'
     }` }, makeCtx())
     expect(res['resultType']).toBe('input_required')
-    const insp = await runtime.manager.inspect(executionIdOf(res))
+    const insp = await runtime.executionManager.inspect(executionIdOf(res))
     expect(insp.execution.status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
     expect(insp.approvals.map(a => a.status)).toEqual(['PENDING'])
     expect(calls).toHaveLength(0)
@@ -81,7 +81,7 @@ describe('run lifecycle — calls the program did not await', () => {
       ])
       return r.map(x => x.status)
     }` }, makeCtx())
-    const insp = await runtime.manager.inspect(executionIdOf(res))
+    const insp = await runtime.executionManager.inspect(executionIdOf(res))
     expect(insp.execution.status).toBe(EXECUTION_STATUS.DENIED)
     expect(insp.approvals).toHaveLength(0)
     expect(insp.activities.map(a => [a.sequence, a.status])).toEqual([[1, ACTIVITY_STATUS.DENIED]])

@@ -64,7 +64,7 @@ describe('§47 acceptance: two approval rounds, every side effect exactly once',
     expect(count('POST', '/campaigns/C1')).toBe(0)      // #3 paused before executing
     let acts = await rt.persistence.listActivities(executionId)
     expect(acts.map(a => [a.sequence, a.status])).toEqual([[1, 'COMPLETED'], [2, 'COMPLETED'], [3, 'WAITING_APPROVAL']])
-    expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect((await rt.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
 
     // ── First resume (approve activation) ────────────────────────────────
     const run2 = await handler(args, await retryCtx(rt, run1, { action: 'accept', approve: true }, '2'))
@@ -77,7 +77,7 @@ describe('§47 acceptance: two approval rounds, every side effect exactly once',
     expect(acts.map(a => [a.sequence, a.status])).toEqual([
       [1, 'COMPLETED'], [2, 'COMPLETED'], [3, 'COMPLETED'], [4, 'WAITING_APPROVAL']
     ])
-    expect((await rt.manager.load(executionId)).runCount).toBe(2)
+    expect((await rt.executionManager.load(executionId)).runCount).toBe(2)
 
     // ── Second resume (approve creative) ─────────────────────────────────
     const run3 = await handler(args, await retryCtx(rt, run2, { action: 'accept', approve: true }, '3'))
@@ -104,7 +104,7 @@ describe('§47 acceptance: two approval rounds, every side effect exactly once',
     ])
 
     // ── Records: journal, decisions, approvals, history ───────────────────
-    const { execution, activities, approvals, decisions, history } = await rt.manager.inspect(executionId)
+    const { execution, activities, approvals, decisions, history } = await rt.executionManager.inspect(executionId)
     expect(execution.status).toBe(EXECUTION_STATUS.COMPLETED)
     expect(execution.runCount).toBe(3)
     // The persisted program drove all three isolates (call order above); once

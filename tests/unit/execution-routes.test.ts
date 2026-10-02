@@ -66,14 +66,14 @@ async function seedPaused(rt: ReturnType<typeof makeRuntime>, token = TOKEN, use
     access_token: token,
     metadata: { userId }
   })
-  const exec = await rt.manager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
-  await rt.manager.beginRun(exec.executionId)
+  const exec = await rt.executionManager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
+  await rt.executionManager.beginRun(exec.executionId)
   const journal = new ActivityJournal(rt.persistence, exec.executionId, 'trafficking', 1)
   const request = { method: 'POST' as const, rawPath: '/campaigns/C1', specPath: '/campaigns/{id}', operationId: 'updateCampaign', body: { action: 'activate' } }
   await journal.next(request)
   const approval = await rt.approvals.request(exec.executionId, 1, { ...request, service: 'trafficking', reason: 'r', matchedRules: ['x'] })
   await journal.recordWaitingApproval(1, request, approval.approvalId)
-  await rt.manager.endRun(exec.executionId, { kind: 'waitingApproval', approvalId: approval.approvalId })
+  await rt.executionManager.endRun(exec.executionId, { kind: 'waitingApproval', approvalId: approval.approvalId })
   return { executionId: exec.executionId, approvalId: approval.approvalId }
 }
 
@@ -178,7 +178,7 @@ describe('execution routes', () => {
     expect(refused.error).not.toContain(theirs.executionId) // the reply does not confirm whose approval it is
     // Their approval is untouched and their execution still pauses on it.
     expect((await rt.approvals.get(theirs.approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
-    expect((await rt.manager.load(theirs.executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect((await rt.executionManager.load(theirs.executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
   })
 
   it('answers an over-limit POST body with a readable 413, not a reset connection', async () => {
@@ -209,7 +209,7 @@ describe('execution routes', () => {
     expect(decision.status).toBe(409)
     expect((await decision.json() as { code: string }).code).toBe(ERR.EXECUTION_LOCKED)
     expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
-    expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect((await rt.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
     await rt.persistence.releaseLock(executionId)
   })
 
@@ -245,7 +245,7 @@ describe('execution routes', () => {
     const rt = makeRuntime()
     const first = await resources.authMiddleware.validateRequest(`Bearer ${TOKEN}`, 'c')
     const userIdHash = hashAuthenticatedPrincipal(first.payload, TOKEN)
-    const exec = await rt.manager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
+    const exec = await rt.executionManager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
     const { baseUrl, close } = await start(rt, registry); cleanup = close
 
     const res = await fetch(`${baseUrl}/executions/${exec.executionId}`, {

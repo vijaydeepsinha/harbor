@@ -49,7 +49,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(typeof executionId).toBe('string')
     expect(meta[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
     expect(calls.length).toBe(2)
-    const exec = await rt.manager.load(executionId)
+    const exec = await rt.executionManager.load(executionId)
     expect(exec.originalCode).toBeUndefined() // a COMPLETED execution keeps no program text (EXECUTION_CODE_RETENTION=DROP)
     expect(exec.currentActivity).toBe(2)
     expect((await rt.persistence.listDecisions(executionId)).map(d => d.decision)).toEqual(['ALLOW', 'ALLOW'])
@@ -71,7 +71,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     const executionId = meta[EXECUTION_ID_META_KEY] as string
     const approvalId = meta[APPROVAL_ID_META_KEY] as string
     expect(meta[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
-    expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect((await rt.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
     expect((await rt.persistence.getActivity(executionId, 2))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
     expect(count('GET', '/campaigns')).toBe(1)
     expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
@@ -86,7 +86,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     const approval = await rt.approvals.get(approvalId)
     expect(approval.status).toBe(APPROVAL_STATUS.APPROVED)
     expect(approval.comment).toBe('ship it')
-    const exec = await rt.manager.load(executionId)
+    const exec = await rt.executionManager.load(executionId)
     expect(exec.status).toBe(EXECUTION_STATUS.COMPLETED)
     expect(exec.runCount).toBe(2)
   })
@@ -104,7 +104,7 @@ describe('api_execute under the Code Mode governance layer', () => {
       expect(r['isError']).toBe(true)
       expect((parseContent(r) as { code: string }).code).toBe(code)
       const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
-      expect((await rt.manager.load(executionId)).status).toBe(status)
+      expect((await rt.executionManager.load(executionId)).status).toBe(status)
       expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
     }
   })
@@ -141,14 +141,14 @@ describe('api_execute under the Code Mode governance layer', () => {
     const meta = paused['_meta'] as Record<string, unknown>
     expect(meta[APPROVAL_ID_META_KEY]).toBe(body.approvalId)
 
-    expect((await rt.manager.load(body.executionId)).originalCode).toBe(PROGRAM_FINALIZE) // persisted while paused
+    expect((await rt.executionManager.load(body.executionId)).originalCode).toBe(PROGRAM_FINALIZE) // persisted while paused
 
     await rt.approvals.decide(body.approvalId, { action: 'accept', approve: true, via: 'http', executionId: body.executionId })
     const done = await handler({ service: 'trafficking', code: 'async () => "REPLACEMENT CODE IS IGNORED"' }, makeCtx({ elicitation: false, executionIdMeta: body.executionId }))
     expect(done['isError']).toBeUndefined()
     expect(parseContent(done)).toEqual({ id: 'C1', did: 'POST /campaigns/C1/finalize' }) // the persisted program ran
     expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
-    expect((await rt.manager.load(body.executionId)).originalCode).toBeUndefined() // dropped once COMPLETED (default DROP)
+    expect((await rt.executionManager.load(body.executionId)).originalCode).toBeUndefined() // dropped once COMPLETED (default DROP)
   })
 
   it('resuming before the approval is decided pauses again — it does not report the execution as FAILED', async () => {
@@ -175,7 +175,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect((reasked['_meta'] as Record<string, unknown>)[APPROVAL_ID_META_KEY]).toBe(approvalId)
 
     // Nothing ran and nothing changed: still paused on the same approval, one run so far.
-    const exec = await rt.manager.load(executionId)
+    const exec = await rt.executionManager.load(executionId)
     expect(exec.status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
     expect(exec.pendingApprovalId).toBe(approvalId)
     expect(exec.runCount).toBe(1)
@@ -259,7 +259,7 @@ describe('api_execute under the Code Mode governance layer', () => {
       ['ALLOW', GOVERNANCE_REASON.NO_GOVERNANCE],
       ['DENY', GOVERNANCE_REASON.NO_MATCHING_RULE]
     ])
-    expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.DENIED)
+    expect((await rt.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.DENIED)
   })
 
   it('multi-pod on the memcache store: paused on pod A, approved and resumed on pod B, every call made once', async () => {
@@ -279,7 +279,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(count('GET', '/campaigns')).toBe(1)                // replayed on pod B from the shared journal
     expect(count('POST', '/campaigns/C1/finalize')).toBe(1)   // executed exactly once
     const executionId = (done['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
-    expect((await podA.manager.load(executionId)).status).toBe(EXECUTION_STATUS.COMPLETED) // pod A sees pod B's outcome
+    expect((await podA.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.COMPLETED) // pod A sees pod B's outcome
   })
 
   it('X-Correlation-ID is the execution id on every call of one script, across approval resumes; the client id is forwarded', async () => {
@@ -307,7 +307,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     const executionId = (r['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
     const decisions = await rt.persistence.listDecisions(executionId)
     expect(decisions[1]).toMatchObject({ decision: 'DENY', matchedRules: ['no-finalize'], ruleVersions: ['no-finalize@1#deadbeefcafe'] })
-    expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.DENIED)
+    expect((await rt.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.DENIED)
   })
 
   it('refuses a resume by another principal and by another service', async () => {
@@ -354,7 +354,7 @@ describe('api_execute under the Code Mode governance layer', () => {
       // Once finished, a late conflicting answer is refused as not resumable, and changes nothing.
       const late = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'decline' }))
       expect((parseContent(late) as { code: string }).code).toBe(ERR.EXECUTION_NOT_RESUMABLE)
-      expect((await rt.manager.load(meta[EXECUTION_ID_META_KEY]!)).status).toBe(EXECUTION_STATUS.COMPLETED)
+      expect((await rt.executionManager.load(meta[EXECUTION_ID_META_KEY]!)).status).toBe(EXECUTION_STATUS.COMPLETED)
     })
 
     it('a refused resume reports the stored status in _meta, not the status of a run that never started', async () => {

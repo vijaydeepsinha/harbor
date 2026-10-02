@@ -87,9 +87,9 @@ describe('ExecutionRetentionSweeper', () => {
         retention: { executionSec: 60 },
         governance: { rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600 }
       }, silent)
-      const rec = await rt.manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
-      await rt.manager.beginRun(rec.executionId)
-      await rt.manager.endRun(rec.executionId, { kind: 'completed', result: 1 })
+      const rec = await rt.executionManager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+      await rt.executionManager.beginRun(rec.executionId)
+      await rt.executionManager.endRun(rec.executionId, { kind: 'completed', result: 1 })
       await vi.advanceTimersByTimeAsync(59_000)
       expect(await rt.persistence.getExecution(rec.executionId)).toBeDefined()
       await vi.advanceTimersByTimeAsync(62_000)

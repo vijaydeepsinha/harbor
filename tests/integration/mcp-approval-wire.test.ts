@@ -103,7 +103,7 @@ describe('MCP wire: approval via input_required + retry', () => {
     expect(JSON.parse(content[0]!.text)).toEqual({ did: 'POST /campaigns/C1/finalize' })
     expect(count('GET', '/campaigns')).toBe(1)
     expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
-    expect((await rt.manager.load(executionId!)).status).toBe(EXECUTION_STATUS.COMPLETED)
+    expect((await rt.executionManager.load(executionId!)).status).toBe(EXECUTION_STATUS.COMPLETED)
   })
 
   it('a client that does not declare elicitation gets APPROVAL_REQUIRED with the ids, never an elicitation', async () => {

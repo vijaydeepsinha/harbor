@@ -24,11 +24,11 @@ import { errorMessage } from '../../core/utils/errors.js'
  */
 export interface DurableExecutionRuntime {
   persistence: ExecutionPersistence
-  manager: ExecutionManager
+  executionManager: ExecutionManager
   approvals: ApprovalService
   rules: GovernanceRuleStore
   requestState: ResumeStateCodec
-  config: ExecutionConfig
+  executionConfig: ExecutionConfig
   shutdown(): Promise<void>
 }
 
@@ -66,7 +66,7 @@ export async function buildDurableExecutionRuntime(config: ExecutionConfig, logg
     'Code Mode governance layer ready'
   )
   return {
-    persistence, manager, approvals, rules, requestState, config,
+    persistence, executionManager: manager, approvals, rules, requestState, executionConfig: config,
     async shutdown() {
       retention.stop()
       ruleRefresher.stop()

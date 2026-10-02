@@ -17,10 +17,10 @@ const config = (retention?: ExecutionConfig['retention']): ExecutionConfig => ({
 
 async function codeAfterCompletion(c: ExecutionConfig): Promise<string | undefined> {
   const rt = await buildDurableExecutionRuntime(c, silent)
-  const rec = await rt.manager.create({ service: 'svc', code: 'async () => 1', userIdHash: 'h' })
-  await rt.manager.beginRun(rec.executionId)
-  await rt.manager.endRun(rec.executionId, { kind: 'completed', result: 1 })
-  const code = (await rt.manager.load(rec.executionId)).originalCode
+  const rec = await rt.executionManager.create({ service: 'svc', code: 'async () => 1', userIdHash: 'h' })
+  await rt.executionManager.beginRun(rec.executionId)
+  await rt.executionManager.endRun(rec.executionId, { kind: 'completed', result: 1 })
+  const code = (await rt.executionManager.load(rec.executionId)).originalCode
   await rt.shutdown()
   return code
 }

@@ -53,9 +53,9 @@ export async function handleExecutionRoutes(
   try {
     if (approvalId === undefined) {
       if (req.method !== 'GET') throw new HttpError(405, ERR.NOT_FOUND, 'Method not allowed', undefined, { url })
-      const execution = await durableExecutionRuntime.manager.load(executionId)
+      const execution = await durableExecutionRuntime.executionManager.load(executionId)
       await authorizeExecution(execution, extracted.token, registry, url)
-      const inspection = await durableExecutionRuntime.manager.inspect(executionId)
+      const inspection = await durableExecutionRuntime.executionManager.inspect(executionId)
       sendJson(res, 200, inspection)
       return true
     }
@@ -69,7 +69,7 @@ export async function handleExecutionRoutes(
     // Authorize on the execution first; only then look at the approval, and
     // report one that belongs elsewhere exactly like an unknown one — the
     // reply must not confirm that some other execution's approval exists.
-    const execution = await durableExecutionRuntime.manager.load(executionId)
+    const execution = await durableExecutionRuntime.executionManager.load(executionId)
     await authorizeExecution(execution, extracted.token, registry, url)
     const approval = await durableExecutionRuntime.approvals.get(approvalId)
     if (approval.executionId !== executionId) {
@@ -83,7 +83,7 @@ export async function handleExecutionRoutes(
       via: 'http'
     })
     logger.info({ executionId, approvalId, outcome: result.outcome }, 'Approval decided via HTTP')
-    sendJson(res, 200, { approval: result.approval, outcome: result.outcome, executionStatus: (await durableExecutionRuntime.manager.load(executionId)).status })
+    sendJson(res, 200, { approval: result.approval, outcome: result.outcome, executionStatus: (await durableExecutionRuntime.executionManager.load(executionId)).status })
     return true
   } catch (err) {
     if (err instanceof HttpError) throw err
