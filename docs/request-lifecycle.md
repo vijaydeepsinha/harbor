@@ -496,7 +496,10 @@ and the execution ends `INTERRUPTED` (resumable).
 #### Step 7 — Multiple API calls
 
 Steps 5–6 repeat for every `api.request()` call inside the user's function. Concurrent calls
-(`Promise.all`) are admitted one at a time but run in parallel, up to `maxConcurrentCalls`. Once a
+(`Promise.all`) are admitted one at a time — each takes the next activity sequence in arrival order —
+but run in parallel, up to `maxConcurrentCalls`. A call admitted while another was in flight is
+journaled `admittedConcurrently`, and replay binds its query and body as well as its path
+(`docs/code-mode-governance.md` §4). Once a
 call pauses or stops the run, every later call is refused with the code that says why
 (`APPROVAL_REQUIRED`, `GOVERNANCE_DENIED`, `REPLAY_DIVERGED`, `EXECUTION_CANCELLED`,
 `ACTIVITY_OUTCOME_UNKNOWN`), and the first run-stopping outcome stands.

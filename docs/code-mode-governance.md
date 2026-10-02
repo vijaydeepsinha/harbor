@@ -115,8 +115,10 @@ amount or filter (a clock-dependent branch, `Promise.all` siblings arriving in
 another order) must not inherit it. A mismatch stops the run with
 `REPLAY_DIVERGED` and the execution is `FAILED`; nothing is executed under
 the old history and the recorded activity is left as it was. A `COMPLETED`
-record still replays when only its query or body drifted — nothing executes
-(§14).
+record still replays when only its query or body drifted — nothing executes,
+and a timestamp in a body does not make a sequential program unresumable
+(§14) — **unless it was admitted concurrently** (below): then its query and
+body are bound too.
 
 **Deterministic replay contract.** Given the same persisted program and the
 same recorded responses, replay reproduces the same external-call sequence.
@@ -139,6 +141,24 @@ journaling `EXECUTING` form one critical section per run, taken in arrival
 order. A call admitted after a sibling paused or denied the run therefore
 sees that stop and can neither execute nor open a second approval. The
 external calls themselves still overlap.
+
+**How concurrent calls are numbered.** Each call takes the next sequence
+when it reaches the bridge — arrival order, not completion order. Five
+creates started by one `Promise.all` are #1–#5 in array order, however their
+responses come back, and on a resume each is handed its own recorded
+response. Five approval-gated calls started together take five approval
+rounds: the first pauses the run, the others are refused in that run and
+reach governance one per resume. Arrival order can depend on timing, though:
+two chains that each read and then create (`await get(); await create()`)
+reach their creates in the order their reads returned. On a resume the
+reads replay at once, in sequence order, so the creates may now arrive the
+other way round. A call admitted while another call of the run was in flight
+is therefore journaled with `admittedConcurrently: true`, and replay binds
+its query and body even once it is `COMPLETED`: a sibling that reaches its
+sequence first is a divergence (`REPLAY_DIVERGED`, *calls started together
+arrived in another order*), never a sibling handed another call's response —
+which is what happened before, silently, with the run completing on the
+wrong resource's id.
 
 **The run ends when its calls end.** When the program's function settles,
 calls it started without awaiting (`ids.forEach(async …)`, a floating
@@ -603,11 +623,15 @@ call rather than a fix.
 - A `COMPLETED` activity replays even when the program now sends another
   query or body at that sequence (§4): nothing executes, but the program sees
   the response to the request originally sent.
-- Approval-gated calls started together (`Promise.all`) are admitted in
-  arrival order. If siblings with the same template arrive in a different
-  order on resume, the content check stops the run with `REPLAY_DIVERGED`
-  (fail closed) rather than executing the wrong one; the program has to be
-  submitted again as a new execution.
+- Calls started together are numbered in arrival order (§4). If siblings
+  with the same template arrive in a different order on resume — chains
+  racing on their responses, or approval-gated siblings — the content check
+  stops the run with `REPLAY_DIVERGED` (fail closed) rather than executing the
+  wrong one or handing one sibling another's response; the program has to be
+  submitted again as a new execution. The same check stops a concurrently
+  admitted call whose body carries the time (`Date.now()`), since its body
+  differs on every run — the case the open deterministic-replay decision
+  (seeded `Math.random()`, a clock anchored to recorded times) would remove.
 - Programs that depend on time or randomness before an external call are not
   made deterministic.
 - There is no API to cancel an execution: `CANCELLED` comes only from a

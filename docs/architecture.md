@@ -333,7 +333,7 @@ src/tools/execute-api.tool.ts
          anything else        → mcpError(message, code, retryable, progress)
 ```
 
-Why the admission lock: the journal lookup, governance, the stop check and journaling EXECUTING must see each other's results. Without it, two `Promise.all` siblings could both pass the stop check while the first was opening an approval, and the second would execute on a run that had already paused. Only admission is serialised; the backend calls themselves still run concurrently.
+Why the admission lock: the journal lookup, governance, the stop check and journaling EXECUTING must see each other's results. Without it, two `Promise.all` siblings could both pass the stop check while the first was opening an approval, and the second would execute on a run that had already paused. Only admission is serialised; the backend calls themselves still run concurrently. The handler is also the one place that sees a run's other calls, so it tells the gate whether a call was admitted while another was in flight; the journal records that, and replay binds such a call's content (`docs/code-mode-governance.md` §4).
 
 #### Idempotency keys
 
