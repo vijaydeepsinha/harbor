@@ -15,7 +15,7 @@ documents it links to are the source of truth for details.
 - **Five tools, frozen:** `discover_services`, `discover_skills`,
   `get_skill_details`, `search_code`, `api_execute` (`src/tools/`). Do not add
   tools or change their input schemas.
-- **Execution path:** `src/tools/execute-api.tool.ts` → `src/runtime/sandbox/execute-api-in-sandbox.ts`
+- **Execution path:** `src/tools/execute-api.tool.ts` → `src/tools/execute-api-run.ts` (the run orchestrator) → `src/runtime/sandbox/execute-api-in-sandbox.ts`
   (runs the program) → `src/runtime/sandbox/bridge-request-handler.ts` (the *host
   bridge*, the only door out of the isolate; it asks
   `src/runtime/execution/activity-gate.ts` whether to replay, execute, pause or
@@ -45,7 +45,9 @@ src/           all gateway source (tsconfig rootDir; builds to dist/)
                approvals, request-state, governance-runtime, retention),
                governance (operation-resolver, rule-schema, rule-loader, rule-store, rule-evaluator, rule-refresher),
                registry, spec, observability, transport (stdio)
-  tools/       the five MCP tools + tool-helpers (response _meta, request _meta reader)
+  tools/       the five MCP tools + tool-helpers (response _meta, request _meta reader); api_execute is split into
+               the tool (boundary → auth → responder), mcp-request-view (the SDK boundary), execute-api-run
+               (the run orchestrator) and execute-api-outcome (failure → audit outcome / status / metrics)
 governance/    Governance Rule directory: rules/ ships no rule files (every call is NO_GOVERNANCE until you add
                one); rules/examples/ is documentation
 services/      demo services (product, order, tasks, irctc enabled; billing, billing-jwt, billing-introspection disabled)

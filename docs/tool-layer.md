@@ -263,7 +263,7 @@ Runs AI-written code in a V8 sandbox with `api.request()` injected. `api.request
 }
 ```
 
-**Per tool call** (`src/tools/execute-api.tool.ts`): resolve the service → validate the bearer → create a durable execution, or resume one (an MCP retry carrying `requestState`, or `_meta["harbor/execution-id"]`) → take the execution's run lock → run the program — the persisted original on a resume — in a fresh isolate → wait for the calls it started to finish → record the run's outcome → return the result, an `input_required` approval request, or an error. Once the execution exists, every result carries `harbor/execution-id` and `harbor/execution-status` in `_meta`.
+**Per tool call** (`src/tools/execute-api.tool.ts` → `src/tools/execute-api-run.ts`): read the request at the SDK boundary (`src/tools/mcp-request-view.ts`) → resolve the service → validate the bearer → create a durable execution, or resume one (an MCP retry carrying `requestState`, or `_meta["harbor/execution-id"]`) → take the execution's run lock → run the program — the persisted original on a resume — in a fresh isolate → wait for the calls it started to finish → record the run's outcome → return the result, an `input_required` approval request, or an error. Once the execution exists, every result carries `harbor/execution-id` and `harbor/execution-status` in `_meta`.
 
 **Per `api.request()` call** (`src/runtime/sandbox/bridge-request-handler.ts`), in this order:
 

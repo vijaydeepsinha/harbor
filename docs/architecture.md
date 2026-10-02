@@ -262,7 +262,14 @@ Five tools, registered on a fresh `McpServer` for every request by `src/runtime/
 | `search-code.tool.ts` | `search_code` | Yes | Yes — agent's search over `PermissionGuard.filterSpec(spec)` |
 | `execute-api.tool.ts` | `api_execute` | Yes | Yes — runs the agent's program |
 
-`tool-helpers.ts` holds the shared pieces: `mcpSuccess` / `mcpError` (serverInfo in `_meta`), service resolution (`UNKNOWN_SERVICE`, not retryable), `validateAuth`, the `runSandboxTool` pipeline and the advisory request `_meta` reader. `api_execute` is the only tool that makes backend calls, and therefore the only one that touches executions, governance, the circuit breaker, idempotency and the audit trail.
+`tool-helpers.ts` holds the shared pieces: `mcpSuccess` / `mcpError` (serverInfo in `_meta`), service resolution (`UNKNOWN_SERVICE`, not retryable), `validateAuth`, the `runSandboxTool` pipeline and the advisory request `_meta` reader. `api_execute` is the only tool that makes backend calls, and therefore the only one that touches executions, governance, the circuit breaker, idempotency and the audit trail. It is split along those concerns:
+
+| File | Owns |
+|---|---|
+| `execute-api.tool.ts` | the tool's description and registration; per call: the SDK boundary, service, auth, then the **responder** — a report becomes metrics, one audit record and the MCP result (`input_required`, `APPROVAL_REQUIRED`, a success or an error) |
+| `mcp-request-view.ts` | the **SDK boundary**: `readMcpRequest` is the only code that reads `ServerContext`; it validates the sealed `requestState`'s shape, the human's answer (`approve` read once) and `_meta["harbor/execution-id"]`, and returns a view the rest works on |
+| `execute-api-run.ts` | the **run orchestrator** `runApiExecute`: which execution (create, or resume and apply the answer), the run lock, the sandbox run, the run's outcome in the store; returns a report and never throws |
+| `execute-api-outcome.ts` | the **outcome mapping**: one table from a failure to its audit outcome, execution status and metrics, read by persistence and the responder alike |
 
 ---
 
@@ -285,11 +292,13 @@ src/runtime/http/http-gateway.ts
         an echoed MRTR requestState is verified by the SDK (HMAC, TTL, method binding) before the handler
   ▼
 src/tools/execute-api.tool.ts
+  ├─ 0. readMcpRequest(ctx) — the SDK boundary (mcp-request-view.ts): the only read of ServerContext
   ├─ 1. resolveService(service)                    ⇒ UNKNOWN_SERVICE (not retryable)
   ├─ 2. validateAuth → AuthMiddleware.validateRequest (token cache; strategy.validate on a miss)
   │        a token the auth strategy rejects is a tool error (HTTP 200), not a 401
   │     userIdHash = hashAuthenticatedPrincipal(payload, bearer)
-  ├─ 3. resolveExecution
+  │  runApiExecute — the run orchestrator (execute-api-run.ts); steps 3–7, returns a report
+  ├─ 3. openExecution
   │        requestState (MRTR retry) or _meta["harbor/execution-id"] ⇒ resume:
   │           load; same principal and service or EXECUTION_NOT_RESUMABLE;
   │           apply the human's answer (ApprovalService.decide) — reject/cancel end it here;

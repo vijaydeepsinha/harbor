@@ -334,7 +334,7 @@ execution is created and no sandbox runs.
 
 #### Step 3 — Create or resume the execution
 
-**Files: `src/tools/execute-api.tool.ts` (`resolveExecution`), `src/runtime/execution/execution-manager.ts`**
+**Files: `src/tools/execute-api-run.ts` (`openExecution`), `src/tools/mcp-request-view.ts` (what the request says), `src/runtime/execution/execution-manager.ts`**
 
 - **A new call** (no `requestState`, no `_meta["harbor/execution-id"]`) creates an execution. Its
   `code` is persisted as the authoritative original.
@@ -514,7 +514,7 @@ request) still decides the outcome.
 
 #### Step 8 — End of run, audit and metrics
 
-**File: `src/tools/execute-api.tool.ts`**
+**Files: `src/tools/execute-api-run.ts` (the run's outcome in the store), `src/tools/execute-api.tool.ts` (the responder: metrics, audit, the MCP result), `src/tools/execute-api-outcome.ts` (the mapping both read)**
 
 `ExecutionManager.endRun()` records how the run ended and releases the lock:
 
