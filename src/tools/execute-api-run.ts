@@ -243,7 +243,6 @@ async function openExecution(
     if (resume.answer) {
       const ended = await applyAnswer(governanceRuntime, state, resume.answer, execution, logger, correlationId)
       if (ended) return refuse(ended)
-      execution = await governanceRuntime.executionManager.load(resumeId)
     } else if (execution.status === EXECUTION_STATUS.WAITING_APPROVAL) {
       // The client retried without answering: ask again (spec allows repeated input_required).
       const approval = await governanceRuntime.approvals.get(state.approvalId)
@@ -252,7 +251,11 @@ async function openExecution(
       }
     }
   }
-  return { kind: 'open', execution }
+  // A decision a crash or a store outage cut short is completed before
+  // anything runs: the run must meet the activity the human approved (or
+  // the end of the execution they rejected), not the old question again.
+  await governanceRuntime.approvals.completeDecisions(resumeId)
+  return { kind: 'open', execution: await governanceRuntime.executionManager.load(resumeId) }
 }
 
 /**

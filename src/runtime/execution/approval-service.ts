@@ -94,21 +94,44 @@ export class ApprovalService {
     if (observed.executionId !== input.executionId) {
       throw new ApprovalNotFoundError(approvalId)
     }
-    if (observed.status !== APPROVAL_STATUS.PENDING) {
-      throw new ApprovalAlreadyDecidedError(approvalId, observed.status)
-    }
     if (!await this.persistence.acquireLock(observed.executionId)) {
-      throw new ExecutionLockedError(observed.executionId)
+      throw observed.status !== APPROVAL_STATUS.PENDING
+        ? new ApprovalAlreadyDecidedError(approvalId, observed.status)
+        : new ExecutionLockedError(observed.executionId)
     }
 
     try {
       const approval = await this.get(approvalId)
       if (approval.status !== APPROVAL_STATUS.PENDING) {
+        // Decided already — possibly by this very caller, before a crash or a
+        // store outage cut the decision short. Finish what did not land, then
+        // say so: an answer is never applied twice.
+        await this.followDecision(approval)
         throw new ApprovalAlreadyDecidedError(approvalId, approval.status)
       }
       return await this.applyDecision(approval, input)
     } finally {
       await this.persistence.releaseLock(observed.executionId)
+    }
+  }
+
+  /**
+   * Completes every decision of this execution that was cut short — the
+   * approval says decided, but its activity or its execution never followed
+   * — so that a resume runs against a journal that agrees with the human.
+   * Without it, an approved activity still WAITING_APPROVAL would pause every
+   * resume on an approval that can no longer be answered. Takes the execution
+   * lock; when the lock is held, a run or a decision is in progress and the
+   * caller is about to be refused anyway, so nothing is done.
+   */
+  async completeDecisions(executionId: string): Promise<void> {
+    if (!await this.persistence.acquireLock(executionId)) return
+    try {
+      for (const approval of await this.persistence.listApprovals(executionId)) {
+        if (approval.status !== APPROVAL_STATUS.PENDING) await this.followDecision(approval)
+      }
+    } finally {
+      await this.persistence.releaseLock(executionId)
     }
   }
 
@@ -134,30 +157,47 @@ export class ApprovalService {
       decidedVia: input.via,
       ...(input.comment ? { comment: input.comment } : {})
     }
+    // The commit point. A decision is three writes — the approval, its
+    // activity, and for a rejection or cancellation the execution — and no
+    // store here offers a transaction across them. From this write on the
+    // decision has happened; the rest only makes the records agree with it,
+    // and is repeated if it is cut short (followDecision, completeDecisions).
     await this.persistence.putApproval(decided)
+    await this.followDecision(decided)
+    return { approval: decided, outcome }
+  }
 
-    if (activity) {
+  /**
+   * Makes the bound activity and — for a rejection or cancellation — the
+   * execution agree with a decided approval. Idempotent: each step looks at
+   * what is stored and writes only what has not happened yet, so it can run
+   * again after a crash or a store outage stopped it part-way.
+   */
+  private async followDecision(decided: ApprovalRecord): Promise<void> {
+    const activity = await this.persistence.getActivity(decided.executionId, decided.activitySequence)
+    if (activity && activity.status === ACTIVITY_STATUS.WAITING_APPROVAL && activity.approvalId === decided.approvalId) {
       activity.status =
-        outcome === APPROVAL_STATUS.APPROVED ? ACTIVITY_STATUS.APPROVED
-        : outcome === APPROVAL_STATUS.REJECTED ? ACTIVITY_STATUS.DENIED
+        decided.status === APPROVAL_STATUS.APPROVED ? ACTIVITY_STATUS.APPROVED
+        : decided.status === APPROVAL_STATUS.REJECTED ? ACTIVITY_STATUS.DENIED
         : ACTIVITY_STATUS.CANCELLED
-      activity.updatedAt = decided.decidedAt as string
+      activity.updatedAt = decided.decidedAt ?? this.now()
       await this.persistence.putActivity(activity)
     }
-
-    if (outcome === APPROVAL_STATUS.REJECTED) {
-      await this.manager.markApprovalDecided(approval.executionId, EXECUTION_STATUS.DENIED, {
+    // APPROVED: the execution stays WAITING_APPROVAL with a decided approval — resumable.
+    if (decided.status === APPROVAL_STATUS.APPROVED || decided.status === APPROVAL_STATUS.PENDING) return
+    const execution = await this.manager.load(decided.executionId)
+    if (TERMINAL_EXECUTION_STATUSES.has(execution.status)) return
+    if (decided.status === APPROVAL_STATUS.REJECTED) {
+      await this.manager.markApprovalDecided(decided.executionId, EXECUTION_STATUS.DENIED, {
         code: ERR.GOVERNANCE_DENIED,
-        message: `${GOVERNANCE_REASON.APPROVAL_REJECTED}: activity #${approval.activitySequence} (${approval.summary.method} ${approval.summary.specPath})`
+        message: `${GOVERNANCE_REASON.APPROVAL_REJECTED}: activity #${decided.activitySequence} (${decided.summary.method} ${decided.summary.specPath})`
       })
-    } else if (outcome === APPROVAL_STATUS.CANCELLED) {
-      await this.manager.markApprovalDecided(approval.executionId, EXECUTION_STATUS.CANCELLED, {
+    } else {
+      await this.manager.markApprovalDecided(decided.executionId, EXECUTION_STATUS.CANCELLED, {
         code: ERR.EXECUTION_CANCELLED,
-        message: `${GOVERNANCE_REASON.APPROVAL_CANCELLED}: activity #${approval.activitySequence}`
+        message: `${GOVERNANCE_REASON.APPROVAL_CANCELLED}: activity #${decided.activitySequence}`
       })
     }
-    // APPROVED: the execution stays WAITING_APPROVAL with a decided approval — resumable.
-    return { approval: decided, outcome }
   }
 
   /**
