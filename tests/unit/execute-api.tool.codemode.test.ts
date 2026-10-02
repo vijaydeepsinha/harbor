@@ -12,6 +12,7 @@ import { MemcacheExecutionStore } from '../../src/adapters/execution/memcache-ex
 import { FakeMemcache } from './fake-memcache.js'
 import { AuditPipeline } from '../../src/runtime/observability/audit-pipeline.js'
 import type { AuditEvent } from '../../src/spi/observability/audit-sink.js'
+import { hashAuthenticatedPrincipal } from '../../src/core/utils/user-id-hash.js'
 import {
   ERR, EXECUTION_STATUS, ACTIVITY_STATUS, APPROVAL_STATUS, GOVERNANCE_DECISION, GOVERNANCE_REASON, TOOL,
   EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY, APPROVAL_ID_META_KEY, APPROVAL_INPUT_KEY
@@ -434,6 +435,62 @@ describe('api_execute under the Code Mode governance layer', () => {
       const last = records().at(-1)!
       expect(last.executionId).toBe(executionId)
       expect(last.codeSubmitted).toBe(PROGRAM_FINALIZE)
+    })
+
+    it('every record names the authenticated principal: the pause, a failed run, a declined approval and a refused resume', async () => {
+      const owner = hashAuthenticatedPrincipal({ access_token: 'tok', metadata: { userId: 'user-42' } }, 'client-token')
+      const governanceRuntime = makeRuntime([FINALIZE_RULE])
+      const { handler, records } = auditedTool(governanceRuntime, true)
+
+      // 1. The approval pause.
+      const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false }))
+      const { executionId, approvalId } = parseContent(paused) as { executionId: string; approvalId: string }
+      await settle()
+      expect(records().at(-1)).toMatchObject({ outcome: 'approval_required', userIdHash: owner, executionId })
+
+      // 2. A run that fails (the approved finalize meets a backend that is down).
+      await governanceRuntime.approvals.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId })
+      await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false, executionIdMeta: executionId }))
+      await settle()
+      expect(records().at(-1)).toMatchObject({ outcome: 'error', userIdHash: owner, executionId })
+
+      // 3. A refused resume (the execution is finished): nothing ran, and the record says who tried.
+      const refused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false, executionIdMeta: executionId }))
+      expect(refused['isError']).toBe(true)
+      await settle()
+      expect(records().at(-1)).toMatchObject({ outcome: 'error', userIdHash: owner, executionId })
+
+      // 4. A decline answered over MCP.
+      const second = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
+      await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(governanceRuntime, second, { action: 'decline' }))
+      await settle()
+      expect(records().at(-1)).toMatchObject({ outcome: 'governance_denied', userIdHash: owner })
+
+      expect(records().map(r => r.userIdHash)).not.toContain('unknown')
+    })
+
+    it('a resume refused because the execution belongs to someone else is audited under the caller who tried, not the owner', async () => {
+      const governanceRuntime = makeRuntime([FINALIZE_RULE])
+      const events: AuditEvent[] = []
+      const pipeline = new AuditPipeline([{ name: 'capture', write: (e: AuditEvent) => { events.push(e) } }], silentLogger)
+      const metrics = { increment: () => {}, stop: () => {} } as unknown as MetricsRegistry
+      const config = { ...globalConfig, observability: { ...globalConfig.observability, enableAudit: true } }
+      const toolFor = (userId: string) => {
+        const { handlers, server } = makeFakeServer()
+        registerExecuteApiTool(server, makeRegistry({ trafficking: makeResources('trafficking', makeConnector().connector, userId) }), config, silentLogger, metrics, 'client-token', governanceRuntime, pipeline)
+        return handlers[TOOL.API_EXECUTE]!
+      }
+      const paused = await toolFor('user-42')({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false }))
+      const { executionId } = parseContent(paused) as { executionId: string }
+      const ownerHash = (await governanceRuntime.executionManager.load(executionId)).userIdHash
+
+      const r = await toolFor('mallory')({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx({ elicitation: false, executionIdMeta: executionId }))
+      expect((parseContent(r) as { code: string }).code).toBe(ERR.EXECUTION_NOT_RESUMABLE)
+      await settle()
+      const last = events.filter(e => e.kind === 'audit').map(e => (e as Extract<AuditEvent, { kind: 'audit' }>).record).at(-1)!
+      expect(last.executionId).toBe(executionId)
+      expect(last.userIdHash).toMatch(/^[0-9a-f]{64}$/)
+      expect(last.userIdHash).not.toBe(ownerHash)
     })
 
     it('a decline answered on resume is audited, with the code that caller sent', async () => {

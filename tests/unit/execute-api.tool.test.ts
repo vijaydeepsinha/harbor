@@ -381,7 +381,7 @@ describe('registerExecuteApiTool', () => {
     expect(audit.userIdHash).not.toBe(createHash('sha256').update(goodToken.access_token).digest('hex'))
   })
 
-  it('PermissionDeniedError ⇒ OUTCOME.PERMISSION_DENIED, audit with userIdHash="unknown", no CB_OPENS, no SANDBOX_ERRORS', async () => {
+  it('PermissionDeniedError ⇒ OUTCOME.PERMISSION_DENIED, audit under the authenticated principal, no CB_OPENS, no SANDBOX_ERRORS', async () => {
     const svc = makeResources({ name: 'tasks' })
     vi.mocked(runApiInSandbox).mockRejectedValue(new PermissionDeniedError('/orders', 'POST'))
 
@@ -413,7 +413,8 @@ describe('registerExecuteApiTool', () => {
 
     const audit = vi.mocked(writeAuditRecord).mock.calls[0]![0]
     expect(audit.outcome).toBe(OUTCOME.PERMISSION_DENIED)
-    expect(audit.userIdHash).toBe('unknown')
+    // A failed call is audited under the principal that made it (the auth strategy mapped userId 'user-42').
+    expect(audit.userIdHash).toBe(createHash('sha256').update('user-42').digest('hex'))
     expect(audit.errorCode).toBe(ERR.PERMISSION_DENIED)
     expect(audit.errorType).toBe('PermissionDeniedError')
     expect(audit.apiCallCount).toBe(0)

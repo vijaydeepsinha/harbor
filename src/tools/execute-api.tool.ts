@@ -249,14 +249,15 @@ async () => {
           const resumed = await resolveExecution(governanceRuntime, ctx, { service, code, userIdHash }, logger, correlationId)
           if ('error' in resumed) {
             // Refused, or the answer itself ended the execution (decline, cancel): nothing ran, but the
-            // decision is part of the audit trail. codeSubmitted stays what this caller sent — never
-            // the persisted program, which may belong to someone else.
+            // decision is part of the audit trail — under the principal that just authenticated, which
+            // for a refused resume is the caller who tried, not the execution's owner. codeSubmitted
+            // stays what this caller sent — never the persisted program, which may belong to someone else.
             executionId = resumed.executionId
             const refusedCode = toolErrorCode(resumed.error)
             outcome = refusedCode === ERR.GOVERNANCE_DENIED ? OUTCOME.GOVERNANCE_DENIED
               : refusedCode === ERR.EXECUTION_CANCELLED ? OUTCOME.EXECUTION_CANCELLED
               : OUTCOME.ERROR
-            audit({ outcome, errorCode: refusedCode, userIdHash: 'unknown' }, code)
+            audit({ outcome, errorCode: refusedCode }, code)
             return resumed.error
           }
           if ('reprompt' in resumed) pendingRetry = resumed.reprompt
@@ -388,13 +389,14 @@ async () => {
           }
           if (err instanceof ApprovalRequiredError) {
             approvalId = err.approvalId
-            audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, program)
+            audit({ outcome, errorType, errorCode }, program)
             return await approvalResult(governanceRuntime, ctx, err, userIdHash, logger, correlationId)
           }
         }
 
-        // Error-path audit keeps the pre-existing shape (userIdHash 'unknown'); see docs/code-mode-governance.md → limitations.
-        audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, program)
+        // The record names the authenticated principal on every path. It reads 'unknown' only
+        // when the failure came before authentication finished — there is no principal to name.
+        audit({ outcome, errorType, errorCode }, program)
 
         // Attach structured progress (per-call status + ids extracted from
         // successful POST responses) so the caller can resume a failed
