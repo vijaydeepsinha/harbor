@@ -275,9 +275,17 @@ elicitation**. No custom MCP methods.
    program in a fresh isolate.
 4. Mapping: `accept` with `approve: true` → `APPROVED` (the activity executes
    on resume); `accept` with `approve: false` or `decline` → `REJECTED`
-   (execution `DENIED`); `cancel` → `CANCELLED`. An `accept` whose `approve`
-   is missing or not a boolean is refused (`INVALID_API_REQUEST`) and the
-   approval stays pending — a malformed answer is never read as a yes.
+   (execution `DENIED`); `cancel` → `CANCELLED`. `approve` may also be a word,
+   for approvers who answer in a chat rather than tick a box: `yes`, `sure`,
+   `proceed`, `approve`, `approved` approve; `no`, `reject`, `rejected`,
+   `deny`, `denied`, `decline`, `declined` reject (`APPROVAL_ANSWER_WORDS` in
+   `src/core/constants.ts`; the whole value, trimmed, any case). Both channels
+   read the field with the same function (`readApprovalAnswer` in
+   `src/runtime/execution/approval-service.ts`). An `accept` whose `approve`
+   is missing or is anything else — a number, `null`, the strings `"true"` /
+   `"false"`, a sentence such as `"yes please"` — is refused
+   (`INVALID_API_REQUEST`) and the approval stays pending: an answer Harbor
+   does not recognise is never read as a yes.
 
 An approval is bound to **one activity**. If a later activity needs approval,
 the run pauses again with a new elicitation and a new `requestState` —
@@ -390,7 +398,7 @@ Agent                Harbor (api_execute)          V8 #1              Backend   
 | Calls still in flight when the program returned | finished within the run's time budget, else aborted and journaled `FAILED` (outcome unknown), before the run's outcome is recorded (§4) |
 | Circuit open / other retryable error | execution `INTERRUPTED` (resumable via `_meta["harbor/execution-id"]`); no activity recorded for the unmade call |
 | Governance evaluation error | `DENY` with `GOVERNANCE_EVALUATION_FAILED` |
-| Malformed answer (`accept` without a boolean `approve`) | `INVALID_API_REQUEST` (HTTP 400); the approval stays pending |
+| Malformed answer (`accept` whose `approve` is missing or neither a boolean nor a listed word, §7) | `INVALID_API_REQUEST` (HTTP 400); the approval stays pending |
 | Approval decided twice | second decision refused (`APPROVAL_ALREADY_DECIDED`); an MRTR retry repeating the recorded decision resumes, a conflicting one runs nothing (§7) |
 | Answer for an approval the execution no longer waits on | `EXECUTION_NOT_RESUMABLE`; nothing is written (§7) |
 | Concurrent approval decisions | decisions serialize on the execution lock; a contender gets `EXECUTION_LOCKED` (HTTP 409) without changing state, then can retry and observe `APPROVAL_ALREADY_DECIDED` |
@@ -409,8 +417,8 @@ lets one probe through at a time.
 
 `GET /executions/{id}` returns `{ execution, activities, approvals,
 decisions, history }`. `POST /executions/{id}/approvals/{approvalId}` with
-`{ "action": "accept" | "decline" | "cancel", "approve"?: boolean,
-"comment"?: string }` decides an approval — the fallback for clients without
+`{ "action": "accept" | "decline" | "cancel", "approve"?: boolean | word,
+"comment"?: string }` (the words are listed in §7) decides an approval — the fallback for clients without
 elicitation (§7) — and returns `{ approval, outcome, executionStatus }`
 (`src/runtime/http/execution-routes.ts`).
 
@@ -429,7 +437,7 @@ the HTTP and the MCP door.
 | Status | When |
 |---|---|
 | `200` | the inspection, or the decision applied |
-| `400 INVALID_API_REQUEST` | body not a JSON object, `action` not one of the three, or `accept` without a boolean `approve` (the approval stays pending) |
+| `400 INVALID_API_REQUEST` | body not a JSON object, `action` not one of the three, or `accept` whose `approve` is missing or not a recognised answer (the approval stays pending) |
 | `400 EXECUTION_NOT_RESUMABLE` | the execution has finished, or its activity no longer waits on this approval (§7) |
 | `401` | bearer missing or malformed (with `WWW-Authenticate` when `HARBOR_RESOURCE_URI` is set), or rejected by the service's auth strategy |
 | `403 AUTH_FAILED` | the bearer belongs to a different principal than the execution's owner |

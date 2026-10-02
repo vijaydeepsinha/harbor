@@ -575,14 +575,14 @@ Additional error codes:
 
 ### `/executions` (HTTP)
 
-`GET /executions/{id}` returns the execution, its activities, approvals, decisions and history; `POST /executions/{id}/approvals/{approvalId}` takes `{ "action": "accept" | "decline" | "cancel", "approve"?: boolean, "comment"?: string }` (`accept` needs `approve: true` to approve, `approve: false` rejects) and returns `{ approval, outcome, executionStatus }`. Both validate the bearer against the execution's service and require the execution's owner (`src/runtime/http/execution-routes.ts`):
+`GET /executions/{id}` returns the execution, its activities, approvals, decisions and history; `POST /executions/{id}/approvals/{approvalId}` takes `{ "action": "accept" | "decline" | "cancel", "approve"?: boolean | word, "comment"?: string }` (`accept` needs `approve: true` — or `yes`, `sure`, `proceed`, `approve`, `approved` — to approve; `approve: false`, or `no`, `reject`, `rejected`, `deny`, `denied`, `decline`, `declined`, rejects) and returns `{ approval, outcome, executionStatus }`. Both validate the bearer against the execution's service and require the execution's owner (`src/runtime/http/execution-routes.ts`):
 
 | Status | Code | When |
 |--------|------|------|
 | 401 | `MISSING_TOKEN` / `TOKEN_INVALID` / `TOKEN_EXPIRED` | Missing, malformed or rejected bearer |
 | 403 | `AUTH_FAILED` | A valid bearer of another principal |
 | 503 | `INTROSPECTION_FAILED` | The auth service is unreachable |
-| 400 | `INVALID_API_REQUEST` / `EXECUTION_NOT_RESUMABLE` | Body not a JSON object, bad `action`, `accept` without a boolean `approve`; an approval that can no longer be decided |
+| 400 | `INVALID_API_REQUEST` / `EXECUTION_NOT_RESUMABLE` | Body not a JSON object, bad `action`, `accept` whose `approve` is missing or not a recognised answer; an approval that can no longer be decided |
 | 404 | `EXECUTION_NOT_FOUND` / `APPROVAL_NOT_FOUND` | Unknown execution; unknown approval, or one belonging to another execution |
 | 409 | `EXECUTION_LOCKED` / `APPROVAL_ALREADY_DECIDED` | The execution is running or another decision holds its lock; already decided |
 | 413 | `PAYLOAD_TOO_LARGE` | Body over 64 KiB |

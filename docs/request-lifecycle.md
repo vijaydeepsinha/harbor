@@ -601,7 +601,7 @@ Transport-level failures are HTTP responses; everything after the transport is a
 | Execution already running | `EXECUTION_LOCKED` | yes | Another run holds the lock |
 | Resume of an unknown / finished / someone else's execution | `EXECUTION_NOT_FOUND` / `EXECUTION_NOT_RESUMABLE` | no | Nothing runs; when `beginRun` refuses, `harbor/execution-status` reports the stored status |
 | Conflicting answer to an already decided approval | `APPROVAL_ALREADY_DECIDED` | no | Nothing runs; repeating the recorded answer resumes. On a finished execution: `EXECUTION_NOT_RESUMABLE` |
-| `accept` without a boolean `approve` | `INVALID_API_REQUEST` | no | The approval stays pending |
+| `accept` whose `approve` is missing or not a recognised answer (a boolean, or a word such as `yes` / `no`) | `INVALID_API_REQUEST` | no | The approval stays pending |
 | Bad `api.request` argument or path | `INVALID_API_REQUEST` | no | Nothing sent or journaled; still reported if the program swallowed it |
 | More than `maxApiCalls` / `maxConcurrentCalls` | `CALL_LIMIT_EXCEEDED` / `CONCURRENT_LIMIT_EXCEEDED` | no | Execution `FAILED` |
 | Permission guard refuses | `PERMISSION_DENIED` | no | Execution `FAILED` |

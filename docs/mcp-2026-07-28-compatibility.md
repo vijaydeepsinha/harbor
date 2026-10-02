@@ -162,8 +162,10 @@ involved; the approval rides the 2026-07-28 multi-round-trip pattern:
    `src/runtime/http/mcp-server-factory.ts`); a tampered or expired state is a
    JSON-RPC `-32602` error. The handler then re-checks the principal against
    the bearer it just authenticated, records the decision once (`accept` with
-   `approve: true` approves; `approve: false` or `decline` rejects; `cancel`
-   cancels), and resumes the persisted program in a fresh isolate — completed
+   `approve: true` — or one of the words `yes`, `sure`, `proceed`, `approve`,
+   `approved` — approves; `approve: false`, a word such as `no` or
+   `rejected`, or `decline` rejects; `cancel` cancels; any other `approve`
+   value is refused and the approval stays pending), and resumes the persisted program in a fresh isolate — completed
    calls are replayed, never repeated. A retry without an answer is asked
    again.
 4. **Fallback.** A client without `elicitation` gets an `APPROVAL_REQUIRED`

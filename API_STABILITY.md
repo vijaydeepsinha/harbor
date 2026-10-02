@@ -143,7 +143,7 @@ All fields documented in `docs/service-onboarding.md` are stable. Additions are 
 | `GET /health` | ✅ | `{ status, protocolVersion, services }` |
 | `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp`, `/mcp/.well-known/oauth-protected-resource` | ✅ | RFC 9728 metadata; served only when `HARBOR_RESOURCE_URI` is set, else `404` |
 | `GET /executions/{id}` | 🟡 | Inspection; owner-bound (`401`/`503` on bearer failure, `403 AUTH_FAILED` for another principal, `404 EXECUTION_NOT_FOUND`) |
-| `POST /executions/{id}/approvals/{approvalId}` | 🟡 | Fallback approval: `{ action: accept \| decline \| cancel, approve?, comment? }`; `400` bad body or a decision that no longer applies, `404` unknown approval, `409` already decided or locked, `413` over 64 KiB |
+| `POST /executions/{id}/approvals/{approvalId}` | 🟡 | Fallback approval: `{ action: accept \| decline \| cancel, approve?, comment? }` (`approve`: a boolean or a word from `APPROVAL_ANSWER_WORDS`); `400` bad body or a decision that no longer applies, `404` unknown approval, `409` already decided or locked, `413` over 64 KiB |
 
 Error bodies from these routes are `{ error, code, … }` with `code` from `ERR`.
 
@@ -153,7 +153,7 @@ Error bodies from these routes are `{ error, code, … }` with `code` from `ERR`
 |---------|--------|-------|
 | `io.modelcontextprotocol/serverInfo` in response `_meta` | ✅ | Protocol-defined; `{ name: "harbor", version }` |
 | `harbor/execution-id`, `harbor/execution-status`, `harbor/approval-id` (`_meta`) | 🟡 | `META_PREFIX` (`src/core/constants.ts`) is a placeholder until the project's public name is settled; `harbor/execution-id` in a request `_meta` resumes an execution |
-| `input_required` approval form (input key `approval`; `approve` boolean, `comment`) | 🟡 | The MRTR pattern is the protocol's; the form content is Harbor's |
+| `input_required` approval form (input key `approval`; `approve` boolean — the listed answer words are accepted too — and `comment`) | 🟡 | The MRTR pattern is the protocol's; the form content is Harbor's |
 | Outbound `Authorization`, `Content-Type`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID`, `X-Idempotency-Key`, `X-Correlation-ID` | ✅ | Header names. Values are not frozen: `X-Correlation-ID` is the execution id in a governed run, and the idempotency key format (`mcp-{service}-{executionId}-{sequence}`) changed in 1.0.0 |
 | Outbound `X-Harbor-Server-ID` (`HARBOR_SERVER_ID`), `X-Harbor-Client-ID` (forwarded from the caller) | 🟡 | New in 1.0.0 |
 
