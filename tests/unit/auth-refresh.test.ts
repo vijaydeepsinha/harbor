@@ -731,7 +731,7 @@ const cbMocks = {
 }
 
 vi.mock('../../src/adapters/infra/couchbase-client.js', () => ({
-  CouchbaseRestClient: vi.fn().mockImplementation(() => cbMocks)
+  CouchbaseRestClient: vi.fn().mockImplementation(function () { return cbMocks })
 }))
 
 describe('CouchbaseTokenCache — error resilience', () => {
