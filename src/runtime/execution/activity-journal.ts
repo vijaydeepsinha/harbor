@@ -125,19 +125,19 @@ export class ActivityJournal extends CallLog {
     const sequence = ++this.cursor
     const existing = await this.persistence.getActivity(this.executionId, sequence)
     if (!existing) return { sequence }
-    const recorded = existing.request
+    const existingRequest = existing.request
     const diverged =
-      recorded.method !== request.method || recorded.specPath !== request.specPath || recorded.rawPath !== request.rawPath
+      existingRequest.method !== request.method || existingRequest.specPath !== request.specPath || existingRequest.rawPath !== request.rawPath
         ? 'path'
         : CONTENT_BOUND.has(existing.status) &&
-          (canonicalJson(recorded.query) !== canonicalJson(request.query) || canonicalJson(recorded.body) !== canonicalJson(request.body))
+          (canonicalJson(existingRequest.query) !== canonicalJson(request.query) || canonicalJson(existingRequest.body) !== canonicalJson(request.body))
           ? 'content'
           : undefined
     if (diverged) {
       const suffix = diverged === 'content' ? ' (query/body differ from the recorded request)' : ''
       throw new ReplayDivergedError(
         this.executionId, sequence,
-        `${recorded.method} ${recorded.rawPath}`,
+        `${existingRequest.method} ${existingRequest.rawPath}`,
         `${request.method} ${request.rawPath}${suffix}`
       )
     }
