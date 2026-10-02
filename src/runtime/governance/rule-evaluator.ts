@@ -125,8 +125,19 @@ function conditionsHold(node: ConditionNode, req: GovernanceRequest): boolean {
     case 'allOf': return node.allOf.every(child => conditionsHold(child, req))
     case 'anyOf': return node.anyOf.some(child => conditionsHold(child, req))
     case 'not': return !conditionsHold(node.not, req)
-    case 'leaf': return comparisonHolds(node, operandValue(node, req), node.field?.startsWith('query.') === true)
+    case 'leaf': return comparisonHolds(node, operandValue(node, req), node.field !== undefined && travelsAsText(node.field))
   }
+}
+
+/**
+ * Query values and path parameters reach the backend as text — `?all=true`,
+ * `/campaigns/42` — so they compare as they travel: `path.id: { equals: 42 }`
+ * matches the segment `42`, and `greater_than: 100` reads `150` as a number.
+ * Read strictly, a numeric YAML value never equals a path segment, and a DENY
+ * written that way would never fire. Body values keep their JSON types.
+ */
+function travelsAsText(field: string): boolean {
+  return field.startsWith('query.') || field.startsWith('path.')
 }
 
 const MS_PER_DAY = 86_400_000

@@ -116,6 +116,13 @@ describe('governance rule schema — condition tree (allOf / anyOf / not) and co
     expect(errorsOf({ anyOf: Array.from({ length: MAX_CONDITION_NODES }, () => leaf) })).toEqual([`conditions: conditions have ${MAX_CONDITION_NODES + 1} nodes; the limit is ${MAX_CONDITION_NODES}`])
   })
 
+  it('bounds the flat shorthand by the tree it stands for: no more than MAX_CONDITION_NODES - 1 fields', () => {
+    const flat = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`body.f${i}`, { equals: i }]))
+    expect(errorsOf(flat(MAX_CONDITION_NODES - 1))).toEqual([]) // allOf + 63 leaves = 64 nodes
+    expect(errorsOf(flat(MAX_CONDITION_NODES))).toEqual([`conditions: conditions have ${MAX_CONDITION_NODES + 1} nodes; the limit is ${MAX_CONDITION_NODES}`])
+    expect(errorsOf(flat(1000))).toHaveLength(1)
+  })
+
   it('keeps the action advisory: only ALLOW | DENY | REQUIRE_APPROVAL plus a reason — no mutation, no side effect', () => {
     for (const action of [
       { type: 'ALLOW', set: { 'body.budget': 0 } },
@@ -311,6 +318,20 @@ describe('governance evaluator', () => {
     expect(readField({ ...req, pathParams: { id: 'C1' } }, 'path.id')).toBe('C1')
     expect(readField(req, 'body.tags.1')).toBe('b')
     expect(readField(req, 'missing.deep')).toBeUndefined()
+  })
+
+  it('path parameters compare as they travel, like query values: a numeric rule value matches the URL segment', () => {
+    const onCampaign = (id: string): GovernanceRequest => ({ ...req, specPath: '/campaigns/{id}', operationId: 'updateCampaign', pathParams: { id } })
+    const denies = (conditions: Record<string, unknown>, id: string) =>
+      evaluateGovernance([rule({ conditions, action: { type: 'DENY' } })], onCampaign(id), GOVERNANCE_DECISION.ALLOW).decision === 'DENY'
+    expect(denies({ 'path.id': { equals: 42 } }, '42')).toBe(true) // YAML `equals: 42` is a number; the segment is text
+    expect(denies({ 'path.id': { in: [7, 42] } }, '42')).toBe(true)
+    expect(denies({ 'path.id': { greater_than: 100 } }, '150')).toBe(true)
+    expect(denies({ 'path.id': { greater_than: 100 } }, '99')).toBe(false)
+    expect(denies({ 'path.id': { greater_than: 100 } }, 'C150')).toBe(false) // not a number: no ordering
+    expect(denies({ 'path.id': { equals: 'C1' } }, 'C1')).toBe(true)
+    // Body values keep their JSON types.
+    expect(evaluateGovernance([rule({ conditions: { 'body.n': { equals: 42 } }, action: { type: 'DENY' } })], { ...req, body: { n: '42' } }, GOVERNANCE_DECISION.ALLOW).decision).toBe('ALLOW')
   })
 
   it('evaluates every operator; missing fields only satisfy exists:false; type mismatches are false', () => {

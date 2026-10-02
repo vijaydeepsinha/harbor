@@ -122,11 +122,13 @@ Evaluation is a pure function of the rule and the request — no I/O, no clock:
   `not_in`: a DENY written as `{ field: body.currency, not_in: [EUR, USD] }`
   does not fire when `currency` is absent — add `{ field: body.currency,
   exists: false }` under an `anyOf` if it should.
-- **Query values compare as they travel**: on the wire every query value is
-  text (`params: { all: true }` and `?all=true` both send `all=true`), so a
-  `query.*` leaf compares text for equality (`equals: true` matches `'true'`)
-  and reads a numeric string as its number for ordering. Body and path values
-  keep their JSON types — a body string `"5000"` is not `greater_than: 1000`.
+- **Query and path values compare as they travel**: on the wire every query
+  value and path parameter is text (`params: { all: true }` and `?all=true`
+  both send `all=true`; `/campaigns/42` carries `42`), so a `query.*` or
+  `path.*` leaf compares text for equality (`equals: true` matches `'true'`,
+  `path.id: { equals: 42 }` matches the segment `42`) and reads a numeric
+  string as its number for ordering. Body values keep their JSON types — a
+  body string `"5000"` is not `greater_than: 1000`.
 - A **body passed as a JSON string** (`body: JSON.stringify({...})`) is read
   as the object it encodes: it reaches the backend as the same bytes.
 - Only the request's **own** properties are read: `constructor`, `__proto__`
@@ -169,7 +171,7 @@ A body field named like a tree key (`allOf`, `anyOf`, `not`, `field`, `ratio`,
 `percent_of`, `days_between`) must be written with its prefix in the
 shorthand — `body.not`, not `not`.
 
-**Limits.** At most 8 levels of nesting and 64 nodes per rule.
+**Limits.** At most 8 levels of nesting and 64 nodes per rule — counted on the tree that is evaluated, so the flat shorthand (one `allOf` plus a leaf per field) takes at most 63 fields.
 
 ## Actions
 
