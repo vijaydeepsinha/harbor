@@ -543,8 +543,9 @@ writeAuditRecord({
 
 It is delivered to every `AUDIT_SINKS` sink — by default `console`, which logs it as structured
 JSON (`"msg":"audit"`) at `info` level on the service's logger. Nothing is written when
-`ENABLE_AUDIT=false`. On the error and approval-pause paths the record's `userIdHash` is
-`"unknown"` (a known limitation; the execution record carries the real one).
+`ENABLE_AUDIT=false`. The record's `userIdHash` is the authenticated principal on every
+path — success, error, approval pause, refused resume; it is `"unknown"` only when the call
+failed before authentication finished.
 `tool_calls_total` is incremented with the outcome.
 
 ---

@@ -587,8 +587,11 @@ call rather than a fix.
   rotates behind the caller. Without a mapped `userId`, two bearers for the
   same human are two principals, so an execution paused under one bearer is
   not resumable under the other.
-- Audit lines written on the error, approval-pause and refused-resume paths
-  carry `userIdHash: "unknown"`.
+- Every audit line names the principal that authenticated for that tool
+  call — on the success, error, approval-pause and refused-resume paths
+  alike. For a resume refused because the execution belongs to someone else
+  that is the caller who tried, not the owner. It reads `"unknown"` only when
+  the call failed before authentication finished.
 
 **Execution and replay**
 

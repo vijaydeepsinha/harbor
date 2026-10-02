@@ -112,6 +112,6 @@ should_bind_http_inspection_and_decisions_to_the_execution_owner).
 | Idempotency strategies cache non-2xx responses (401 included) for the TTL; keys are now per execution and call, so the impact is limited | RG-019 | — |
 | Memcache store: lock owner is the process, `releaseLock` is get + delete, index read-modify-write not serialised across pods; file store: no fsync, unreadable documents skipped at boot | RG-018, RG-023 | — |
 | Concurrent approval-gated calls (`Promise.all`) are admitted in arrival order; siblings with one template racing differently on resume stop the run with `REPLAY_DIVERGED` (fail closed) | RG-006, RG-017 | `bridge-request-handler.test.ts` (concurrent calls of one run) |
-| Error-path audit lines carry `userIdHash: "unknown"`; no log redaction, full results/code logged at info in places | RG-012 | — |
+| No log redaction, full results/code logged at info in places | RG-012 | — |
 | The production `Dockerfile` ships no `governance/rules` (zero rules ⇒ every call ungoverned unless mounted) and its `HEALTHCHECK` uses `localhost` (IPv6 on Alpine) | RG-026 | not visible to the suite: Compose mounts the fixture rules and probes `127.0.0.1` |
 | `url` / `url-with-fallback` spec sources are not fetched at boot (only on refresh) | RG-008 | — |

@@ -499,7 +499,7 @@ Every `api_execute` call produces one audit record (`AuditRecord`, `src/core/typ
 
 - `endpointsAccessed` / `apiCallCount` count the calls that went out in this run; replayed activities are not counted.
 - `codeSubmitted` is the program that ran — the persisted original on a resume.
-- Failed calls add `errorType` and `errorCode`; `outcome` is one of `success`, `error`, `circuit_open`, `permission_denied`, `call_limit_exceeded`, `concurrent_limit_exceeded`, `approval_required`, `governance_denied`, `replay_diverged`, `execution_cancelled`. Error-path records carry `userIdHash: "unknown"` (a known limitation).
+- Failed calls add `errorType` and `errorCode`; `outcome` is one of `success`, `error`, `circuit_open`, `permission_denied`, `call_limit_exceeded`, `concurrent_limit_exceeded`, `approval_required`, `governance_denied`, `replay_diverged`, `execution_cancelled`. Every record — error, approval-pause and refused-resume paths included — carries the authenticated principal's `userIdHash`; `"unknown"` only when the call failed before authentication finished.
 
 `ENABLE_AUDIT` accepts `true`, `false`, `1` or `0` (default `true`; any other value stops boot). `false` or `0` turns off every audit record and execution-state event.
 

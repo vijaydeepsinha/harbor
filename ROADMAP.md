@@ -58,7 +58,7 @@ Found in the 2026-09-27 review and not yet fixed. Several need an owner decision
 - [ ] Production Dockerfile ships no `governance/rules` (zero rules unless mounted), and its HEALTHCHECK uses `localhost` (IPv6 on Alpine)
 
 ### Observability
-- [ ] Error-path audit lines carry `userIdHash: "unknown"`
+- [x] Error-path audit lines carry the authenticated `userIdHash` (they read `"unknown"` until the PR #7 follow-up)
 - [ ] Metrics injection seam; pino redaction; full results and code are logged at info in places
 
 ---
