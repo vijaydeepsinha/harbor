@@ -114,7 +114,7 @@ export interface ConnectorAPI {
   request(
     apiRequest: ApiRequest,       // canonical path, method, params, body, program headers
     ctx: ExecuteRequestContext    // tokenPayload, invalidate, idempotencyKey, idempotencyKeyTtlMs,
-                                  // correlationId, sessionId, clientId?, endpoint?, signal?
+                                  // correlationId, clientId?, endpoint?, signal?
   ): Promise<ApiResponse>
 }
 ```

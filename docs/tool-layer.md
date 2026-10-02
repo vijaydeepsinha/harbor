@@ -374,7 +374,7 @@ const { body } = await api.request(...)   // undefined!
 
 **Headers.** A program may add its own headers (`Accept`, `Content-Type`, custom `X-…`), but the following are dropped in any letter case, and Harbor's own headers are applied after the program's:
 
-- Harbor's own: `Authorization`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID`, `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`;
+- Harbor's own: `Authorization`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID` — and `X-MCP-Session-ID`, which Harbor no longer sends (MCP 2026-07-28 has no sessions) but keeps reserved;
 - routing and framing: `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `TE`, `Trailer`, `Proxy-Authorization`, `Proxy-Connection`, `Cookie`, `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-Port`, `X-Forwarded-Prefix`, `X-Real-IP`, `X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override`, `X-Original-URL`, `X-Rewrite-URL`, `X-Original-Method`.
 
 The list is `PROGRAM_FORBIDDEN_HEADERS` in `src/runtime/api-client/api-client.ts`.
@@ -481,7 +481,6 @@ Every `api_execute` call produces one audit record (`AuditRecord`, `src/core/typ
   "auditId": "a1b2c3d4-...",
   "timestamp": "2026-09-27T10:15:02.114Z",
   "userIdHash": "3f9a...",
-  "sessionId": "5d1e...",
   "correlationId": "7",
   "tool": "api_execute",
   "authStrategy": "oauth-introspection",

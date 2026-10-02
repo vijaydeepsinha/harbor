@@ -350,8 +350,9 @@ not set the following, in any letter case — its copies are dropped
 (`src/runtime/api-client/api-client.ts`):
 
 - **Harbor's own**: `Authorization`, `X-Request-Source`, `X-MCP-Tool`,
-  `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID`, `X-Idempotency-Key`,
-  `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`. A program
+  `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID` (no longer sent, still
+  reserved), `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`,
+  `X-Harbor-Client-ID`. A program
   that could set these could act as another principal or defeat
   deduplication.
 - **Routing, framing and ambient credentials**: `Host`, `Content-Length`,

@@ -71,7 +71,7 @@ Adding a required member to any of these is a breaking change for every downstre
 |--------|------|-------|
 | `GlobalConfig` | `src/core/types/config.types.ts` | The validated shape every env var maps to |
 | `ApiRequest` / `ApiResponse` | `src/core/types/connector.types.ts` | Shared between the sandbox bridge and `ConnectorAPI` |
-| `ExecuteRequestContext` | `src/core/types/connector.types.ts` | Passed from the bridge to `ConnectorAPI`: token payload, `invalidate`, idempotency key and TTL, correlation, session and client ids, `endpoint` (the breaker key), `signal` |
+| `ExecuteRequestContext` | `src/core/types/connector.types.ts` | Passed from the bridge to `ConnectorAPI`: token payload, `invalidate`, idempotency key and TTL, correlation and client ids, `endpoint` (the breaker key), `signal` |
 | `TOOL` | `src/core/constants.ts` | Tool names used in MCP tool registration |
 | `ERR` | `src/core/constants.ts` | Error codes clients receive — see [Error codes](#error-codes) |
 | `HTTP_ROUTES`, `HTTP_HEADER` | `src/core/constants.ts` | The gateway's routes and the headers it sends and reads |
@@ -154,7 +154,7 @@ Error bodies from these routes are `{ error, code, … }` with `code` from `ERR`
 | `io.modelcontextprotocol/serverInfo` in response `_meta` | ✅ | Protocol-defined; `{ name: "harbor", version }` |
 | `harbor/execution-id`, `harbor/execution-status`, `harbor/approval-id` (`_meta`) | 🟡 | `META_PREFIX` (`src/core/constants.ts`) is a placeholder until the project's public name is settled; `harbor/execution-id` in a request `_meta` resumes an execution |
 | `input_required` approval form (input key `approval`; `approve` boolean — the listed answer words are accepted too — and `comment`) | 🟡 | The MRTR pattern is the protocol's; the form content is Harbor's |
-| Outbound `Authorization`, `Content-Type`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID`, `X-Idempotency-Key`, `X-Correlation-ID` | ✅ | Header names. Values are not frozen: `X-Correlation-ID` is the execution id in a governed run, and the idempotency key format (`mcp-{service}-{executionId}-{sequence}`) changed in 1.0.0 |
+| Outbound `Authorization`, `Content-Type`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-Idempotency-Key`, `X-Correlation-ID` | ✅ | Header names. Values are not frozen: `X-Correlation-ID` is the execution id in a governed run, and the idempotency key format (`mcp-{service}-{executionId}-{sequence}`) changed in 1.0.0 |
 | Outbound `X-Harbor-Server-ID` (`HARBOR_SERVER_ID`), `X-Harbor-Client-ID` (forwarded from the caller) | 🟡 | New in 1.0.0 |
 
 ### Error Codes

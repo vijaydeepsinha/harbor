@@ -35,6 +35,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Removed
 - `SessionManager`, idle session sweep, session resume routing, and `ERR.UNKNOWN_SESSION`.
+- **Breaking:** the last session id. With MCP 2026-07-28 there is no session, so `api_execute` was inventing a fresh random id per tool call and passing it on as if it named one. Gone: the outbound `X-MCP-Session-ID` header (the name stays reserved — a program still cannot set it), `sessionId` on the audit record, on `ExecuteRequestContext` (the `ConnectorAPI` context) and on the sandbox context, and `extractSessionId`. Correlate with `correlationId` (the MCP request id, or the execution id under governance) and `executionId`.
 
 ### Fixed — owner review on main (before the 2026-09-27 review)
 - `GET /executions/{id}` and `POST /executions/{id}/approvals/{approvalId}` validate the bearer against the execution's service and require the execution's owner; another principal gets `403 AUTH_FAILED` (3cbc9df). Before, any accepted bearer could inspect or decide any execution.

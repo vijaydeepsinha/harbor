@@ -23,7 +23,7 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 | `registerGetSkillDetailsTool` | `src/tools/get-skill-details.tool.ts` | Defines what happens when `get_skill_details()` is called |
 | `registerSearchCodeTool` | `src/tools/search-code.tool.ts` | Defines what happens when `search_code()` is called |
 | `registerExecuteApiTool` | `src/tools/execute-api.tool.ts` | Defines what happens when `api_execute()` is called |
-| `toolHelpers` | `src/tools/tool-helpers.ts` | Shared utilities — `mcpError`, `mcpSuccess`, `resolveService`, `validateAuth`, `extractCorrelationId`, `extractSessionId`, `runSandboxTool` |
+| `toolHelpers` | `src/tools/tool-helpers.ts` | Shared utilities — `mcpError`, `mcpSuccess`, `resolveService`, `validateAuth`, `extractCorrelationId`, `runSandboxTool` |
 | `AuthMiddleware` | `src/spi/auth/auth-middleware.ts` | Parses the bearer, cache-first validation via the service's auth strategy, proactive refresh, session expiry detection |
 | `extractBearerFromHeader` | `src/spi/auth/bearer-authorization.ts` | One `Authorization` header, `Bearer` scheme, a JWT or ≥ 32 base64url characters |
 | `AbstractTokenCache` | `src/spi/auth/abstract-token-cache.ts` | Base class for all token cache backends — hash, entry expiry, get/validate/update orchestration |
@@ -440,7 +440,7 @@ circuitBreaker.recordSuccess(template)    any returned status (a 5xx has thrown 
   own headers, then Harbor's, which always win:
   - `Authorization: Bearer <access_token>` — the validated payload's token
   - `X-Request-Source` (`MCP_AGENT_NAME`, default `mcp-agent`), `X-MCP-Tool: api_execute`,
-    `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID` (a per-request id)
+    `X-MCP-Service`, `X-MCP-Version` (no session header: MCP 2026-07-28 is stateless)
   - `X-Idempotency-Key`
   - `X-Correlation-ID` — the execution id (the same on every call of one script, across approval
     resumes); the MCP request id on the legacy path
@@ -448,7 +448,7 @@ circuitBreaker.recordSuccess(template)    any returned status (a 5xx has thrown 
   - `X-Harbor-Client-ID` — the caller's own id, forwarded when the `/mcp` request carried a
     safe one
 - **What a program may not set**, in any letter case (its copies are dropped): `Authorization`,
-  `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID`,
+  `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID` (no longer sent, still reserved),
   `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `Host`,
   `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `TE`, `Trailer`,
   `Proxy-Authorization`, `Proxy-Connection`, `Cookie`, `Forwarded`, `X-Forwarded-For`/`-Host`/
@@ -529,7 +529,7 @@ The new state is published to the audit sinks as an `execution` event. Then the 
 ```typescript
 writeAuditRecord({
   auditId: uuidv4(),
-  timestamp, service: 'tasks', environment, userIdHash, sessionId, correlationId,
+  timestamp, service: 'tasks', environment, userIdHash, correlationId,
   tool: 'api_execute',
   authStrategy: 'static-token', idempotencyStrategy: 'noop', circuitBreakerStrategy: 'noop',
   codeSubmitted: program,               // the program that ran — the persisted original on a resume

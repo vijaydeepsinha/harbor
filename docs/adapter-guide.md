@@ -245,7 +245,7 @@ export interface ConnectorAPI {
 }
 ```
 
-`ExecuteRequestContext` (`src/core/types/connector.types.ts`) carries `tokenPayload`, `invalidate`, `idempotencyKey`, `idempotencyKeyTtlMs`, `correlationId` (the execution id in a governed run), `sessionId`, `clientId?`, `endpoint?` (the OpenAPI template the bridge used for this call) and `signal?`.
+`ExecuteRequestContext` (`src/core/types/connector.types.ts`) carries `tokenPayload`, `invalidate`, `idempotencyKey`, `idempotencyKeyTtlMs`, `correlationId` (the execution id in a governed run), `clientId?`, `endpoint?` (the OpenAPI template the bridge used for this call) and `signal?`.
 
 **There is no registration function.** `createMcpGateway` builds an `ApiClient` for every service in `src/runtime/gateway/service-resources-factory.ts`. To use another transport, change that construction, or assemble a `ServiceRegistry` yourself and hand it to `buildMcpServerFactory` / `startHttpGateway` — `tests/unit/code-mode-harness.ts` does this with a counting fake connector.
 
