@@ -74,6 +74,14 @@ describe('OAuth 2.0 Protected Resource Metadata endpoint', () => {
     expect(body.resource).toBe('https://harbor.example.com')
   })
 
+  it('RFC 9728 path-inserted form for the /mcp resource returns the same document', async () => {
+    const { baseUrl, close } = await startForTest(baseOAuthConfig)
+    cleanup = close
+    const res = await fetch(`${baseUrl}/.well-known/oauth-protected-resource/mcp`)
+    expect(res.status).toBe(200)
+    expect((await res.json() as Record<string, unknown>).resource).toBe('https://harbor.example.com')
+  })
+
   it('includes scopes_supported when configured', async () => {
     const { baseUrl, close } = await startForTest({
       ...baseOAuthConfig,

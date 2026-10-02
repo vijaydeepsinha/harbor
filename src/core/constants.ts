@@ -87,6 +87,8 @@ export const ERR = {
   SANDBOX_RUNTIME: 'SANDBOX_RUNTIME',
   INVALID_API_REQUEST: 'INVALID_API_REQUEST',
   NOT_FOUND: 'NOT_FOUND',
+  /** An HTTP request body over the configured limit (MCP_MAX_BODY_BYTES for /mcp; 64 KiB for /executions). */
+  PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   INTERNAL: 'INTERNAL',
   // ── Code Mode governance layer ──
   APPROVAL_REQUIRED: 'APPROVAL_REQUIRED',
@@ -116,6 +118,7 @@ export type AllowedHttpMethod = (typeof ALLOWED_HTTP_METHODS)[number]
 
 export const HTTP_HEADER = {
   CONTENT_TYPE: 'Content-Type',
+  CONNECTION: 'Connection',
   AUTHORIZATION: 'Authorization',
   CORRELATION_ID: 'X-Correlation-ID',
   REQUEST_SOURCE: 'X-Request-Source',
@@ -148,6 +151,8 @@ export const HTTP_ROUTES = {
   MCP: '/mcp',
   OAUTH_PROTECTED_RESOURCE: '/.well-known/oauth-protected-resource',
   OAUTH_PROTECTED_RESOURCE_MCP: '/mcp/.well-known/oauth-protected-resource',
+  /** RFC 9728 §3.1 path-inserted form for the `/mcp` resource — where discovery without a WWW-Authenticate hint looks. */
+  OAUTH_PROTECTED_RESOURCE_PATH_INSERTED: '/.well-known/oauth-protected-resource/mcp',
   /** Code Mode execution inspection + fallback approval decisions (see docs/code-mode-governance.md). */
   EXECUTIONS: '/executions',
 } as const
@@ -155,6 +160,8 @@ export const HTTP_ROUTES = {
 /** Default bind address and port for the MCP gateway HTTP transport. */
 export const MCP_DEFAULT_HOST = '127.0.0.1'
 export const MCP_DEFAULT_PORT = 3333
+/** Largest `/mcp` request body read (MCP_MAX_BODY_BYTES): a tool call carries a program, never a payload. */
+export const MCP_DEFAULT_MAX_BODY_BYTES = 4 * 1024 * 1024
 
 /** Max length for bearer credentials after the `Bearer` prefix (header value hardening). */
 export const BEARER_CREDENTIAL_MAX_OCTETS = 8192
@@ -175,6 +182,9 @@ export const REQUEST_SOURCE_VALUE = 'mcp-agent'
 export const MCP_FRAMEWORK_VERSION = '1.0'
 
 // ── Metric names ─────────────────────────────────────────────────────────────
+
+/** Metric label for a `service` argument that names no registered service (never the caller's raw string). */
+export const UNKNOWN_SERVICE_LABEL = 'unknown'
 
 export const METRIC = {
   TOOL_CALLS: 'tool_calls_total',

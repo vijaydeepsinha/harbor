@@ -150,10 +150,12 @@ export function resolveService(
 ): ServiceResources | ToolResponse {
   const resources = registry.get(service)
   if (!resources) {
+    // Not retryable: the registry is fixed at boot, so the same name fails every time —
+    // `true` invited an agent to loop on it instead of picking a listed service.
     return mcpError(
       `Unknown service "${service}". Available: ${serviceNames.join(', ')}`,
       ERR.UNKNOWN_SERVICE,
-      true
+      false
     )
   }
   return resources

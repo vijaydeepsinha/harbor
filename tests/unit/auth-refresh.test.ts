@@ -731,7 +731,7 @@ const cbMocks = {
 }
 
 vi.mock('../../src/adapters/infra/couchbase-client.js', () => ({
-  CouchbaseRestClient: vi.fn().mockImplementation(() => cbMocks)
+  CouchbaseRestClient: vi.fn().mockImplementation(function () { return cbMocks })
 }))
 
 describe('CouchbaseTokenCache — error resilience', () => {
@@ -774,5 +774,77 @@ describe('CouchbaseTokenCache — error resilience', () => {
     const result = await cacheInstance.getOrValidate('test-service', 'token', validator)
     expect(validator).toHaveBeenCalledTimes(1)
     expect(result.access_token).toBe('valid-access')
+  })
+})
+
+// ── Refresh never outlives the caller's token; identity survives it ──────────
+
+describe('AuthMiddleware — what a refresh may and may not change', () => {
+  let cache: InMemoryTokenCache
+  let logger: ReturnType<typeof makeLogger>
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.now())
+    logger = makeLogger()
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    cache.destroy()
+    vi.useRealTimers()
+  })
+
+  it('background refresh works with the real introspection strategy (the method keeps its `this`)', async () => {
+    cache = new InMemoryTokenCache(600_000)
+    await cache.update('svc', TOK, makePayload({ expires_in: 200, access_token: 'old-backend-token' }))
+    const strategy = new OAuthIntrospectionStrategy({
+      host: 'auth.example.com', port: 8083, introspectionPath: '/introspect', refreshPath: '/refresh',
+      authTimeoutMs: 1000, method: 'POST'
+    })
+    vi.mocked(axios.post).mockResolvedValue({ status: 200, data: { access_token: 'new-backend-token', expires_in: 3600, refresh_token: 'r2' } })
+    const middleware = new AuthMiddleware(strategy, cache, logger as never, 'svc')
+    await middleware.validateRequest(`Bearer ${TOK}`, 'c1')
+    await vi.waitFor(async () => expect((await cache.get('svc', TOK))?.payload.access_token).toBe('new-backend-token'))
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), 'Background token refresh failed — entering cooldown')
+  })
+
+  it('a refresh never extends how long the caller\'s own token is trusted: it is validated again on time', async () => {
+    cache = new InMemoryTokenCache(600_000)
+    const validate = vi.fn().mockResolvedValue(makePayload({ expires_in: 200 }))
+    const strategy: AuthStrategy = { name: 'test', tokenRefreshBufferSec: 300, validate, refresh: vi.fn().mockResolvedValue(makePayload({ access_token: 'refreshed', expires_in: 3600 })) }
+    const middleware = new AuthMiddleware(strategy, cache, logger as never, 'svc')
+    await middleware.validateRequest(`Bearer ${TOK}`, 'c1') // miss → validate → sync refresh
+    expect(validate).toHaveBeenCalledTimes(1)
+    vi.setSystemTime(Date.now() + 150_000)
+    await middleware.validateRequest(`Bearer ${TOK}`, 'c2') // still inside the caller token's 200 s
+    expect(validate).toHaveBeenCalledTimes(1)
+    vi.setSystemTime(Date.now() + 60_000)
+    await middleware.validateRequest(`Bearer ${TOK}`, 'c3') // past it: the caller's token is checked again (revocation honoured)
+    expect(validate).toHaveBeenCalledTimes(2)
+  })
+
+  it('no refresh storm when the cache TTL is inside the refresh window: the window follows the token, not the entry', async () => {
+    cache = new InMemoryTokenCache(300_000) // AUTH_TOKEN_CACHE_TTL_MS default == 300 s refresh buffer
+    const refresh = vi.fn().mockResolvedValue(makePayload({ access_token: 'refreshed' }))
+    const strategy: AuthStrategy = { name: 'test', tokenRefreshBufferSec: 300, validate: vi.fn().mockResolvedValue(makePayload({ expires_in: 3600 })), refresh }
+    const middleware = new AuthMiddleware(strategy, cache, logger as never, 'svc')
+    for (let i = 0; i < 10; i++) await middleware.validateRequest(`Bearer ${TOK}`, `c${i}`)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(refresh).not.toHaveBeenCalled() // the token has an hour left
+  })
+
+  it('the caller keeps their identity across a refresh whose response carries no user claim', async () => {
+    cache = new InMemoryTokenCache(600_000)
+    const strategy: AuthStrategy = {
+      name: 'test', tokenRefreshBufferSec: 300,
+      validate: vi.fn().mockResolvedValue(makePayload({ expires_in: 100, metadata: { userId: 'alice' } })),
+      refresh: vi.fn().mockResolvedValue(makePayload({ access_token: 'refreshed', expires_in: 3600 }))
+    }
+    const middleware = new AuthMiddleware(strategy, cache, logger as never, 'svc')
+    const first = await middleware.validateRequest(`Bearer ${TOK}`, 'c1')
+    expect(first.payload.access_token).toBe('refreshed')
+    expect(first.payload.metadata?.['userId']).toBe('alice')
+    expect((await cache.get('svc', TOK))?.payload.metadata?.['userId']).toBe('alice')
   })
 })

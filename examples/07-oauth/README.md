@@ -2,8 +2,7 @@
 
 Docker configuration for the mock OAuth 2.1 authorization server used by Harbor's E2E test suite.
 
-Contains `docker-compose.yml` and the mock AS config — no shell scripts.
-All testing is handled by `tests/demo_e2e.py`.
+Contains `docker-compose.yml` and the mock AS config. `tests/demo_e2e.py` automates the full OAuth test; `examples/demo/start-oauth-mode.sh` sets the same environment up for manual testing (e.g. with the OAuth folders of `postman/Harbor.postman_collection.json`).
 
 ## Run the full E2E suite
 
@@ -36,7 +35,7 @@ Paste the token into `~/.cursor/mcp.json`:
 {
   "mcpServers": {
     "harbor-local": {
-      "url": "http://localhost:3333/mcp",
+      "url": "http://127.0.0.1:3333/mcp",
       "headers": { "Authorization": "Bearer <token>" }
     }
   }
@@ -47,14 +46,14 @@ Token expires in ~1h. Re-run the curl to refresh.
 
 ## Switch modes manually
 
-Modes control which services Harbor loads. Edit `enabled` in `services/*/config.json`:
+Modes control which services Harbor loads. `examples/demo/start-oauth-mode.sh` switches to OAuth mode and back on exit; to do it by hand, edit `enabled` in `services/*/config.json`:
 
-| Mode | `billing` | `product` / `order` / `tasks` |
+| Mode | `billing` / `billing-jwt` / `billing-introspection` | `product` / `order` / `tasks` |
 |------|-----------|-------------------------------|
 | oauth | `true` | `false` |
 | token | `false` | `true` |
 
-Harbor must be restarted after switching.
+`irctc` stays enabled in both modes. `billing-introspection` also needs the mock introspection server (`node examples/demo/mock-introspection-server.js`, port 3008), and all three need the billing backend (`node examples/demo/billing-service.js`, port 3004). Harbor must be restarted after switching.
 
 ## Service config reference — `oauth-2.1` auth type
 

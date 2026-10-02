@@ -47,10 +47,29 @@ export interface ApiClientContext {
   serverId?: string
 }
 
-/** Harbor's own headers: set by Harbor on every call, never by the sandboxed program. */
-const HARBOR_OWNED_HEADERS: ReadonlySet<string> = new Set([
-  HTTP_HEADER.CORRELATION_ID, HTTP_HEADER.HARBOR_SERVER_ID, HTTP_HEADER.HARBOR_CLIENT_ID
+/**
+ * Headers a sandboxed program may not set, in any letter case; its copies
+ * are dropped. Two kinds:
+ *  - Harbor's own: the caller's identity (Authorization), which gateway,
+ *    tool, service, session and execution the call belongs to, and the
+ *    idempotency key. A program that could set these could act as another
+ *    principal or defeat deduplication.
+ *  - Routing and framing: they would let the backend (or a proxy in front
+ *    of it) serve a different method, URL or host than the one governance
+ *    resolved, or smuggle a second request.
+ */
+const PROGRAM_FORBIDDEN_HEADERS: ReadonlySet<string> = new Set([
+  HTTP_HEADER.AUTHORIZATION, HTTP_HEADER.REQUEST_SOURCE, HTTP_HEADER.MCP_TOOL, HTTP_HEADER.MCP_SERVICE,
+  HTTP_HEADER.MCP_VERSION, HTTP_HEADER.SESSION_ID, HTTP_HEADER.IDEMPOTENCY_KEY,
+  HTTP_HEADER.CORRELATION_ID, HTTP_HEADER.HARBOR_SERVER_ID, HTTP_HEADER.HARBOR_CLIENT_ID,
+  'Host', 'Content-Length', 'Transfer-Encoding', 'Connection', 'Keep-Alive', 'Upgrade', 'TE', 'Trailer',
+  'Proxy-Authorization', 'Proxy-Connection', 'Cookie', 'Forwarded',
+  'X-Forwarded-For', 'X-Forwarded-Host', 'X-Forwarded-Proto', 'X-Forwarded-Port', 'X-Forwarded-Prefix', 'X-Real-IP',
+  'X-HTTP-Method-Override', 'X-HTTP-Method', 'X-Method-Override', 'X-Original-URL', 'X-Rewrite-URL', 'X-Original-Method'
 ].map(h => h.toLowerCase()))
+
+/** Methods whose repetition has the same effect as sending them once (RFC 9110 §9.2.2) — the only ones retried. */
+const IDEMPOTENT_METHODS: ReadonlySet<string> = new Set(['GET', 'PUT', 'DELETE'])
 
 export class ApiClient implements ConnectorAPI {
   private readonly axiosInstance: AxiosInstance
@@ -73,6 +92,11 @@ export class ApiClient implements ConnectorAPI {
 
     this.axiosInstance = axios.create({
       baseURL: baseUrl,
+      // Without this an absolute `path` (`http://elsewhere/…`, `//host/…`)
+      // replaces baseURL and the caller's bearer goes to another host. The
+      // bridge already refuses such paths; this keeps any other ConnectorAPI
+      // caller on the service too.
+      allowAbsoluteUrls: false,
       timeout: apiConfig.requestTimeoutMs,
       httpsAgent,
       validateStatus: () => true
@@ -93,16 +117,18 @@ export class ApiClient implements ConnectorAPI {
   async executeRequest(apiRequest: ApiRequest, ctx: ExecuteRequestContext): Promise<ApiResponse> {
     const { tokenPayload, invalidate, idempotencyKey, correlationId, sessionId, clientId, signal } = ctx
     const { path: apiPath, method, params, body } = apiRequest
-    const normalizedPath = normalizeEndpointPath(apiPath)
+    const breakerKey = ctx.endpoint ?? normalizeEndpointPath(apiPath)
 
-    // The program may add headers, but not Harbor's own: they tell the backend
-    // which gateway made the call, which script (execution) it belongs to and
-    // who the caller is, and must not be forgeable from inside the sandbox.
-    // Program-supplied copies — in any letter case — are dropped.
+    // The program may add headers (Accept, Content-Type, its own X-…), but
+    // never one Harbor owns or one that changes routing — see
+    // PROGRAM_FORBIDDEN_HEADERS. Harbor's own are applied after the
+    // program's, so even a copy that slipped the filter could not win.
     const programHeaders = Object.fromEntries(
-      Object.entries(apiRequest.headers ?? {}).filter(([name]) => !HARBOR_OWNED_HEADERS.has(name.toLowerCase()))
+      Object.entries(apiRequest.headers ?? {}).filter(([name]) => !PROGRAM_FORBIDDEN_HEADERS.has(name.toLowerCase()))
     )
     const headers: Record<string, string> = {
+      [HTTP_HEADER.CONTENT_TYPE]: CONTENT_TYPE_JSON,
+      ...programHeaders,
       [HTTP_HEADER.AUTHORIZATION]: `${AUTH_SCHEME} ${tokenPayload.access_token}`,
       [HTTP_HEADER.REQUEST_SOURCE]: this.context.agentName,
       [HTTP_HEADER.MCP_TOOL]: TOOL.API_EXECUTE,
@@ -110,16 +136,20 @@ export class ApiClient implements ConnectorAPI {
       [HTTP_HEADER.MCP_VERSION]: MCP_FRAMEWORK_VERSION,
       [HTTP_HEADER.SESSION_ID]: sessionId,
       [HTTP_HEADER.IDEMPOTENCY_KEY]: idempotencyKey,
-      [HTTP_HEADER.CONTENT_TYPE]: CONTENT_TYPE_JSON,
-      ...programHeaders,
       [HTTP_HEADER.CORRELATION_ID]: correlationId,
       [HTTP_HEADER.HARBOR_SERVER_ID]: this.context.serverId ?? DEFAULT_HARBOR_SERVER_ID,
       ...(clientId !== undefined ? { [HTTP_HEADER.HARBOR_CLIENT_ID]: clientId } : {})
     }
 
     let lastError: Error | undefined
+    // A POST or PATCH that timed out or got a 5xx may already have taken
+    // effect; sending it again could create a second order or charge twice,
+    // while the journal shows one activity. Only methods whose repetition is
+    // harmless (RFC 9110 §9.2.2) are retried; for the rest the outcome is
+    // unknown and the run stops (AGENTS.md §5 rule 2).
+    const maxRetries = IDEMPOTENT_METHODS.has(method) ? this.apiConfig.maxRetries : 0
 
-    for (let attempt = 0; attempt <= this.apiConfig.maxRetries; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         this.logger.debug(
           {
@@ -177,28 +207,29 @@ export class ApiClient implements ConnectorAPI {
         }
 
         // 5xx — service failure
-        this.circuitBreaker.recordFailure(normalizedPath)
         lastError = new ApiError(
           `Upstream API returned ${response.status}`,
           response.status,
           true
         )
 
-        if (attempt < this.apiConfig.maxRetries) {
+        if (attempt < maxRetries) {
           await sleep(backoffMs(attempt))
         }
       } catch (err) {
         // Sandbox disposed — not a backend failure; skip CB recording and retries.
         if (signal?.aborted) throw ensureError(err)
-        this.circuitBreaker.recordFailure(normalizedPath)
         lastError = ensureError(err)
 
-        if (attempt < this.apiConfig.maxRetries) {
+        if (attempt < maxRetries) {
           await sleep(backoffMs(attempt))
         }
       }
     }
 
+    // One logical call, one breaker failure — however many attempts it took —
+    // so failureThreshold means "N calls failed", as documented.
+    this.circuitBreaker.recordFailure(breakerKey)
     throw lastError ?? new ApiError('Unknown API error')
   }
 }

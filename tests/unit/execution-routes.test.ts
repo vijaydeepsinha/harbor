@@ -46,11 +46,11 @@ function makeRouteRegistry() {
   return registry
 }
 
-async function start(codeMode: ReturnType<typeof makeRuntime>, registry = makeRouteRegistry()) {
+async function start(governanceRuntime: ReturnType<typeof makeRuntime>, registry = makeRouteRegistry()) {
   const handle = startHttpGateway({
     host: '127.0.0.1', port: 0,
     createMcpServer: () => { throw new Error('not expected') },
-    registry, logger: silentLogger, codeMode
+    registry, logger: silentLogger, governanceRuntime
   })
   await new Promise<void>(resolve => handle.server.once('listening', () => resolve()))
   const { port } = handle.server.address() as AddressInfo
@@ -61,19 +61,19 @@ async function start(codeMode: ReturnType<typeof makeRuntime>, registry = makeRo
 }
 
 /** An execution paused on approval #1, as the tool would leave it. */
-async function seedPaused(rt: ReturnType<typeof makeRuntime>, token = TOKEN, userId = 'user-42') {
+async function seedPaused(governanceRuntime: ReturnType<typeof makeRuntime>, token = TOKEN, userId = 'user-42') {
   const userIdHash = hashAuthenticatedPrincipal({
     access_token: token,
     metadata: { userId }
   })
-  const exec = await rt.manager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
-  await rt.manager.beginRun(exec.executionId)
-  const journal = new ActivityJournal(rt.store, exec.executionId, 'trafficking', 1)
+  const exec = await governanceRuntime.executionManager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
+  await governanceRuntime.executionManager.beginRun(exec.executionId)
+  const journal = new ActivityJournal(governanceRuntime.persistence, exec.executionId, 'trafficking', 1)
   const request = { method: 'POST' as const, rawPath: '/campaigns/C1', specPath: '/campaigns/{id}', operationId: 'updateCampaign', body: { action: 'activate' } }
   await journal.next(request)
-  const approval = await rt.approvals.request(exec.executionId, 1, { ...request, service: 'trafficking', reason: 'r', matchedRules: ['x'] })
+  const approval = await governanceRuntime.approvals.request(exec.executionId, 1, { ...request, service: 'trafficking', reason: 'r', matchedRules: ['x'] })
   await journal.recordWaitingApproval(1, request, approval.approvalId)
-  await rt.manager.endRun(exec.executionId, { kind: 'waitingApproval', approvalId: approval.approvalId })
+  await governanceRuntime.executionManager.endRun(exec.executionId, { kind: 'waitingApproval', approvalId: approval.approvalId })
   return { executionId: exec.executionId, approvalId: approval.approvalId }
 }
 
@@ -82,9 +82,9 @@ describe('execution routes', () => {
   afterEach(async () => { if (cleanup) { await cleanup(); cleanup = null } })
 
   it('requires a bearer, 404s unknown executions, and returns the full inspection', async () => {
-    const rt = makeRuntime()
-    const { executionId, approvalId } = await seedPaused(rt)
-    const { baseUrl, close } = await start(rt); cleanup = close
+    const governanceRuntime = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(governanceRuntime)
+    const { baseUrl, close } = await start(governanceRuntime); cleanup = close
 
     expect((await fetch(`${baseUrl}/executions/${executionId}`)).status).toBe(401)
     const forged = await fetch(`${baseUrl}/executions/${executionId}`, {
@@ -107,9 +107,9 @@ describe('execution routes', () => {
   })
 
   it('POST decides an approval once; validates body and ownership', async () => {
-    const rt = makeRuntime()
-    const { executionId, approvalId } = await seedPaused(rt)
-    const { baseUrl, close } = await start(rt); cleanup = close
+    const governanceRuntime = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(governanceRuntime)
+    const { baseUrl, close } = await start(governanceRuntime); cleanup = close
     const post = (path: string, body: unknown) => fetch(`${baseUrl}${path}`, {
       method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     })
@@ -120,7 +120,13 @@ describe('execution routes', () => {
     const wrongExec = await post(`/executions/other-exec/approvals/${approvalId}`, { action: 'accept' })
     expect(wrongExec.status).toBe(404)
 
-    const ok = await post(`/executions/${executionId}/approvals/${approvalId}`, { action: 'accept', comment: 'fine' })
+    for (const approve of [undefined, 'true', 1, null]) {
+      const malformed = await post(`/executions/${executionId}/approvals/${approvalId}`, { action: 'accept', ...(approve !== undefined ? { approve } : {}) })
+      expect(malformed.status, `approve=${String(approve)}`).toBe(400) // an accept that does not say approve: true is not a yes
+    }
+    expect((await governanceRuntime.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+
+    const ok = await post(`/executions/${executionId}/approvals/${approvalId}`, { action: 'accept', approve: true, comment: 'fine' })
     expect(ok.status).toBe(200)
     const decided = await ok.json() as { outcome: string; approval: { status: string; comment: string; decidedVia: string }; executionStatus: string }
     expect(decided.outcome).toBe('APPROVED')
@@ -136,9 +142,9 @@ describe('execution routes', () => {
   })
 
   it('rejects a different authenticated principal without exposing or deciding the execution', async () => {
-    const rt = makeRuntime()
-    const { executionId, approvalId } = await seedPaused(rt)
-    const { baseUrl, close } = await start(rt); cleanup = close
+    const governanceRuntime = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(governanceRuntime)
+    const { baseUrl, close } = await start(governanceRuntime); cleanup = close
     const headers = { Authorization: `Bearer ${OTHER_TOKEN}` }
 
     const inspection = await fetch(`${baseUrl}/executions/${executionId}`, { headers })
@@ -150,14 +156,14 @@ describe('execution routes', () => {
       body: JSON.stringify({ action: 'accept' })
     })
     expect(decision.status).toBe(403)
-    expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+    expect((await governanceRuntime.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
   })
 
   it('refuses an approval that belongs to another principal execution, even with a valid token for one of them', async () => {
-    const rt = makeRuntime()
-    const mine = await seedPaused(rt, TOKEN, 'user-42')
-    const theirs = await seedPaused(rt, OTHER_TOKEN, 'user-99')
-    const { baseUrl, close } = await start(rt); cleanup = close
+    const governanceRuntime = makeRuntime()
+    const mine = await seedPaused(governanceRuntime, TOKEN, 'user-42')
+    const theirs = await seedPaused(governanceRuntime, OTHER_TOKEN, 'user-99')
+    const { baseUrl, close } = await start(governanceRuntime); cleanup = close
 
     // A valid token for *my* execution, paired with *their* approval id.
     const res = await fetch(`${baseUrl}/executions/${mine.executionId}/approvals/${theirs.approvalId}`, {
@@ -167,17 +173,32 @@ describe('execution routes', () => {
     })
 
     expect(res.status).toBe(404)
-    expect((await res.json() as { code: string }).code).toBe(ERR.APPROVAL_NOT_FOUND)
+    const refused = await res.json() as { code: string; error: string }
+    expect(refused.code).toBe(ERR.APPROVAL_NOT_FOUND)
+    expect(refused.error).not.toContain(theirs.executionId) // the reply does not confirm whose approval it is
     // Their approval is untouched and their execution still pauses on it.
-    expect((await rt.approvals.get(theirs.approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
-    expect((await rt.manager.load(theirs.executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    expect((await governanceRuntime.approvals.get(theirs.approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+    expect((await governanceRuntime.executionManager.load(theirs.executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+  })
+
+  it('answers an over-limit POST body with a readable 413, not a reset connection', async () => {
+    const governanceRuntime = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(governanceRuntime)
+    const { baseUrl, close } = await start(governanceRuntime); cleanup = close
+    const res = await fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'accept', approve: true, comment: 'x'.repeat(100 * 1024) })
+    })
+    expect(res.status).toBe(413)
+    expect((await res.json() as { code: string }).code).toBe(ERR.PAYLOAD_TOO_LARGE)
+    expect((await governanceRuntime.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
   })
 
   it('returns a conflict when another operation holds the execution lock', async () => {
-    const rt = makeRuntime()
-    const { executionId, approvalId } = await seedPaused(rt)
-    expect(await rt.store.acquireLock(executionId)).toBe(true)
-    const { baseUrl, close } = await start(rt); cleanup = close
+    const governanceRuntime = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(governanceRuntime)
+    expect(await governanceRuntime.persistence.acquireLock(executionId)).toBe(true)
+    const { baseUrl, close } = await start(governanceRuntime); cleanup = close
 
     const decision = await fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, {
       method: 'POST',
@@ -187,15 +208,15 @@ describe('execution routes', () => {
 
     expect(decision.status).toBe(409)
     expect((await decision.json() as { code: string }).code).toBe(ERR.EXECUTION_LOCKED)
-    expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
-    expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
-    await rt.store.releaseLock(executionId)
+    expect((await governanceRuntime.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+    expect((await governanceRuntime.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
+    await governanceRuntime.persistence.releaseLock(executionId)
   })
 
   it('decline over HTTP denies the execution', async () => {
-    const rt = makeRuntime()
-    const { executionId, approvalId } = await seedPaused(rt)
-    const { baseUrl, close } = await start(rt); cleanup = close
+    const governanceRuntime = makeRuntime()
+    const { executionId, approvalId } = await seedPaused(governanceRuntime)
+    const { baseUrl, close } = await start(governanceRuntime); cleanup = close
     const res = await fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, {
       method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decline' })
     })
@@ -221,11 +242,11 @@ describe('execution routes', () => {
     }
     registry.register('trafficking', resources)
 
-    const rt = makeRuntime()
+    const governanceRuntime = makeRuntime()
     const first = await resources.authMiddleware.validateRequest(`Bearer ${TOKEN}`, 'c')
     const userIdHash = hashAuthenticatedPrincipal(first.payload, TOKEN)
-    const exec = await rt.manager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
-    const { baseUrl, close } = await start(rt, registry); cleanup = close
+    const exec = await governanceRuntime.executionManager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
+    const { baseUrl, close } = await start(governanceRuntime, registry); cleanup = close
 
     const res = await fetch(`${baseUrl}/executions/${exec.executionId}`, {
       headers: { Authorization: `Bearer ${TOKEN}` }
@@ -233,7 +254,7 @@ describe('execution routes', () => {
     expect(res.status).toBe(200)
   })
 
-  it('is absent when no Code Mode runtime is configured', async () => {
+  it('is absent when no governance runtime is configured', async () => {
     const handle = startHttpGateway({
       host: '127.0.0.1', port: 0, createMcpServer: () => { throw new Error('no') }, registry: new ServiceRegistry(), logger: silentLogger
     })

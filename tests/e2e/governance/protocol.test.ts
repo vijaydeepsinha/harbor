@@ -104,6 +104,16 @@ describe('MCP protocol surface', () => {
     expect(res.error?.code).toBe(-32700)
   })
 
+  it('should_refuse_an_oversized_request_body_with_413_before_anything_is_parsed', async () => {
+    // MCP_MAX_BODY_BYTES defaults to 4 MiB; the body is read (bounded) before the SDK sees it.
+    const c = s().client('alice')
+    const huge = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'api_execute', arguments: { service: 'commerce', code: `async () => ${JSON.stringify('x'.repeat(5 * 1024 * 1024))}` }, _meta: c.envelope() } })
+    const res = await c.rawPost(huge, c.headers('tools/call', 'api_execute'))
+    expect(res.httpStatus).toBe(413)
+    expect((res.body as { code?: string }).code).toBe('PAYLOAD_TOO_LARGE')
+    expect(await s().mock.requests()).toHaveLength(0)
+  })
+
   it('should_reject_an_unknown_method_with_minus_32601', async () => {
     const res = await s().client('alice').rpc('governance/approve', { anything: true })
     expect(res.error?.code, JSON.stringify(res.body)).toBe(-32601)

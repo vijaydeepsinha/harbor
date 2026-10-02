@@ -54,6 +54,14 @@ export function extractBearerFromHeader(
 
 /** Convenience wrapper that reads the `Authorization` header off a Node request. */
 export function extractBearerFromRequest(req: IncomingMessage): BearerExtractionResult {
+  // Node keeps only the first Authorization header and silently drops the
+  // rest, so the parser's duplicate check never sees them. A proxy that
+  // honours the last one would authenticate a different credential than
+  // Harbor does — count them on the raw header list instead.
+  const raw = req.rawHeaders ?? []
+  let count = 0
+  for (let i = 0; i < raw.length; i += 2) if (raw[i]?.toLowerCase() === 'authorization') count++
+  if (count > 1) return extractBearerFromHeader(raw.filter((_, i) => i % 2 === 1 && raw[i - 1]?.toLowerCase() === 'authorization'))
   return extractBearerFromHeader(req.headers['authorization'])
 }
 

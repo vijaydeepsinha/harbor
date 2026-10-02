@@ -18,10 +18,10 @@ export function ensureError(err: unknown): Error {
  * attach, falling back to a caller-supplied code (defaulting to `ERR.UNKNOWN`).
  */
 export function errorCode(err: unknown, fallback: string = ERR.UNKNOWN): string {
-  return (err as { code?: string }).code ?? fallback
+  return (err as { code?: string } | null | undefined)?.code ?? fallback
 }
 
 /** Reads the optional `retryable` flag attached to our domain errors. */
 export function errorRetryable(err: unknown): boolean {
-  return (err as { retryable?: boolean }).retryable ?? false
+  return (err as { retryable?: boolean } | null | undefined)?.retryable ?? false
 }

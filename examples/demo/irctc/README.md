@@ -23,25 +23,29 @@ Harbor
 OpenAPI discovery / API execution
     |
     v
-Railway Booking Service     <-- this repo
+Railway Booking Service     <-- this service
     |
     v
 SQLite
 ```
 
-Later, Harbor will introduce a governance layer:
+Harbor's governance layer sits in front of backend API execution:
 
 ```text
-Governance
+Governance Rules (evaluated by Harbor before each call)
     |
     v
-ALLOW / DENY
+ALLOW / DENY / REQUIRE_APPROVAL (a human decides over MCP)
 ```
 
-sitting in front of backend API execution. **Harbor integration is intentionally not
-implemented in this project.** This service only exposes technically valid operations;
-policy decisions (e.g. blocking Tatkal for large groups, capping booking amounts) are
-left entirely to Harbor.
+**Policy is intentionally not implemented in this service.** It only exposes
+technically valid operations; policy decisions (e.g. blocking Tatkal for large groups,
+capping booking amounts) are left entirely to Harbor, as Governance Rules. No IRCTC
+rule ships with the repository — every call is allowed until you add one; the rule
+format is in [`governance/rules/README.md`](../../../governance/rules/README.md).
+
+In the Harbor repository this backend is registered as the `irctc` service
+(`services/irctc/`) and started on port 3005 by `examples/demo/start.sh`.
 
 Project layout:
 
@@ -61,7 +65,11 @@ tests/             pytest suite
 
 ## Installation
 
+Requires Python 3.13 or later (`pyproject.toml`). Create the virtualenv as `.venv`
+**in this folder** — that is the interpreter `examples/demo/start.sh` runs:
+
 ```bash
+cd examples/demo/irctc
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -142,10 +150,11 @@ curl -X POST "http://localhost:3005/demo/reset"
 4. Create a booking and receive a generated PNR.
 5. Retrieve the booking by PNR.
 6. Cancel the booking and confirm the status is `CANCELLED` on re-fetch.
-7. Create a Tatkal booking for 3 passengers — the backend allows it (Harbor will later
-   decide whether this is permitted).
-8. Create a booking with total fare above ₹5,000 — the backend allows it (Harbor will
-   later enforce any maximum-amount policy).
+7. Create a Tatkal booking for 3 passengers — the backend allows it (whether this is
+   permitted is a Governance Rule decision in Harbor).
+8. Create a booking with total fare above ₹5,000 — the backend allows it (any
+   maximum-amount policy is a Governance Rule in Harbor, e.g. `REQUIRE_APPROVAL` above a
+   threshold).
 
 ## Reset instructions
 
@@ -168,4 +177,6 @@ This service deliberately does **not** implement any governance/policy logic (e.
 blocking Tatkal bookings by passenger count, or capping total booking fare). It exposes
 the raw technical capability via a fully-described OpenAPI spec so that Harbor, sitting
 in front of this service, can decide — per request — whether an AI agent's action is
-`ALLOWED` or `DENIED` before the request ever reaches this backend.
+allowed (`ALLOW`), refused (`DENY`) or held for a human (`REQUIRE_APPROVAL`) before the
+request ever reaches this backend. See
+[`docs/code-mode-governance.md`](../../../docs/code-mode-governance.md).

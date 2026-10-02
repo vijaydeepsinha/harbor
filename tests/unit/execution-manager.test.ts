@@ -3,7 +3,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ExecutionManager, buildHistory } from '../../src/runtime/execution/execution-manager.js'
-import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-execution-store.js'
 import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, GOVERNANCE_DECISION, ERR, EXECUTION_CODE_RETENTION } from '../../src/core/constants.js'
 import {
   ExecutionNotFoundError, ExecutionLockedError, ExecutionNotResumableError,
@@ -16,12 +16,12 @@ let ids = 0
 const newId = () => `exec-${++ids}`
 
 describe('ExecutionManager', () => {
-  let store: InMemoryCodeModeStore
+  let persistence: InMemoryExecutionStore
   let manager: ExecutionManager
   beforeEach(() => {
     tick = 0; ids = 0
-    store = new InMemoryCodeModeStore()
-    manager = new ExecutionManager(store, clock, newId)
+    persistence = new InMemoryExecutionStore()
+    manager = new ExecutionManager(persistence, clock, newId)
   })
 
   it('creates an execution with a durable id and persists the original code', async () => {
@@ -50,7 +50,7 @@ describe('ExecutionManager', () => {
     await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
     await manager.beginRun('exec-1')
     await manager.endRun('exec-1', { kind: 'waitingApproval', approvalId: 'ap-1' })
-    await store.putApproval({
+    await persistence.putApproval({
       approvalId: 'ap-1', executionId: 'exec-1', activitySequence: 3, status: APPROVAL_STATUS.PENDING,
       summary: { service: 'svc', method: 'POST', specPath: '/x', reason: 'r', matchedRules: [] }, createdAt: clock()
     })
@@ -64,11 +64,11 @@ describe('ExecutionManager', () => {
     const untouched = await manager.load('exec-1')
     expect(untouched.status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
     expect(untouched.runCount).toBe(1)
-    expect(await store.acquireLock('exec-1')).toBe(true)
-    await store.releaseLock('exec-1')
+    expect(await persistence.acquireLock('exec-1')).toBe(true)
+    await persistence.releaseLock('exec-1')
 
-    const ap = (await store.getApproval('ap-1'))!
-    await store.putApproval({ ...ap, status: APPROVAL_STATUS.APPROVED, decidedAt: clock() })
+    const ap = (await persistence.getApproval('ap-1'))!
+    await persistence.putApproval({ ...ap, status: APPROVAL_STATUS.APPROVED, decidedAt: clock() })
     const resumed = await manager.beginRun('exec-1')
     expect(resumed.runCount).toBe(2)
     expect(resumed.status).toBe(EXECUTION_STATUS.RUNNING)
@@ -101,7 +101,7 @@ describe('ExecutionManager', () => {
     })
 
     it('KEEP stores the code against the executionId for good', async () => {
-      const keep = new ExecutionManager(store, clock, newId, { codeRetention: EXECUTION_CODE_RETENTION.KEEP })
+      const keep = new ExecutionManager(persistence, clock, newId, { codeRetention: EXECUTION_CODE_RETENTION.KEEP })
       const rec = await keep.create({ service: 'svc', code: 'async () => 3', userIdHash: 'h' })
       await keep.beginRun(rec.executionId)
       await keep.endRun(rec.executionId, { kind: 'completed', result: 3 })
@@ -113,13 +113,13 @@ describe('ExecutionManager', () => {
     it('an execution without its program cannot be resumed — nothing else may run in its place', async () => {
       const rec = await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
       const { originalCode: _dropped, ...withoutCode } = await manager.load(rec.executionId)
-      await store.updateExecution({ ...withoutCode, status: EXECUTION_STATUS.INTERRUPTED })
+      await persistence.updateExecution({ ...withoutCode, status: EXECUTION_STATUS.INTERRUPTED })
       await expect(manager.beginRun(rec.executionId)).rejects.toBeInstanceOf(ExecutionNotResumableError)
     })
   })
 
   it('stamps a terminal execution with finishedAt, and with expiresAt under a retention period; a paused one gets neither', async () => {
-    const retained = new ExecutionManager(store, clock, newId, { retentionSec: 3600 })
+    const retained = new ExecutionManager(persistence, clock, newId, { retentionSec: 3600 })
     const done = await retained.create({ service: 'svc', code: 'c', userIdHash: 'h' })
     await retained.beginRun(done.executionId)
     await retained.endRun(done.executionId, { kind: 'completed', result: 1 })
@@ -155,8 +155,8 @@ describe('ExecutionManager', () => {
       const after = await manager.load(rec.executionId)
       expect(after.status).toBe(status)
       expect(after.terminalReason).toEqual({ code: 'X', message: 'why' })
-      expect(await store.acquireLock(rec.executionId)).toBe(true)
-      await store.releaseLock(rec.executionId)
+      expect(await persistence.acquireLock(rec.executionId)).toBe(true)
+      await persistence.releaseLock(rec.executionId)
     }
   })
 
@@ -164,7 +164,7 @@ describe('ExecutionManager', () => {
     await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
     const rec = await manager.beginRun('exec-1')
     // simulate a process crash: status stays RUNNING, lock evaporates
-    await store.releaseLock('exec-1')
+    await persistence.releaseLock('exec-1')
     expect(rec.status).toBe(EXECUTION_STATUS.RUNNING)
     const again = await manager.beginRun('exec-1')
     expect(again.runCount).toBe(2)
@@ -172,30 +172,39 @@ describe('ExecutionManager', () => {
 
   it('recordProgress only ever raises the activity high-water mark', async () => {
     await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await manager.beginRun('exec-1') // progress is recorded by a live run
     await manager.recordProgress('exec-1', 3)
     await manager.recordProgress('exec-1', 2)
     expect((await manager.load('exec-1')).currentActivity).toBe(3)
+  })
+
+  it('recordProgress never writes over a run that has finished (a stale copy would resurrect it)', async () => {
+    await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
+    await manager.beginRun('exec-1')
+    const finished = await manager.endRun('exec-1', { kind: 'completed', result: 1 })
+    await manager.recordProgress('exec-1', 9)
+    expect(await manager.load('exec-1')).toEqual(finished)
   })
 
   it('inspect assembles a chronological history from the records', async () => {
     const rec = await manager.create({ service: 'svc', code: 'c', userIdHash: 'h' })
     const id = rec.executionId
     await manager.beginRun(id)
-    await store.putActivity({
+    await persistence.putActivity({
       executionId: id, sequence: 1, service: 'svc', status: ACTIVITY_STATUS.COMPLETED,
       request: { method: 'GET', rawPath: '/a', specPath: '/a' }, response: { status: 200, ok: true, data: [] },
       runIndex: 1, createdAt: clock(), updatedAt: clock()
     })
-    await store.putDecision({
+    await persistence.putDecision({
       executionId: id, activitySequence: 2, decision: GOVERNANCE_DECISION.REQUIRE_APPROVAL, reason: 'RULE_MATCHED',
       matchedRules: ['big'], ruleVersions: ['big@1#x'], evaluatedAt: clock()
     })
     const createdAt = clock()
-    await store.putActivity({
+    await persistence.putActivity({
       executionId: id, sequence: 2, service: 'svc', status: ACTIVITY_STATUS.WAITING_APPROVAL,
       request: { method: 'POST', rawPath: '/b', specPath: '/b' }, runIndex: 1, createdAt, updatedAt: createdAt, approvalId: 'ap'
     })
-    await store.putApproval({
+    await persistence.putApproval({
       approvalId: 'ap', executionId: id, activitySequence: 2, status: APPROVAL_STATUS.PENDING,
       summary: { service: 'svc', method: 'POST', specPath: '/b', reason: 'r', matchedRules: ['big'] }, createdAt: clock()
     })

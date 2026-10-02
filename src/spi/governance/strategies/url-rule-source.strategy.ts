@@ -2,6 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import axios from 'axios'
+import { redactUrl } from '../../../core/utils/url.js'
 import type { GovernanceRuleDocument, GovernanceRuleSource } from '../rule-source.js'
 
 /**
@@ -15,7 +16,7 @@ export class UrlRuleSourceStrategy implements GovernanceRuleSource {
   readonly name: string
 
   constructor(private readonly url: string, private readonly timeoutMs: number) {
-    this.name = `url:${redact(url)}`
+    this.name = `url:${redactUrl(url)}`
   }
 
   async load(): Promise<GovernanceRuleDocument[]> {
@@ -29,19 +30,8 @@ export class UrlRuleSourceStrategy implements GovernanceRuleSource {
     if (typeof response.data !== 'string') throw new Error(`${this.name} returned a non-text body`)
     const contentType = String(response.headers['content-type'] ?? '')
     const json = contentType.includes('json') || /\.json(?:$|\?)/.test(new URL(this.url).pathname)
-    return [{ name: redact(this.url), format: json ? 'json' : 'yaml', text: response.data }]
+    return [{ name: redactUrl(this.url), format: json ? 'json' : 'yaml', text: response.data }]
   }
 }
 
 /** The URL as logs and decision records may show it: no user-info, no query (either may carry a secret). */
-function redact(url: string): string {
-  try {
-    const u = new URL(url)
-    u.username = ''
-    u.password = ''
-    u.search = ''
-    return u.toString()
-  } catch {
-    return '(invalid URL)'
-  }
-}

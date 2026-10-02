@@ -79,6 +79,37 @@ describe('OAuthIntrospectionStrategy', () => {
     await expect(strategy.validate('bad-token')).rejects.toThrow(TokenInvalidError)
   })
 
+  it('an RFC 7662 response with active:false is rejected, whatever else it carries', async () => {
+    for (const active of [false, 'true', 0]) {
+      vi.mocked(axios.post).mockResolvedValueOnce({ status: 200, data: { active, expires_in: 3600, sub: 'revoked-user' } })
+      await expect(strategy.validate('revoked'), String(active)).rejects.toThrow(TokenInvalidError)
+    }
+    vi.mocked(axios.post).mockResolvedValueOnce({ status: 200, data: { active: true, expires_in: 3600 } })
+    expect((await strategy.validate('live')).expires_in).toBe(3600)
+  })
+
+  it('reads RFC 7662 exp (absolute) as the remaining lifetime, and refuses one in the past', async () => {
+    const now = Math.floor(Date.now() / 1000)
+    vi.mocked(axios.post).mockResolvedValueOnce({ status: 200, data: { active: true, exp: now + 600 } })
+    const live = await strategy.validate('t')
+    expect(live.expires_in).toBeGreaterThan(590)
+    expect(live.expires_in).toBeLessThanOrEqual(600)
+    vi.mocked(axios.post).mockResolvedValueOnce({ status: 200, data: { active: true, exp: now - 86_400 } })
+    await expect(strategy.validate('t')).rejects.toThrow(TokenExpiredError)
+    // An epoch timestamp mapped onto expires_in is read as absolute, not as a lifetime of decades.
+    const mapped = new OAuthIntrospectionStrategy({ ...config, responseMapping: { expires_in: 'exp' } })
+    vi.mocked(axios.post).mockResolvedValueOnce({ status: 200, data: { exp: now - 86_400 } })
+    await expect(mapped.validate('t')).rejects.toThrow(TokenExpiredError)
+  })
+
+  it('a transport failure names the error code but never the auth server\'s address', async () => {
+    vi.mocked(axios.post).mockRejectedValueOnce(Object.assign(new Error('connect ECONNREFUSED 10.0.0.7:8083'), { code: 'ECONNREFUSED' }))
+    const err = await strategy.validate('t').catch((e: unknown) => e) as Error
+    expect(err).toBeInstanceOf(TokenIntrospectionError)
+    expect(err.message).toContain('ECONNREFUSED')
+    expect(err.message).not.toContain('10.0.0.7')
+  })
+
   it('network failure throws TokenIntrospectionError', async () => {
     vi.mocked(axios.post).mockRejectedValueOnce(new Error('ECONNREFUSED'))
 

@@ -98,7 +98,10 @@ export class AuthMiddleware {
         // cached payload is always safe to serve. If it's inside the refresh
         // window, kick off a background refresh — the next request will see
         // the refreshed token. Current request returns immediately.
-        this.maybeStartBackgroundRefresh(rawToken, tokenHash, cached.payload, cached.expiresAt, correlationId)
+        // The window is measured against the backend token's own expiry, not
+        // the entry's: an entry capped by AUTH_TOKEN_CACHE_TTL_MS would sit
+        // inside the window from its first second and refresh on every hit.
+        this.maybeStartBackgroundRefresh(rawToken, tokenHash, cached.payload, cached.tokenExpiresAt ?? cached.expiresAt, correlationId)
         return { payload: cached.payload, invalidate }
       }
 
@@ -188,15 +191,17 @@ export class AuthMiddleware {
     payload: TokenPayload,
     correlationId: string
   ): Promise<void> {
-    const refresh = this.authStrategy.refresh
-    if (!refresh || !payload.refresh_token) {
+    // Called as a method: a detached `const refresh = strategy.refresh` loses
+    // `this`, and every background refresh used to throw inside the strategy.
+    const strategy = this.authStrategy
+    if (!strategy.refresh || !payload.refresh_token) {
       this.tracker.markFailed(tokenHash)
       return
     }
 
     try {
       this.logger.info({ correlationId }, 'Token near expiry — refreshing in background')
-      const refreshedToken = await refresh(payload.refresh_token, payload.access_token)
+      const refreshedToken = keepIdentity(await strategy.refresh(payload.refresh_token, payload.access_token), payload)
       this.metrics?.increment(METRIC.AUTH_REFRESH_SUCCEEDED, { mode: 'background' })
       await this.updateCacheBestEffort(rawToken, refreshedToken)
       this.tracker.markSucceeded(tokenHash)
@@ -225,7 +230,7 @@ export class AuthMiddleware {
     this.metrics?.increment(METRIC.AUTH_REFRESH_STARTED, { mode: 'sync' })
     try {
       this.logger.info({ correlationId }, 'Token near expiry — refreshing synchronously (cache miss path)')
-      const refreshedToken = await this.authStrategy.refresh(payload.refresh_token, payload.access_token)
+      const refreshedToken = keepIdentity(await this.authStrategy.refresh(payload.refresh_token, payload.access_token), payload)
       this.metrics?.increment(METRIC.AUTH_REFRESH_SUCCEEDED, { mode: 'sync' })
       await this.updateCacheBestEffort(rawToken, refreshedToken)
       return refreshedToken
@@ -248,4 +253,17 @@ export class AuthMiddleware {
       return null
     }
   }
+}
+
+/**
+ * A refresh rotates the backend token for the *same* caller. Token-endpoint
+ * responses carry no identity claims (RFC 6749 §5.1), so the refreshed
+ * payload would lose `metadata.userId` and the caller's principal hash would
+ * change — locking them out of their own paused executions. The identity
+ * established by validating the caller's token stands.
+ */
+function keepIdentity(refreshed: TokenPayload, original: TokenPayload): TokenPayload {
+  const userId = original.metadata?.['userId']
+  if (userId === undefined) return refreshed
+  return { ...refreshed, metadata: { ...(refreshed.metadata ?? {}), userId } }
 }

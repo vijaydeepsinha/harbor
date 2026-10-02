@@ -6,8 +6,11 @@ agents run through `api_execute`.
 
 > **The V8 isolate is ephemeral. The execution is durable.**
 
-Requirements: [`docs/poc/requirements-aug28.md`](poc/requirements-aug28.md).
-Design decisions and the gap analysis: [`docs/poc/implementation-plan.md`](poc/implementation-plan.md).
+Rule format: [`governance/rules/README.md`](../governance/rules/README.md).
+Requirement → test mapping: [`tests/REQUIREMENT_COVERAGE.md`](../tests/REQUIREMENT_COVERAGE.md).
+History: the 2026-08-28 requirements ([`docs/poc/requirements-aug28.md`](poc/requirements-aug28.md))
+and gap analysis ([`docs/poc/implementation-plan.md`](poc/implementation-plan.md));
+where they disagree with this document, this document and the code win.
 
 ---
 
@@ -39,9 +42,9 @@ CREATED ──► RUNNING ──► COMPLETED
                ├──► WAITING_APPROVAL ──(decided: approve)──► RUNNING …
                │                     ──(decided: reject) ──► DENIED
                │                     ──(decided: cancel) ──► CANCELLED
-               ├──► INTERRUPTED   (retryable failure: circuit open, timeout, transport) ──► RUNNING …
+               ├──► INTERRUPTED   (retryable failure: circuit open, sandbox time limit, internal error) ──► RUNNING …
                ├──► DENIED        (a Governance Rule said DENY)
-               └──► FAILED        (replay diverged, unknown outcome, non-retryable error)
+               └──► FAILED        (replay diverged, unknown outcome, non-retryable error — incl. a failed call the program did not catch)
 ```
 
 | Fact | Where |
@@ -58,9 +61,9 @@ CREATED ──► RUNNING ──► COMPLETED
 Every `api.request()` that reaches the host bridge becomes activity `#N`,
 numbered in **arrival order** within the execution — never by variable name,
 never by hashing code (`src/runtime/execution/activity-journal.ts`). Each record
-holds the request (`method`, raw path, resolved OpenAPI path template,
-`operationId`, path params, query, body — never headers) and, once the call
-returns, the response (`status`, `ok`, `data`).
+holds the request (`method`, the canonical concrete path (§5), resolved
+OpenAPI path template, `operationId`, path params, query, body — never
+headers) and, once the call returns, the response (`status`, `ok`, `data`).
 
 **Updated in place, never rebuilt.** There is exactly one activity record per
 call, keyed by `executionId + sequence`. An approval moves that same record
@@ -83,7 +86,7 @@ Activity states:
 |---|---|
 | `EXECUTING` | call in flight; found on resume ⇒ the previous process died mid-call |
 | `COMPLETED` | response recorded (any HTTP status) — replayable |
-| `FAILED` | the transport threw; `failure.outcomeKnown: false` — Harbor does not know whether the API executed |
+| `FAILED` | the call threw — transport error, timeout, a 5xx that retries did not clear (§10), or an abort when the run ended; `failure.outcomeKnown: false` — Harbor does not know whether the API executed |
 | `WAITING_APPROVAL` / `APPROVED` / `DENIED` / `CANCELLED` | governance and human-decision states |
 
 ## 4. Replay
@@ -102,9 +105,18 @@ On every run the program starts from the top. At activity `#N` the bridge
 | `FAILED`, or `EXECUTING` with a non-`GET` method | stop with `ACTIVITY_OUTCOME_UNKNOWN` — never silently repeat |
 | `EXECUTING` with `GET` | re-execute (safe method) |
 
-**Divergence.** If the call at `#N` has a different method or resolved path
-than the record, the run stops with `REPLAY_DIVERGED` and the execution is
-`FAILED`; nothing is executed under the old history.
+**Divergence.** Every record binds the call's method, resolved template and
+concrete canonical path (§5): a replayed response must belong to the same
+resource. A record that is about to execute or is in front of a human —
+`APPROVED`, `WAITING_APPROVAL`, `EXECUTING` — also binds the query and the
+body (compared independently of key order): an approval is for the request
+the human saw, and a program that reaches the same sequence with another
+amount or filter (a clock-dependent branch, `Promise.all` siblings arriving in
+another order) must not inherit it. A mismatch stops the run with
+`REPLAY_DIVERGED` and the execution is `FAILED`; nothing is executed under
+the old history and the recorded activity is left as it was. A `COMPLETED`
+record still replays when only its query or body drifted — nothing executes
+(§14).
 
 **Deterministic replay contract.** Given the same persisted program and the
 same recorded responses, replay reproduces the same external-call sequence.
@@ -115,46 +127,109 @@ check then stops it.
 
 **Stopped runs stay stopped.** Once a run has paused or stopped, any further
 `api.request()` in that isolate — even inside a `try/catch` — is refused
-without executing, and the control-plane signal is re-raised after the
-isolate settles so user code cannot mask it.
+without executing, with the code of why the run stopped (`GOVERNANCE_DENIED`,
+`REPLAY_DIVERGED`, `EXECUTION_CANCELLED`, `ACTIVITY_OUTCOME_UNKNOWN`, else
+`APPROVAL_REQUIRED`). The first run-stopping signal stands — a sibling's
+later pause never turns a DENY into a question the human is asked — and it is
+re-raised after the isolate settles so user code cannot mask it.
+
+**Concurrent calls are admitted one at a time.** For calls a program starts
+together (`Promise.all`), the journal lookup, governance, the stop check and
+journaling `EXECUTING` form one critical section per run, taken in arrival
+order. A call admitted after a sibling paused or denied the run therefore
+sees that stop and can neither execute nor open a second approval. The
+external calls themselves still overlap.
+
+**The run ends when its calls end.** When the program's function settles,
+calls it started without awaiting (`ids.forEach(async …)`, a floating
+promise) get the rest of the run's time budget (`executeTimeoutMs`) to finish
+and be journaled; whatever is still in flight is then aborted and journaled
+`FAILED` (outcome unknown), and a connector that ignores the abort is
+abandoned after one second. Only then is the run's outcome recorded, so
+nothing reaches the backend or the store after the execution is marked
+finished. An un-awaited call that paused or was denied decides the outcome
+like an awaited one (`src/runtime/sandbox/bridge-request-handler.ts`).
 
 ## 5. Governance decision point
 
 ```
-V8 api.request() → bridge → resolve OpenAPI operation → evaluate rules → ALLOW | DENY | REQUIRE_APPROVAL
-                                                                          │       │            │
-                                                                       execute  stop      pause (approval)
+V8 api.request() → bridge → canonicalise path → resolve OpenAPI operation → evaluate rules → ALLOW | DENY | REQUIRE_APPROVAL
+                                                                                              │       │            │
+                                                                                           execute  stop      pause (approval)
 ```
 
 Governance always runs **before** the external call, never after. The
 evaluator (`src/runtime/governance/rule-evaluator.ts`) is a pure function of the
 rule set and the request — no I/O, no clock, no model.
 
+**One spelling of the path.** The bridge canonicalises every `api.request`
+path once, before resolution (`src/runtime/sandbox/request-path.ts`), and
+governance, the journal and the connector all use that spelling. Otherwise
+the rules would judge the raw string while axios, the URL parser and the
+backend normalise it on the way out: `/orders/./1`, `/x/../orders/1` or
+`/%6frders/1` would reach an operation a rule denies while the resolver
+reported "no such operation" (ungoverned, allowed).
+
+- **Refused** with `INVALID_API_REQUEST` — nothing is sent or journaled:
+  absolute or protocol-relative URLs (`http://…`, `//host`), backslashes,
+  `#` fragments, empty interior segments (`//`), `.` / `..` segments (literal
+  or `%2e`), a segment that decodes to `/`, `\` or a control character,
+  malformed percent-encoding, a query key repeated in the path or given both
+  in the path and in `params`, and `params` that is not an object
+  (`bad-params`).
+- **Normalised**: a missing leading slash is added; escapes of characters
+  that need none are decoded (`%6f` → `o`); a trailing slash is kept and
+  resolves to the same template; a query string written into the path moves
+  into `params`, so `query.*` conditions see it.
+
+`ApiClient` also refuses to leave the service's base URL (axios
+`allowAbsoluteUrls: false`), whoever calls it.
+
 ## 6. Governance Rules
 
 Rules come from a **rule source** (`src/spi/governance/rule-source.ts`): by default
-the files in `governance/rules/*.yaml|yml|json` (`GOVERNANCE_RULES_DIR`), or one
-document at `GOVERNANCE_RULES_URL` (`GOVERNANCE_RULES_SOURCE=url`), or a source
+the `*.yaml|yml|json` files directly in `GOVERNANCE_RULES_DIR` — unset, the
+install's own `governance/rules/`, whatever the working directory; no rule
+files ship there, so a fresh gateway governs nothing — or one document at
+`GOVERNANCE_RULES_URL` (`GOVERNANCE_RULES_SOURCE=url`), or a source
 registered with `registerGovernanceRuleSourceBackend`. With
-`GOVERNANCE_RULES_REFRESH_SEC` > 0 the source is re-read on that interval
+`GOVERNANCE_RULES_REFRESH_SEC` above 0 the source is re-read on that interval
 (`src/runtime/governance/rule-refresher.ts`): a changed set is swapped in
-atomically; an unreachable source or an invalid set keeps the last valid set.
+atomically; an unreachable source, an invalid set, or an empty set that would
+replace a non-empty one keeps the last valid set (clearing every rule takes a
+restart). A rules directory that does not exist is tolerated at boot only:
+the gateway starts with no rules and logs a warning; a refresh that finds it
+missing keeps the rules in force, and one that finds it created loads it.
 Format and operators in [`governance/rules/README.md`](../governance/rules/README.md).
 
 - **Targeting** uses the service's own OpenAPI document: a call to
   `POST /campaigns/C1/activate` resolves to `operationId: activateCampaign`,
   path template `/campaigns/{id}/activate`, `pathParams.id = "C1"`
-  (`src/runtime/governance/operation-resolver.ts`). Rules match on `service`,
-  `operation`, `method` (one or a list), `path` (template, or `/prefix/**` for
-  a template and everything beneath it) — `*` matches anything.
+  (`src/runtime/governance/operation-resolver.ts`). Literal segments compare
+  on the decoded segment and ignore letter case (exact case preferred) —
+  many backends route `/Orders/1` like `/orders/1`, and a call must not
+  escape a rule by changing case. A segment mixing literals and parameters
+  (`/files/{name}.json`, `/v1/{job}:cancel`) resolves; the most specific
+  template wins (literal > mixed > `{param}`). A path the spec does not have
+  resolves to no operation: no `operationId`, and a template made by
+  collapsing id-like segments to `{id}`. Rules match on `service`,
+  `operation`, `method` (one or a list), `path` (a template starting with
+  `/`, or `/prefix/**` for a template and everything beneath it) — `*`
+  matches any *present* value, so `operation: '*'` never targets a call
+  without an `operationId`.
 - **Conditions** are a bounded boolean tree — `allOf` (AND), `anyOf` (OR),
   `not` (NOT) — over actual request values. A leaf compares one operand: a
   field (bare names from the body, `query.*`, `path.*`, `body.a.b`) or a
   number computed from two fields (`ratio`, `percent_of`, `days_between` with
   strict ISO 8601 dates). A leaf on a missing field — or on an operand that
   cannot be computed, e.g. a zero denominator — holds only for `exists:
-  false`; comparisons across types are false. The earlier flat map is still
-  accepted as shorthand for `allOf`. At most 8 levels and 64 nodes.
+  false`; comparisons across types are false. Three readings follow what
+  reaches the backend: a body passed as a JSON string is read as the object
+  it encodes; `query.*` values compare in wire form (`equals: true` matches
+  `'true'`, ordering reads a numeric string as a number); and only the
+  request's own properties are read (`constructor` or `__proto__` is a
+  missing field). The earlier flat map is still accepted as shorthand for
+  `allOf`. At most 8 levels and 64 nodes.
 - **Actions are advisory**: `ALLOW`, `DENY` or `REQUIRE_APPROVAL` plus a
   reason. A rule never rewrites the request and has no side effects.
 - **Levels**: what `match` names sets a rule's level — an operation or path ⇒
@@ -168,7 +243,11 @@ Format and operators in [`governance/rules/README.md`](../governance/rules/READM
 - **Default**: a call some rule *targets* (its `match` fits) but no rule
   matches gets `GOVERNANCE_DEFAULT_DECISION` — default `DENY`
   (`NO_MATCHING_RULE`). A call no rule targets is ungoverned and allowed
-  (`NO_GOVERNANCE`), so a gateway without rules behaves as before.
+  (`NO_GOVERNANCE`) **whatever `GOVERNANCE_DEFAULT_DECISION` says**, so a
+  gateway without rules behaves as before. To fail closed for everything
+  else — paths the spec does not have included — add a gateway-level rule
+  that targets every call, e.g. `match: { service: '*' }` with a `DENY`
+  action; more specific rules still override it (§14).
 - **Fail closed**: an evaluation error is a `DENY`; an invalid rule file stops
   the gateway at boot; a duplicate rule name is an error.
 - **Every decision is persisted** per activity: decision, reason, matched
@@ -196,11 +275,25 @@ elicitation**. No custom MCP methods.
    program in a fresh isolate.
 4. Mapping: `accept` with `approve: true` → `APPROVED` (the activity executes
    on resume); `accept` with `approve: false` or `decline` → `REJECTED`
-   (execution `DENIED`); `cancel` → `CANCELLED`.
+   (execution `DENIED`); `cancel` → `CANCELLED`. An `accept` whose `approve`
+   is missing or not a boolean is refused (`INVALID_API_REQUEST`) and the
+   approval stays pending — a malformed answer is never read as a yes.
 
 An approval is bound to **one activity**. If a later activity needs approval,
 the run pauses again with a new elicitation and a new `requestState` —
 **multiple approval rounds** are simply repeated `input_required` results.
+
+**Stale and conflicting answers change nothing.** Under the execution lock,
+`ApprovalService.decide` (`src/runtime/execution/approval-service.ts`)
+re-checks that the approval is still the question its execution waits on: if
+the execution has finished, or the activity is no longer `WAITING_APPROVAL`
+on this approval, the answer is refused (`EXECUTION_NOT_RESUMABLE`) and
+nothing is written. An MRTR retry whose answer differs from a decision
+already recorded — a decline arriving after an HTTP approve — gets
+`APPROVAL_ALREADY_DECIDED` and nothing runs (`EXECUTION_NOT_RESUMABLE` once
+the execution has finished); a retry repeating the recorded decision (the
+client lost the response) resumes. Errors on this path keep their own
+`retryable` flag — `EXECUTION_LOCKED` is retryable.
 
 **Clients without elicitation.** If the request's `clientCapabilities` do not
 declare `elicitation`, the tool returns an `isError` result with code
@@ -228,15 +321,40 @@ placeholder until the project's public name is settled):
 Reserved `io.modelcontextprotocol/*` keys are never written by Harbor except
 `serverInfo`.
 
-**Outbound headers.** Every backend call carries three headers Harbor owns —
-the sandboxed program cannot set or override them (its copies are dropped,
-whatever their letter case):
+A resume refused before a run starts (the execution is locked, finished, or
+still waiting on an undecided approval) changes nothing, and
+`harbor/execution-status` reports the status as stored — not the status the
+error would have given a run.
+
+**Outbound headers.** Harbor sets its own headers on every backend call
+*after* the program's, so a program's copy never wins. The ones that tie a
+call to its execution:
 
 | Header | Value | Purpose |
 |---|---|---|
 | `X-Correlation-ID` | the `executionId` | ties together every call of one script — across the fresh isolate and the new MCP request of each approval resume |
+| `X-Idempotency-Key` | `mcp-{service}-{executionId}-{sequence}` | one key per activity: two executions of one program never share a key, and a resume keeps its keys. Ungoverned (legacy) runs use `mcp-{service}-{userIdHash12}-{codeHash16}-c{n}`, n = the call's arrival index |
 | `X-Harbor-Server-ID` | `HARBOR_SERVER_ID` (default `HARBOR_GATEWAY`) | Harbor's stamp: this gateway made the call |
 | `X-Harbor-Client-ID` | the caller's `X-Harbor-Client-ID` request header | optional: lets the caller identify itself to the backend; omitted when not sent (and on stdio) |
+
+A program may set `Accept`, `Content-Type` and its own `X-…` headers. It may
+not set the following, in any letter case — its copies are dropped
+(`src/runtime/api-client/api-client.ts`):
+
+- **Harbor's own**: `Authorization`, `X-Request-Source`, `X-MCP-Tool`,
+  `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID`, `X-Idempotency-Key`,
+  `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`. A program
+  that could set these could act as another principal or defeat
+  deduplication.
+- **Routing, framing and ambient credentials**: `Host`, `Content-Length`,
+  `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `TE`,
+  `Trailer`, `Proxy-Authorization`, `Proxy-Connection`, `Cookie`,
+  `Forwarded`, `X-Forwarded-For` / `-Host` / `-Proto` / `-Port` / `-Prefix`,
+  `X-Real-IP`, `X-HTTP-Method-Override`, `X-HTTP-Method`,
+  `X-Method-Override`, `X-Original-URL`, `X-Rewrite-URL`,
+  `X-Original-Method`. These would let the backend, or a proxy in front of
+  it, serve a different method, URL or host than the one governance resolved,
+  or smuggle a second request.
 
 ## 9. Sequence
 
@@ -264,37 +382,66 @@ Agent                Harbor (api_execute)          V8 #1              Backend   
 
 | Failure | Behaviour |
 |---|---|
-| API returned an explicit status (4xx/5xx) | activity `COMPLETED` with that status; the program sees `{ ok: false, status }` as before |
-| Transport threw (timeout, socket) | activity `FAILED`, `outcomeKnown: false`; never replayed or retried silently; a later run stops with `ACTIVITY_OUTCOME_UNKNOWN` |
+| API answered with a status below 500 | activity `COMPLETED` with that status — replayable; the program sees `{ ok, status, data }`, `ok: false` for a 4xx |
+| 5xx or transport error (timeout, socket) on `POST` / `PATCH` | sent once, never retried — it may already have taken effect; activity `FAILED`, `outcomeKnown: false`; a later run stops at it with `ACTIVITY_OUTCOME_UNKNOWN` |
+| 5xx or transport error on `GET` / `PUT` / `DELETE` | retried inside the activity up to the service's `maxRetries` (backoff 500·2ⁿ ms + jitter); still failing ⇒ `FAILED`, `outcomeKnown: false`, as above |
+| A failed call the program does not catch | `SANDBOX_RUNTIME` (not retryable) ⇒ execution `FAILED`. `SANDBOX_TIMEOUT` is only the run's own time limit, whatever a backend's error message says |
 | Process died mid-call | activity left `EXECUTING`; on resume `GET` re-executes, anything else fails closed |
+| Calls still in flight when the program returned | finished within the run's time budget, else aborted and journaled `FAILED` (outcome unknown), before the run's outcome is recorded (§4) |
 | Circuit open / other retryable error | execution `INTERRUPTED` (resumable via `_meta["harbor/execution-id"]`); no activity recorded for the unmade call |
 | Governance evaluation error | `DENY` with `GOVERNANCE_EVALUATION_FAILED` |
-| Approval decided twice | second decision refused (`APPROVAL_ALREADY_DECIDED`); a duplicate MRTR retry after the decision simply resumes |
+| Malformed answer (`accept` without a boolean `approve`) | `INVALID_API_REQUEST` (HTTP 400); the approval stays pending |
+| Approval decided twice | second decision refused (`APPROVAL_ALREADY_DECIDED`); an MRTR retry repeating the recorded decision resumes, a conflicting one runs nothing (§7) |
+| Answer for an approval the execution no longer waits on | `EXECUTION_NOT_RESUMABLE`; nothing is written (§7) |
 | Concurrent approval decisions | decisions serialize on the execution lock; a contender gets `EXECUTION_LOCKED` (HTTP 409) without changing state, then can retry and observe `APPROVAL_ALREADY_DECIDED` |
 | Resume before the approval is decided | the pause is returned again with the same approval id and `_meta["harbor/execution-status"] = WAITING_APPROVAL`; nothing runs, the execution is untouched |
 | Store write failure | the tool call fails; nothing is executed without its journal entry |
-| Replay mismatch | `REPLAY_DIVERGED`, execution `FAILED` |
+| Replay mismatch | `REPLAY_DIVERGED`, execution `FAILED` (§4) |
 | Two resumes at once | second gets `EXECUTION_LOCKED` (retryable) |
 
-Note: `ApiClient` retries 5xx responses up to `maxRetries` (pre-existing
-behaviour); those retries happen inside one activity and are opaque to the
-journal.
+Only methods whose repetition is harmless (RFC 9110 §9.2.2) are retried, and
+those retries are invisible to the journal. The circuit breaker counts one
+failure per logical call however many attempts it took, under the key the
+bridge checks — the OpenAPI template in a governed run — and in `HALF_OPEN`
+lets one probe through at a time.
 
 ## 11. Inspection
 
-`GET /executions/{id}` (bearer) returns `{ execution, activities, approvals,
-decisions, history }`. The bearer is validated through that execution's
-service auth strategy, and the authenticated principal must match the execution
-owner for both inspection and HTTP approval decisions — a syntactically valid
-bearer alone is not sufficient. A decision also names the execution it targets
+`GET /executions/{id}` returns `{ execution, activities, approvals,
+decisions, history }`. `POST /executions/{id}/approvals/{approvalId}` with
+`{ "action": "accept" | "decline" | "cancel", "approve"?: boolean,
+"comment"?: string }` decides an approval — the fallback for clients without
+elicitation (§7) — and returns `{ approval, outcome, executionStatus }`
+(`src/runtime/http/execution-routes.ts`).
+
+The bearer is validated through that execution's service auth strategy, and
+the authenticated principal must match the execution owner for both
+inspection and HTTP approval decisions — a syntactically valid bearer alone
+is not sufficient. The route authorizes on the execution before it looks at
+the approval. A decision also names the execution it targets
 (`ApprovalDecisionInput.executionId`), and `ApprovalService.decide` refuses —
 as `APPROVAL_NOT_FOUND`, before taking the lock — any approval that does not
 belong to it. The decision mutates the approval's *own* execution, so without
 that assertion a caller authorized against one execution could decide an
 approval belonging to another; checking it at the mutation point covers both
-the HTTP and the MCP door. For a terminal execution without `originalCode` under
-the default `DROP`, and `404 EXECUTION_NOT_FOUND` once the retention sweep has
-deleted it. `history` is derived from the records, e.g.
+the HTTP and the MCP door.
+
+| Status | When |
+|---|---|
+| `200` | the inspection, or the decision applied |
+| `400 INVALID_API_REQUEST` | body not a JSON object, `action` not one of the three, or `accept` without a boolean `approve` (the approval stays pending) |
+| `400 EXECUTION_NOT_RESUMABLE` | the execution has finished, or its activity no longer waits on this approval (§7) |
+| `401` | bearer missing or malformed (with `WWW-Authenticate` when `HARBOR_RESOURCE_URI` is set), or rejected by the service's auth strategy |
+| `403 AUTH_FAILED` | the bearer belongs to a different principal than the execution's owner |
+| `404 EXECUTION_NOT_FOUND` / `APPROVAL_NOT_FOUND` | unknown (or swept) execution; unknown approval, or one that belongs to another execution — answered alike, so the reply does not confirm it exists |
+| `405` | any other method |
+| `409 APPROVAL_ALREADY_DECIDED` / `EXECUTION_LOCKED` | the approval was decided already; a run or another decision holds the execution lock (retry) |
+| `413 PAYLOAD_TOO_LARGE` | the body exceeds 64 KiB |
+| `503` | the service's auth backend is unavailable (retry) |
+
+For a terminal execution, `execution` comes back without `originalCode` under
+the default `DROP`; once the retention sweep has deleted it the route answers
+`404 EXECUTION_NOT_FOUND`. `history` is derived from the records, e.g.
 
 ```
 EXECUTION:CREATED
@@ -310,11 +457,17 @@ EXECUTION:COMPLETED
 
 **Audit trail.** Every persisted state change of an execution — the end of
 each run (paused, interrupted, terminal) and each human decision — is
-published to the audit sinks (`AUDIT_SINKS`, default `console`) as an
-`execution-state` event: statuses, activities with HTTP status, approvals and
+published to the audit sinks (`AUDIT_SINKS`, default `console`) as a
+`{ kind: 'execution', state }` event, which the console sink logs as
+`execution-state`: statuses, activities with HTTP status, approvals and
 governance decisions with rule versions. Request and response bodies and the
-program are never included. Destinations beyond the console plug in with
-`registerAuditSinkBackend` (`src/spi/observability/audit-sink.ts`).
+program are never included. The per-call `audit` line of a resumed run
+carries the program that ran (the persisted one, not the code the resume
+sent), and a resume that was refused, or that the answer itself ended
+(decline, cancel), is audited with its execution id and outcome.
+`ENABLE_AUDIT=false` turns both off. Destinations beyond the console
+implement `AuditSink` (`src/spi/observability/audit-sink.ts`) and register
+with `registerAuditSinkBackend` (`src/wiring/strategy-builders.ts`).
 
 ## 12. Storage
 
@@ -334,9 +487,12 @@ Connection settings follow the token cache (`EXECUTION_STORE_MEMCACHE_HOST`,
 (default 300) is how long a crashed pod's lock survives — it must exceed the
 longest run. Retention uses item TTLs.
 
-All stores implement the same SPI (`src/spi/execution/execution-store.ts`);
-register another backend (e.g. Redis) with
-`registerExecutionStoreBackend('redis', factory)` in `src/wiring/strategy-builders.ts`.
+All stores implement the same SPI (`src/spi/execution/execution-store.ts`)
+and pass the contract suite in `tests/unit/execution-store.test.ts`. Register
+another backend (e.g. Redis) with `registerExecutionStoreBackend('redis',
+factory)` from `src/wiring/strategy-builders.ts` and select it with
+`EXECUTION_STORE_TYPE=redis`: any kebab-case name passes config validation,
+and a name nothing registered stops the gateway at boot.
 
 **Retention.** A finished (terminal) execution and everything recorded for it
 — activities, approvals, decisions — is deleted `EXECUTION_RETENTION_SEC`
@@ -350,7 +506,7 @@ a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `EXECUTION_STORE_TYPE` | `in-memory` | `in-memory` \| `file` \| `memcache` (shared across pods) |
+| `EXECUTION_STORE_TYPE` | `in-memory` | `in-memory` \| `file` \| `memcache` (shared across pods) \| the name of a registered backend |
 | `EXECUTION_STORE_DIR` | `./var/executions` | file store directory |
 | `EXECUTION_STORE_MEMCACHE_HOST` / `_PORT` | — | memcache store connection (required with it); `_TIMEOUT_MS` default `2000` |
 | `EXECUTION_STORE_MEMCACHE_KEY_PREFIX` | `harbor:exec:` | key namespace |
@@ -358,15 +514,101 @@ a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
 | `EXECUTION_CODE_RETENTION` | `DROP` | `DROP`: a terminal execution's program text is removed · `KEEP`: stored against the `executionId` |
 | `EXECUTION_RETENTION_SEC` | `86400` | seconds a finished execution and its records are kept before deletion; `0` = keep forever |
 | `GOVERNANCE_RULES_SOURCE` | `dir` | `dir` \| `url` \| a registered source type |
-| `GOVERNANCE_RULES_DIR` | `./governance/rules` | rule files for the `dir` source (top level only) |
+| `GOVERNANCE_RULES_DIR` | `<install root>/governance/rules` | rule files for the `dir` source (top level only); a set value is relative to the working directory |
 | `GOVERNANCE_RULES_URL` | — | rule document for the `url` source |
 | `GOVERNANCE_RULES_URL_TIMEOUT_MS` | `5000` | fetch timeout for the `url` source |
-| `GOVERNANCE_RULES_REFRESH_SEC` | `0` | re-read the source every N seconds (0 = once, at boot); a failed refresh keeps the last valid set |
-| `GOVERNANCE_DEFAULT_DECISION` | `DENY` | a call some rule targets but none matches; calls no rule targets are allowed (`NO_GOVERNANCE`) |
+| `GOVERNANCE_RULES_REFRESH_SEC` | `0` | re-read the source every N seconds (0 = once, at boot); a failed refresh, or one that would empty a non-empty set, keeps the last valid set |
+| `GOVERNANCE_DEFAULT_DECISION` | `DENY` | a call some rule targets but none matches; calls no rule targets are allowed (`NO_GOVERNANCE`) whatever this says |
 | `GOVERNANCE_REQUEST_STATE_KEY` | *(random per process)* | ≥32-char HMAC key; required for multi-instance deployments |
-| `GOVERNANCE_APPROVAL_TTL_SEC` | `600` | how long a paused execution's `requestState` stays redeemable |
+| `GOVERNANCE_APPROVAL_TTL_SEC` | `600` | how long a paused execution's `requestState` stays redeemable (the approval itself does not expire, §14) |
+| `ENABLE_AUDIT` | `true` | `true`/`1` or `false`/`0` (anything else stops boot); off drops both the per-call audit line and the execution-state events |
+| `AUDIT_SINKS` | `console` | comma list of `console` and registered sink types; empty while audit is on stops boot |
+| `HARBOR_SERVER_ID` | `HARBOR_GATEWAY` | `X-Harbor-Server-ID` on every backend call (printable ASCII, ≤128 characters) |
+| `MCP_MAX_BODY_BYTES` | `4194304` (4 MiB) | largest `/mcp` request body; over it ⇒ `413 PAYLOAD_TOO_LARGE`. `/executions` bodies have a fixed 64 KiB cap |
 
-## 14. Known limitations (POC)
+## 14. Known limitations and open decisions
+
+What is true of the code today. Items marked **Decision** wait on an owner's
+call rather than a fix.
+
+**Governance coverage**
+
+- **Decision:** a call no rule targets is allowed (`NO_GOVERNANCE`) even with
+  `GOVERNANCE_DEFAULT_DECISION=DENY` — the default applies only to calls some
+  rule targets. A path the spec does not have has no `operationId`, so only a
+  gateway- or service-level rule (or a `path` rule naming its `{id}`-collapsed
+  form) reaches it. Should unresolved operations fail closed? Until decided,
+  a deployment that must fail closed adds a gateway-level catch-all (§6).
+- Rule targets are not checked against the specs. A typo in `service`,
+  `operation` or `path` loads fine and targets nothing; a spec refresh that
+  renames an `operationId` or drops a path silently un-governs the rules
+  written for it.
+- **Decision:** `final` pins the decision to the broadest level holding a
+  matched `final` rule, whatever its action — a gateway `final` ALLOW beats a
+  service `final` DENY.
+- `not_equals` and `not_in` do not hold on a missing field (only `exists:
+  false` does), so a DENY rule written with them does not fire when the field
+  is absent; pair it with `exists: false` under `anyOf`. There are no
+  case-insensitive or "any element of an array" operators, and numeric
+  strings in the body compare strictly (only `query.*` reads them as
+  numbers).
+- Rules see no principal: `GovernanceRequest`
+  (`src/runtime/governance/rule-evaluator.ts`) carries the service, operation
+  and request values, not who is calling.
+- A decision is made once per activity. A rule change between an approval and
+  the resume is not re-applied to the approved activity (later activities see
+  the rules in force). A stored approval never expires — only the
+  `requestState` carrying it does (`GOVERNANCE_APPROVAL_TTL_SEC`), and a
+  resume via `_meta["harbor/execution-id"]` is asked the same question again.
+- The production image copies no `governance/` directory, so a container runs
+  with zero rules — every call ungoverned — unless rules are mounted at
+  `GOVERNANCE_RULES_DIR` or served from a URL.
+
+**Approvals and identity**
+
+- The approver is the requester. `/executions` decisions require the
+  execution's owner, so the HTTP fallback is self-approval; there is no
+  approver role or requester/approver separation.
+- `requestState` binds the principal hash (`userIdHash`, sealed in the
+  payload) and the JSON-RPC method (via the codec). The principal is the
+  bearer itself when the auth strategy maps no `userId`, and the user — not
+  the specific bearer — when it does.
+- `userIdHash` is the SHA-256 of `metadata.userId` when the auth strategy maps
+  a non-empty string or finite number, otherwise of the raw inbound bearer —
+  never the middleware's `access_token`, which the background/sync refresh
+  rotates behind the caller. Without a mapped `userId`, two bearers for the
+  same human are two principals, so an execution paused under one bearer is
+  not resumable under the other.
+- Audit lines written on the error, approval-pause and refused-resume paths
+  carry `userIdHash: "unknown"`.
+
+**Execution and replay**
+
+- Approval, activity, and execution updates are separate store writes, not a
+  cross-record transaction. The execution lock prevents concurrent decisions
+  from overwriting each other, but a store failure midway through one decision
+  can still leave partially updated records.
+- A `COMPLETED` activity replays even when the program now sends another
+  query or body at that sequence (§4): nothing executes, but the program sees
+  the response to the request originally sent.
+- Approval-gated calls started together (`Promise.all`) are admitted in
+  arrival order. If siblings with the same template arrive in a different
+  order on resume, the content check stops the run with `REPLAY_DIVERGED`
+  (fail closed) rather than executing the wrong one; the program has to be
+  submitted again as a new execution.
+- Programs that depend on time or randomness before an external call are not
+  made deterministic.
+- There is no API to cancel an execution: `CANCELLED` comes only from a
+  `cancel` answer to an approval, and MCP request cancellation does not abort
+  a running sandbox.
+- Neither a backend response (held in host memory and journaled — a memcache
+  item is capped at 1 MB by default) nor a request body a program sends has a
+  size cap.
+- Idempotency strategies cache non-2xx responses, 401 included, for their
+  TTL. Keys are per execution and call, so this reaches only a repeat of the
+  same call.
+
+**Stores and retention**
 
 - With the `in-memory` and `file` stores the run lock is process-local and a
   paused execution resumes only on its own pod; across pods use
@@ -374,31 +616,14 @@ a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
 - On memcache, items without a TTL (live executions, and finished ones when
   `EXECUTION_RETENTION_SEC=0`) can be evicted under memory pressure — size it
   for what you keep; the audit trail is the durable record. The run lock must
-  outlive the longest run (`EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC`).
-- Approval, activity, and execution updates are separate store writes, not a
-  cross-record transaction. The execution lock prevents concurrent decisions
-  from overwriting each other, but a store failure midway through one decision
-  can still leave partially updated records.
-- `requestState` binds the principal via `userIdHash` inside the sealed
-  payload and the JSON-RPC method via the codec; it is not bound to the
-  transport bearer itself.
-- `/executions` inspection and HTTP approval decisions are restricted to the
-  authenticated principal that owns the execution. A separate approver role
-  or requester/approver separation is not implemented yet.
-- `userIdHash` is `metadata.userId` when the auth strategy maps one, otherwise
-  the raw inbound bearer — never the middleware's `access_token`, which the
-  background/sync refresh rotates behind the caller. Without a mapped
-  `userId`, two bearers for the same human are two principals, so an
-  execution paused under one bearer is not resumable under the other.
-- Replay compares method + resolved path, not bodies (by design, §29); a
-  program that changes a body between runs is not detected.
-- Error-path audit lines keep the pre-existing `userIdHash: "unknown"`.
-- Programs that depend on time or randomness before an external call are not
-  made deterministic.
+  outlive the longest run (`EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC`); its owner
+  is the process, not the run, and releasing it is a non-atomic
+  get-then-delete.
+- The file store does not fsync, and skips a document it cannot read at boot.
 - Retention deletes only finished executions. A paused or interrupted
   execution nobody resumes or cancels stays in the store.
 - `EXECUTION_CODE_RETENTION` governs the execution store. The per-call audit
-  line still carries the submitted program (`codeSubmitted`) to the log
+  line still carries the program that ran (`codeSubmitted`) to the log
   pipeline while `ENABLE_AUDIT` is on.
 
 ## 15. Invariants (from the requirements) and where they hold
@@ -416,6 +641,6 @@ a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
 | 9 | V8 cannot bypass governance | every call crosses `__makeRequest`; no network in the isolate |
 | 10 | completed POSTs never replay against the service | replay returns the stored response |
 | 11 | transport stateless | no session; per-request `McpServer` |
-| 12 | durability in the store | `CodeModeStore` |
+| 12 | durability in the store | `ExecutionPersistence` |
 | 13 | Skills ≠ Governance Rules | separate directories, code, vocabulary |
 | 14 | decisions deterministic, no LLM | pure evaluator; no model dependency |

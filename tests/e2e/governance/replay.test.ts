@@ -129,7 +129,7 @@ describe('replay of the activity journal', () => {
   })
 
   it('should_fail_closed_with_outcome_unknown_instead_of_repeating_an_activity_whose_outcome_was_never_known', async () => {
-    // #1 POST /unstable → 500 (retried by the API client, then thrown: outcome unknown, journaled FAILED) · caught by the program
+    // #1 POST /unstable → 500 (a POST is never retried; thrown: outcome unknown, journaled FAILED) · caught by the program
     // #2 POST /payments → REQUIRE_APPROVAL (pauses)
     const program = `async () => {
       let first
@@ -143,7 +143,7 @@ describe('replay of the activity journal', () => {
     let insp = await s().admin.inspect(paused.executionId)
     expect(insp.activities[0]).toMatchObject({ sequence: 1, status: ACTIVITY_STATUS.FAILED, failure: { outcomeKnown: false } })
     const attempts = await s().mock.count('POST', '/unstable')
-    expect(attempts).toBe(2) // maxRetries: 1 — pre-existing API-client behaviour, inside one activity
+    expect(attempts).toBe(1) // maxRetries: 1, but a POST whose outcome is unknown is never re-sent
 
     const out = expectToolError(await c.answerApproval(paused, { action: 'accept' }), ERR.ACTIVITY_OUTCOME_UNKNOWN)
     expect(out.message).toContain('Activity #1')

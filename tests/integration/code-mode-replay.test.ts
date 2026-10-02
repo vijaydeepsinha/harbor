@@ -7,7 +7,7 @@ import { ActivityJournal } from '../../src/runtime/execution/activity-journal.js
 import { AuditCollector } from '../../src/runtime/observability/audit.js'
 import { ProgressCollector } from '../../src/runtime/observability/progress.js'
 import { resolveOperation } from '../../src/runtime/governance/operation-resolver.js'
-import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-execution-store.js'
 import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
 import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
 import type { ConnectorAPI, ApiRequest, ExecuteRequestContext } from '../../src/spi/connector/connector-api.js'
@@ -47,15 +47,15 @@ function makeConnector(fail?: (req: ApiRequest) => Error | undefined) {
   return { connector, calls }
 }
 
-async function seed(store: InMemoryCodeModeStore, executionId = 'exec-1') {
-  await store.createExecution({
+async function seed(persistence: InMemoryExecutionStore, executionId = 'exec-1') {
+  await persistence.createExecution({
     executionId, service: 'trafficking', originalCode: '', status: EXECUTION_STATUS.CREATED,
     userIdHash: 'h', createdAt: 't0', updatedAt: 't0', currentActivity: 0, runCount: 0
   })
 }
 
 function makeCtx(
-  store: InMemoryCodeModeStore,
+  persistence: InMemoryExecutionStore,
   connector: ConnectorAPI,
   runIndex: number,
   decide?: (sequence: number) => Promise<GovernanceVerdict>,
@@ -67,7 +67,7 @@ function makeCtx(
     idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c', sessionId: 's',
     limits: { memoryLimitMb: 64, executeTimeoutMs: 5000, searchTimeoutMs: 1000, maxApiCalls: 20, maxConcurrentCalls: 3 },
     executionBridge: {
-      journal: new ActivityJournal(store, executionId, 'trafficking', runIndex),
+      journal: new ActivityJournal(persistence, executionId, 'trafficking', runIndex),
       resolve: (m, p) => resolveOperation(spec, m, p),
       ...(decide ? { decide: (seq: number) => decide(seq) } : {})
     }
@@ -83,17 +83,17 @@ const PROGRAM = `async () => {
 }`
 
 describe('durable execution at the bridge: journal + replay', () => {
-  let store: InMemoryCodeModeStore
-  beforeEach(async () => { store = new InMemoryCodeModeStore(); await seed(store) })
+  let persistence: InMemoryExecutionStore
+  beforeEach(async () => { persistence = new InMemoryExecutionStore(); await seed(persistence) })
 
   it('assigns sequential activities in call order and persists request + response', async () => {
     const { connector, calls } = makeConnector()
-    const result = await runApiInSandbox(PROGRAM, makeCtx(store, connector, 1))
+    const result = await runApiInSandbox(PROGRAM, makeCtx(persistence, connector, 1))
     expect(result).toEqual({ id: 'C1', creatives: 1, activated: 'POST /campaigns/C1/activate', status: 201 })
     expect(calls.length).toBe(3)
     expect(calls.map(c => c.ctx.idempotencyKey)).toEqual(['idem-1', 'idem-2', 'idem-3'])
 
-    const acts = await store.listActivities('exec-1')
+    const acts = await persistence.listActivities('exec-1')
     expect(acts.map(a => [a.sequence, a.status, a.request.method, a.request.specPath, a.request.operationId])).toEqual([
       [1, ACTIVITY_STATUS.COMPLETED, 'GET', '/campaigns', 'listCampaigns'],
       [2, ACTIVITY_STATUS.COMPLETED, 'GET', '/campaigns/{id}/creatives', 'listCreatives'],
@@ -108,17 +108,17 @@ describe('durable execution at the bridge: journal + replay', () => {
 
   it('a second run of the same program replays every completed activity without touching the backend', async () => {
     const { connector, calls } = makeConnector()
-    const first = await runApiInSandbox(PROGRAM, makeCtx(store, connector, 1))
-    const second = await runApiInSandbox(PROGRAM, makeCtx(store, connector, 2))
+    const first = await runApiInSandbox(PROGRAM, makeCtx(persistence, connector, 1))
+    const second = await runApiInSandbox(PROGRAM, makeCtx(persistence, connector, 2))
     expect(second).toEqual(first)
     expect(calls.length).toBe(3)
-    expect((await store.listActivities('exec-1')).length).toBe(3)
+    expect((await persistence.listActivities('exec-1')).length).toBe(3)
   })
 
   it('the journal is the one record: a resumed run audits only the call it made, its progress also shows the replayed one', async () => {
     const { connector, calls } = makeConnector()
-    await runApiInSandbox(`async () => { await api.request({ method: 'POST', path: '/campaigns/C1', body: {} }); return 1 }`, makeCtx(store, connector, 1))
-    const resumed = makeCtx(store, connector, 2)
+    await runApiInSandbox(`async () => { await api.request({ method: 'POST', path: '/campaigns/C1', body: {} }); return 1 }`, makeCtx(persistence, connector, 1))
+    const resumed = makeCtx(persistence, connector, 2)
     await runApiInSandbox(`async () => {
       await api.request({ method: 'POST', path: '/campaigns/C1', body: {} })
       await api.request({ method: 'POST', path: '/campaigns/C1/finalize' })
@@ -147,11 +147,11 @@ describe('durable execution at the bridge: journal + replay', () => {
       await api.request({ method: 'GET', path: '/campaigns' })
       await api.request({ method: 'GET', path: '/campaigns/C1/creatives' })
       return 'ok'
-    }`, makeCtx(store, connector, 1))
-    const j = new ActivityJournal(store, 'exec-1', 'trafficking', 1)
+    }`, makeCtx(persistence, connector, 1))
+    const j = new ActivityJournal(persistence, 'exec-1', 'trafficking', 1)
     await j.next({ method: 'GET', rawPath: '/campaigns', specPath: '/campaigns' })
     await j.next({ method: 'GET', rawPath: '/campaigns/C1/creatives', specPath: '/campaigns/{id}/creatives' })
-    await j.recordWaitingApproval(3, { method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate' }, 'ap-1')
+    await j.recordWaitingApproval(3, { method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate', body: {} }, 'ap-1')
     expect(calls.length).toBe(2)
 
     // user code swallows the pause and tries to keep going — the bridge refuses and the pause is still promoted
@@ -162,10 +162,10 @@ describe('durable execution at the bridge: journal + replay', () => {
       try { await api.request({ method: 'POST', path: '/campaigns/C1/finalize' }) } catch (e) {}
       return 'pretend success'
     }`
-    await expect(runApiInSandbox(swallowing, makeCtx(store, connector, 2))).rejects.toBeInstanceOf(ApprovalRequiredError)
+    await expect(runApiInSandbox(swallowing, makeCtx(persistence, connector, 2))).rejects.toBeInstanceOf(ApprovalRequiredError)
     expect(calls.length).toBe(2) // nothing new hit the backend
-    expect((await store.getActivity('exec-1', 3))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
-    expect(await store.getActivity('exec-1', 4)).toBeUndefined()
+    expect((await persistence.getActivity('exec-1', 3))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
+    expect(await persistence.getActivity('exec-1', 4)).toBeUndefined()
   })
 
   it('an APPROVED activity executes exactly once on resume and keeps its approval id; new activities continue', async () => {
@@ -173,28 +173,56 @@ describe('durable execution at the bridge: journal + replay', () => {
     await runApiInSandbox(`async () => {
       await api.request({ method: 'GET', path: '/campaigns' })
       return 1
-    }`, makeCtx(store, connector, 1))
-    const j = new ActivityJournal(store, 'exec-1', 'trafficking', 1)
+    }`, makeCtx(persistence, connector, 1))
+    const j = new ActivityJournal(persistence, 'exec-1', 'trafficking', 1)
     await j.next({ method: 'GET', rawPath: '/campaigns', specPath: '/campaigns' })
-    await j.recordWaitingApproval(2, { method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate' }, 'ap-1')
-    const waiting = (await store.getActivity('exec-1', 2))!
-    await store.putActivity({ ...waiting, status: ACTIVITY_STATUS.APPROVED })
+    await j.recordWaitingApproval(2, { method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate', body: { x: 1 } }, 'ap-1')
+    const waiting = (await persistence.getActivity('exec-1', 2))!
+    await persistence.putActivity({ ...waiting, status: ACTIVITY_STATUS.APPROVED })
 
     const result = await runApiInSandbox(`async () => {
       await api.request({ method: 'GET', path: '/campaigns' })
       const a = await api.request({ method: 'POST', path: '/campaigns/C1/activate', body: { x: 1 } })
       const f = await api.request({ method: 'POST', path: '/campaigns/C1/finalize' })
       return [a.data.did, f.data.did]
-    }`, makeCtx(store, connector, 2))
+    }`, makeCtx(persistence, connector, 2))
     expect(result).toEqual(['POST /campaigns/C1/activate', 'POST /campaigns/C1/finalize'])
     expect(calls.map(c => `${c.req.method} ${c.req.path}`)).toEqual([
       'GET /campaigns', 'POST /campaigns/C1/activate', 'POST /campaigns/C1/finalize'
     ])
-    const acts = await store.listActivities('exec-1')
+    const acts = await persistence.listActivities('exec-1')
     expect(acts.map(a => a.status)).toEqual([ACTIVITY_STATUS.COMPLETED, ACTIVITY_STATUS.COMPLETED, ACTIVITY_STATUS.COMPLETED])
     expect(acts[1]?.approvalId).toBe('ap-1')
     expect(acts[1]?.runIndex).toBe(1)
     expect(acts[2]?.runIndex).toBe(2)
+  })
+
+  it('an APPROVED activity does not execute a request other than the one approved', async () => {
+    const { connector, calls } = makeConnector()
+    const j = new ActivityJournal(persistence, 'exec-1', 'trafficking', 1)
+    await j.next({ method: 'POST', rawPath: '/campaigns/C1/finalize', specPath: '/campaigns/{id}/finalize', body: { amount: 10 } })
+    await j.recordWaitingApproval(1, { method: 'POST', rawPath: '/campaigns/C1/finalize', specPath: '/campaigns/{id}/finalize', body: { amount: 10 } }, 'ap-1')
+    await persistence.putActivity({ ...(await persistence.getActivity('exec-1', 1))!, status: ACTIVITY_STATUS.APPROVED })
+    for (const swapped of [
+      `api.request({ method: 'POST', path: '/campaigns/C999/finalize', body: { amount: 10 } })`,
+      `api.request({ method: 'POST', path: '/campaigns/C1/finalize', body: { amount: 1000000 } })`,
+      `api.request({ method: 'POST', path: '/campaigns/C1/finalize', params: { force: true }, body: { amount: 10 } })`
+    ]) {
+      await expect(runApiInSandbox(`async () => { await ${swapped}; return 1 }`, makeCtx(persistence, connector, 2))).rejects.toBeInstanceOf(ReplayDivergedError)
+    }
+    expect(calls).toHaveLength(0)
+    expect((await persistence.getActivity('exec-1', 1))?.request.body).toEqual({ amount: 10 }) // the approved request is untouched
+    // Same request, keys in another order: still the approved one.
+    await runApiInSandbox(`async () => (await api.request({ method: 'POST', path: '/campaigns/C1/finalize', body: { amount: 10 } })).status`, makeCtx(persistence, connector, 2))
+    expect(calls.map(c => c.req.path)).toEqual(['/campaigns/C1/finalize'])
+  })
+
+  it('a replayed response belongs to the same concrete resource', async () => {
+    const { connector, calls } = makeConnector()
+    await runApiInSandbox(`async () => (await api.request({ method: 'POST', path: '/campaigns/C1' })).status`, makeCtx(persistence, connector, 1))
+    await expect(runApiInSandbox(`async () => (await api.request({ method: 'POST', path: '/campaigns/C2' })).status`, makeCtx(persistence, connector, 2)))
+      .rejects.toBeInstanceOf(ReplayDivergedError)
+    expect(calls).toHaveLength(1)
   })
 
   it('stops with REPLAY_DIVERGED when the program issues a different call at a journaled sequence', async () => {
@@ -203,59 +231,59 @@ describe('durable execution at the bridge: journal + replay', () => {
       await api.request({ method: 'GET', path: '/campaigns' })
       await api.request({ method: 'GET', path: '/campaigns/C1/creatives' })
       return 1
-    }`, makeCtx(store, connector, 1))
+    }`, makeCtx(persistence, connector, 1))
     const drifted = `async () => {
       await api.request({ method: 'GET', path: '/campaigns' })
       await api.request({ method: 'POST', path: '/campaigns/C1/finalize' })
       return 1
     }`
-    await expect(runApiInSandbox(drifted, makeCtx(store, connector, 2))).rejects.toBeInstanceOf(ReplayDivergedError)
+    await expect(runApiInSandbox(drifted, makeCtx(persistence, connector, 2))).rejects.toBeInstanceOf(ReplayDivergedError)
     expect(calls.length).toBe(2)
-    expect((await store.getActivity('exec-1', 2))?.request.method).toBe('GET') // history untouched
+    expect((await persistence.getActivity('exec-1', 2))?.request.method).toBe('GET') // history untouched
   })
 
   it('an EXECUTING record from a crashed run: unsafe methods fail closed, GET re-executes', async () => {
     const { connector, calls } = makeConnector()
-    const j = new ActivityJournal(store, 'exec-1', 'trafficking', 1)
+    const j = new ActivityJournal(persistence, 'exec-1', 'trafficking', 1)
     await j.next({ method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate' })
     await j.markExecuting(1, { method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate' })
     await expect(runApiInSandbox(`async () => {
       await api.request({ method: 'POST', path: '/campaigns/C1/activate' })
       return 1
-    }`, makeCtx(store, connector, 2))).rejects.toBeInstanceOf(ActivityOutcomeUnknownError)
+    }`, makeCtx(persistence, connector, 2))).rejects.toBeInstanceOf(ActivityOutcomeUnknownError)
     expect(calls.length).toBe(0)
 
-    const store2 = new InMemoryCodeModeStore(); await seed(store2, 'exec-2')
-    const j2 = new ActivityJournal(store2, 'exec-2', 'trafficking', 1)
+    const persistence2 = new InMemoryExecutionStore(); await seed(persistence2, 'exec-2')
+    const j2 = new ActivityJournal(persistence2, 'exec-2', 'trafficking', 1)
     await j2.next({ method: 'GET', rawPath: '/campaigns', specPath: '/campaigns' })
     await j2.markExecuting(1, { method: 'GET', rawPath: '/campaigns', specPath: '/campaigns' })
     const r = await runApiInSandbox(`async () => (await api.request({ method: 'GET', path: '/campaigns' })).data`,
-      makeCtx(store2, connector, 2, undefined, 'exec-2'))
+      makeCtx(persistence2, connector, 2, undefined, 'exec-2'))
     expect(r).toEqual([{ id: 'C1' }])
-    expect((await store2.getActivity('exec-2', 1))?.status).toBe(ACTIVITY_STATUS.COMPLETED)
+    expect((await persistence2.getActivity('exec-2', 1))?.status).toBe(ACTIVITY_STATUS.COMPLETED)
   })
 
   it('governance verdicts: DENY stops and journals DENIED; REQUIRE_APPROVAL pauses and journals WAITING_APPROVAL', async () => {
     const { connector, calls } = makeConnector()
     const deny = async (seq: number): Promise<GovernanceVerdict> =>
       seq === 2 ? { decision: 'DENY', reason: 'budget too high', matchedRules: ['cap'] } : { decision: 'ALLOW' }
-    const denied = await runApiInSandbox(PROGRAM, makeCtx(store, connector, 1, deny)).catch(e => e)
+    const denied = await runApiInSandbox(PROGRAM, makeCtx(persistence, connector, 1, deny)).catch(e => e)
     expect(denied).toBeInstanceOf(GovernanceDeniedError)
     expect(denied).toMatchObject({ activitySequence: 2, matchedRules: ['cap'] })
     expect(calls.length).toBe(1)
-    expect((await store.getActivity('exec-1', 2))?.status).toBe(ACTIVITY_STATUS.DENIED)
+    expect((await persistence.getActivity('exec-1', 2))?.status).toBe(ACTIVITY_STATUS.DENIED)
 
-    const store2 = new InMemoryCodeModeStore(); await seed(store2, 'exec-2')
+    const persistence2 = new InMemoryExecutionStore(); await seed(persistence2, 'exec-2')
     const approve = async (seq: number): Promise<GovernanceVerdict> =>
       seq === 3
         ? { decision: 'REQUIRE_APPROVAL', approvalId: 'ap-9', summary: { service: 'trafficking', method: 'POST', specPath: '/campaigns/{id}/activate', reason: 'r', matchedRules: ['big'] } }
         : { decision: 'ALLOW' }
-    const err = await runApiInSandbox(PROGRAM, makeCtx(store2, connector, 1, approve, 'exec-2')).catch(e => e)
+    const err = await runApiInSandbox(PROGRAM, makeCtx(persistence2, connector, 1, approve, 'exec-2')).catch(e => e)
     expect(err).toBeInstanceOf(ApprovalRequiredError)
     expect(err.approvalId).toBe('ap-9')
     expect(err.activitySequence).toBe(3)
     expect(calls.length).toBe(3) // 1 from the deny run + 2 GETs here; the POST never went out
-    const a3 = await store2.getActivity('exec-2', 3)
+    const a3 = await persistence2.getActivity('exec-2', 3)
     expect(a3?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
     expect(a3?.approvalId).toBe('ap-9')
   })
@@ -265,15 +293,15 @@ describe('durable execution at the bridge: journal + replay', () => {
     const result = await runApiInSandbox(`async () => {
       await api.request({ method: 'GET', path: '/campaigns' })
       try { await api.request({ method: 'POST', path: '/campaigns/C1/activate' }) } catch (e) { return 'caught: ' + e.message }
-    }`, makeCtx(store, connector, 1))
+    }`, makeCtx(persistence, connector, 1))
     expect(String(result)).toContain('socket hang up')
     expect(calls.length).toBe(1)
-    const a2 = await store.getActivity('exec-1', 2)
+    const a2 = await persistence.getActivity('exec-1', 2)
     expect(a2?.status).toBe(ACTIVITY_STATUS.FAILED)
     expect(a2?.failure).toMatchObject({ outcomeKnown: false })
     await expect(runApiInSandbox(`async () => {
       await api.request({ method: 'GET', path: '/campaigns' })
       await api.request({ method: 'POST', path: '/campaigns/C1/activate' })
-    }`, makeCtx(store, makeConnector().connector, 2))).rejects.toBeInstanceOf(ActivityOutcomeUnknownError)
+    }`, makeCtx(persistence, makeConnector().connector, 2))).rejects.toBeInstanceOf(ActivityOutcomeUnknownError)
   })
 })

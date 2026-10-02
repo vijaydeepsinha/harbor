@@ -28,13 +28,14 @@ describe('failure handling', () => {
     })
   }
 
-  it('should_retry_a_500_once_then_journal_the_activity_as_failed_with_unknown_outcome', async () => {
+  it('should_not_retry_a_post_that_got_a_500_and_journal_the_activity_as_failed_with_unknown_outcome', async () => {
     const out = expectToolError(await s().client('alice').apiExecute('commerce', programs.unstable('500')))
     s().track(out.meta.executionId)
     s().note('uncaught500Code', out.code)
     expect(out.message).toContain('500')
     expect(out.meta.executionStatus).toBe(EXECUTION_STATUS.FAILED)
-    expect(await s().mock.count('POST', '/unstable')).toBe(2) // maxRetries: 1 (pre-existing API-client behaviour)
+    // maxRetries: 1, but a POST is never re-sent: the first attempt may already have taken effect.
+    expect(await s().mock.count('POST', '/unstable')).toBe(1)
     const insp = await s().admin.inspect(out.meta.executionId!)
     expect(insp.execution.status).toBe(EXECUTION_STATUS.FAILED)
     expect(insp.activities[0]).toMatchObject({ status: ACTIVITY_STATUS.FAILED, failure: { outcomeKnown: false } })
@@ -52,7 +53,7 @@ describe('failure handling', () => {
     const insp = await s().admin.inspect(out.meta.executionId!)
     expect(insp.activities[0]).toMatchObject({ status: ACTIVITY_STATUS.FAILED, failure: { outcomeKnown: false } })
     const attempts = await s().mock.requests({ method: 'POST', path: '/unstable' })
-    expect(attempts.length).toBeGreaterThanOrEqual(1) // received (and held) by the backend — Harbor cannot know that
+    expect(attempts).toHaveLength(1) // received (and held) by the backend — Harbor cannot know that, so it never re-sends
   }, 30_000)
 
   it('should_keep_the_completed_first_step_when_a_middle_step_fails', async () => {
@@ -60,7 +61,7 @@ describe('failure handling', () => {
     s().track(out.meta.executionId)
     const insp = await s().admin.inspect(out.meta.executionId!)
     expect(insp.activities.map(a => [a.sequence, a.status])).toEqual([[1, ACTIVITY_STATUS.COMPLETED], [2, ACTIVITY_STATUS.FAILED]])
-    expect(await s().mock.calls()).toEqual(['GET /ping', 'POST /unstable', 'POST /unstable'])
+    expect(await s().mock.calls()).toEqual(['GET /ping', 'POST /unstable'])
     expectToolError(await s().client('alice').resumeByMeta('commerce', programs.pingThenUnstable('500'), out.meta.executionId!), ERR.EXECUTION_NOT_RESUMABLE)
   })
 
@@ -76,17 +77,16 @@ describe('failure handling', () => {
     expect(insp.execution.terminalReason?.code).toBe(ERR.SANDBOX_TIMEOUT)
   }, 30_000)
 
-  it('known_quirk_an_uncaught_backend_timeout_is_reported_as_sandbox_timeout', async () => {
-    // The API client's 2 s timeout error bubbles into the isolate as an Error whose message contains "timeout";
-    // sandbox-core's error normaliser classifies any such message as SandboxTimeoutError. The journal is right
-    // (activity FAILED, outcome unknown) but the tool-level code and message are misleading. Pinned as observed.
-    const out = expectToolError(await s().client('alice').apiExecute('commerce', programs.unstable('timeout')))
+  it('should_report_an_uncaught_backend_timeout_as_a_runtime_error_not_a_sandbox_timeout', async () => {
+    // Formerly known_quirk_an_uncaught_backend_timeout_is_reported_as_sandbox_timeout: sandbox-core classified any
+    // error whose message contained "timeout" as SANDBOX_TIMEOUT (retryable ⇒ INTERRUPTED), inviting a rerun of a
+    // program whose POST may already have executed. Classification now follows what happened, not the wording.
+    const out = expectToolError(await s().client('alice').apiExecute('commerce', programs.unstable('timeout')), ERR.SANDBOX_RUNTIME)
     s().track(out.meta.executionId)
-    s().note('uncaughtBackendTimeoutCode', out.code)
-    expect([ERR.SANDBOX_TIMEOUT, ERR.API_ERROR, ERR.SANDBOX_RUNTIME]).toContain(out.code)
+    expect(out.retryable).toBe(false)
+    expect(out.meta.executionStatus).toBe(EXECUTION_STATUS.FAILED)
     const insp = await s().admin.inspect(out.meta.executionId!)
     expect(insp.activities[0]).toMatchObject({ status: ACTIVITY_STATUS.FAILED, failure: { outcomeKnown: false } })
-    if (out.code === ERR.SANDBOX_TIMEOUT) console.warn('KNOWN QUIRK: backend timeout surfaced as SANDBOX_TIMEOUT (sandbox-core normalizeIsolateError substring match)')
   }, 30_000)
 
   it('should_fail_with_sandbox_syntax_before_any_call_when_the_program_does_not_parse', async () => {
@@ -131,7 +131,7 @@ describe('failure handling', () => {
 
   it('should_reject_an_unknown_service_without_creating_an_execution', async () => {
     const out = expectToolError(await s().client('alice').apiExecute('warehouse', programs.ping()), ERR.UNKNOWN_SERVICE)
-    expect(out.retryable).toBe(true)
+    expect(out.retryable).toBe(false) // the registry is fixed at boot: the same name can never succeed
     expect(out.message).toContain('commerce')
     expect(out.meta.executionId).toBeUndefined()
     expect(await s().mock.requests()).toHaveLength(0)

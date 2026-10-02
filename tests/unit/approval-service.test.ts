@@ -5,10 +5,12 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { ApprovalService } from '../../src/runtime/execution/approval-service.js'
 import { ExecutionManager } from '../../src/runtime/execution/execution-manager.js'
 import { ActivityJournal } from '../../src/runtime/execution/activity-journal.js'
-import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-execution-store.js'
 import { APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR } from '../../src/core/constants.js'
 import {
   ApprovalAlreadyDecidedError,
+  ApprovalAnswerInvalidError,
+  ApprovalStaleError,
   ApprovalNotFoundError,
   ExecutionLockedError,
   type ApprovalSummary
@@ -21,26 +23,26 @@ const summary: ApprovalSummary = {
 }
 
 describe('ApprovalService', () => {
-  let store: InMemoryCodeModeStore
+  let persistence: InMemoryExecutionStore
   let manager: ExecutionManager
   let service: ApprovalService
   let executionId: string
   let n = 0
 
   beforeEach(async () => {
-    store = new InMemoryCodeModeStore()
-    manager = new ExecutionManager(store)
-    service = new ApprovalService(store, manager, undefined, () => `ap-${++n}`)
+    persistence = new InMemoryExecutionStore()
+    manager = new ExecutionManager(persistence)
+    service = new ApprovalService(persistence, manager, undefined, () => `ap-${++n}`)
     const exec = await manager.create({ service: 'trafficking', code: 'c', userIdHash: 'h' })
     executionId = exec.executionId
     await manager.beginRun(executionId)
-    const journal = new ActivityJournal(store, executionId, 'trafficking', 1)
+    const journal = new ActivityJournal(persistence, executionId, 'trafficking', 1)
     await journal.next({ method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate' })
   })
 
   async function pauseOnApproval() {
     const approval = await service.request(executionId, 1, summary)
-    const journal = new ActivityJournal(store, executionId, 'trafficking', 1)
+    const journal = new ActivityJournal(persistence, executionId, 'trafficking', 1)
     await journal.recordWaitingApproval(1, { method: 'POST', rawPath: '/campaigns/C1/activate', specPath: '/campaigns/{id}/activate' }, approval.approvalId)
     await manager.endRun(executionId, { kind: 'waitingApproval', approvalId: approval.approvalId })
     return approval
@@ -59,7 +61,7 @@ describe('ApprovalService', () => {
     expect(outcome).toBe('APPROVED')
     expect(approval).toMatchObject({ status: APPROVAL_STATUS.APPROVED, comment: 'go', decidedVia: 'mcp-elicitation' })
     expect(approval.decidedAt).toBeDefined()
-    expect((await store.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.APPROVED)
+    expect((await persistence.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.APPROVED)
     expect((await manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
     const resumed = await manager.beginRun(executionId)
     expect(resumed.status).toBe(EXECUTION_STATUS.RUNNING)
@@ -67,16 +69,16 @@ describe('ApprovalService', () => {
 
   it('accept with approve=false and decline both reject: activity DENIED, execution DENIED', async () => {
     for (const input of [{ action: 'accept', approve: false }, { action: 'decline' }] as const) {
-      store = new InMemoryCodeModeStore(); manager = new ExecutionManager(store)
-      service = new ApprovalService(store, manager, undefined, () => `ap-${++n}`)
+      persistence = new InMemoryExecutionStore(); manager = new ExecutionManager(persistence)
+      service = new ApprovalService(persistence, manager, undefined, () => `ap-${++n}`)
       const exec = await manager.create({ service: 'trafficking', code: 'c', userIdHash: 'h' })
       executionId = exec.executionId
       await manager.beginRun(executionId)
-      await new ActivityJournal(store, executionId, 'trafficking', 1).next({ method: 'POST', rawPath: '/x', specPath: '/x' })
+      await new ActivityJournal(persistence, executionId, 'trafficking', 1).next({ method: 'POST', rawPath: '/x', specPath: '/x' })
       const { approvalId } = await pauseOnApproval()
       const { outcome } = await service.decide(approvalId, { ...input, via: 'http', executionId })
       expect(outcome).toBe('REJECTED')
-      expect((await store.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.DENIED)
+      expect((await persistence.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.DENIED)
       const exec2 = await manager.load(executionId)
       expect(exec2.status).toBe(EXECUTION_STATUS.DENIED)
       expect(exec2.terminalReason?.code).toBe(ERR.GOVERNANCE_DENIED)
@@ -88,21 +90,21 @@ describe('ApprovalService', () => {
     const { approvalId } = await pauseOnApproval()
     const { outcome } = await service.decide(approvalId, { action: 'cancel', via: 'mcp-elicitation', executionId })
     expect(outcome).toBe('CANCELLED')
-    expect((await store.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.CANCELLED)
+    expect((await persistence.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.CANCELLED)
     expect((await manager.load(executionId))).toMatchObject({ status: EXECUTION_STATUS.CANCELLED, terminalReason: { code: ERR.EXECUTION_CANCELLED } })
   })
 
   it('an approval is decided exactly once', async () => {
     const { approvalId } = await pauseOnApproval()
-    await service.decide(approvalId, { action: 'accept', via: 'http', executionId })
+    await service.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId })
     await expect(service.decide(approvalId, { action: 'decline', via: 'http', executionId })).rejects.toBeInstanceOf(ApprovalAlreadyDecidedError)
-    expect((await store.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.APPROVED)
+    expect((await persistence.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.APPROVED)
   })
 
   it('serializes concurrent opposite decisions and leaves records consistent with the winner', async () => {
     const { approvalId } = await pauseOnApproval()
     const results = await Promise.allSettled([
-      service.decide(approvalId, { action: 'accept', via: 'http', executionId }),
+      service.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId }),
       service.decide(approvalId, { action: 'decline', via: 'http', executionId })
     ])
     const winners = results.filter((result) => result.status === 'fulfilled')
@@ -122,10 +124,10 @@ describe('ApprovalService', () => {
     const expectedExecutionStatus = winner.value.outcome === 'APPROVED' ? EXECUTION_STATUS.WAITING_APPROVAL : EXECUTION_STATUS.DENIED
 
     expect((await service.get(approvalId)).status).toBe(expectedStatus)
-    expect((await store.getActivity(executionId, 1))?.status).toBe(expectedActivityStatus)
+    expect((await persistence.getActivity(executionId, 1))?.status).toBe(expectedActivityStatus)
     expect((await manager.load(executionId)).status).toBe(expectedExecutionStatus)
-    expect(await store.acquireLock(executionId)).toBe(true)
-    await store.releaseLock(executionId)
+    expect(await persistence.acquireLock(executionId)).toBe(true)
+    await persistence.releaseLock(executionId)
     await expect(service.decide(approvalId, { action: 'cancel', via: 'http', executionId })).rejects.toBeInstanceOf(ApprovalAlreadyDecidedError)
   })
 
@@ -134,17 +136,17 @@ describe('ApprovalService', () => {
     const other = await manager.create({ service: 'trafficking', code: 'c', userIdHash: 'other-hash' })
 
     await expect(
-      service.decide(approvalId, { action: 'accept', via: 'http', executionId: other.executionId })
+      service.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId: other.executionId })
     ).rejects.toBeInstanceOf(ApprovalNotFoundError)
 
     // Nothing moved: the approval, its activity and its execution are untouched.
     expect((await service.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
-    expect((await store.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
+    expect((await persistence.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
     expect((await manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
     // The lock was never taken, so the rightful owner can still decide.
-    expect(await store.acquireLock(executionId)).toBe(true)
-    await store.releaseLock(executionId)
-    expect((await service.decide(approvalId, { action: 'accept', via: 'http', executionId })).outcome).toBe('APPROVED')
+    expect(await persistence.acquireLock(executionId)).toBe(true)
+    await persistence.releaseLock(executionId)
+    expect((await service.decide(approvalId, { action: 'accept', approve: true, via: 'http', executionId })).outcome).toBe('APPROVED')
   })
 
   it('builds an elicitation that explains what/where/values/why without secrets', async () => {
@@ -166,5 +168,35 @@ describe('ApprovalService', () => {
     const e = service.buildElicitation(big)
     expect(e.message.length).toBeLessThan(1500)
     expect(e.message).toContain('more chars')
+  })
+
+  it('an accept without approve: true is not a decision: refused, nothing changes', async () => {
+    const { approvalId } = await pauseOnApproval()
+    for (const approve of [undefined, 'false', 0, null] as unknown[]) {
+      await expect(service.decide(approvalId, { action: 'accept', ...(approve !== undefined ? { approve } : {}), via: 'http', executionId } as never))
+        .rejects.toBeInstanceOf(ApprovalAnswerInvalidError)
+    }
+    expect((await service.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+    expect((await persistence.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
+    expect(await persistence.acquireLock(executionId)).toBe(true) // the lock was released
+  })
+
+  it('a PENDING approval left on a finished execution cannot change it', async () => {
+    const { approvalId } = await pauseOnApproval()
+    const record = await manager.load(executionId)
+    await persistence.updateExecution({ ...record, status: EXECUTION_STATUS.COMPLETED })
+    for (const action of ['cancel', 'decline'] as const) {
+      await expect(service.decide(approvalId, { action, via: 'http', executionId })).rejects.toBeInstanceOf(ApprovalStaleError)
+    }
+    expect((await manager.load(executionId)).status).toBe(EXECUTION_STATUS.COMPLETED)
+    expect((await service.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
+  })
+
+  it('an approval whose activity was re-asked under another approval cannot rewrite that activity', async () => {
+    const stale = await service.request(executionId, 1, summary) // e.g. a crash before the activity was journaled
+    const { approvalId: current } = await pauseOnApproval()
+    await expect(service.decide(stale.approvalId, { action: 'decline', via: 'http', executionId })).rejects.toBeInstanceOf(ApprovalStaleError)
+    expect(await persistence.getActivity(executionId, 1)).toMatchObject({ status: ACTIVITY_STATUS.WAITING_APPROVAL, approvalId: current })
+    expect((await manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
   })
 })

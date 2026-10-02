@@ -10,11 +10,12 @@ import { buildTokenCacheStrategy, buildAuditSinks } from './gateway/strategy-bui
 import { buildServiceResources } from './gateway/service-resources-factory.js'
 import { startHttpGateway } from './http/http-gateway.js'
 import { buildMcpServerFactory } from './http/mcp-server-factory.js'
-import { buildCodeModeRuntime } from './execution/code-mode-runtime.js'
+import { buildGovernanceRuntime } from './execution/governance-runtime.js'
 import { AuditPipeline } from './observability/audit-pipeline.js'
 import { startStdioGateway } from './transport/stdio-gateway.js'
 import { GATEWAY_NAME, STORE_TYPE } from '../core/constants.js'
 import { errorMessage } from '../core/utils/errors.js'
+import { extractBearerFromHeader } from '../spi/auth/bearer-authorization.js'
 
 /**
  * Boots a single MCP gateway by auto-scanning the services directory.
@@ -81,8 +82,8 @@ export async function createMcpGateway(
   )
   gatewayLogger.info({ sinks: auditPipeline.sinkNames }, 'Audit pipeline ready')
 
-  // Process-wide Code Mode governance layer: executions outlive requests and isolates.
-  const codeMode = await buildCodeModeRuntime(globalConfig.codeMode, gatewayLogger, auditPipeline)
+  // Process-wide governance runtime: executions outlive requests and isolates.
+  const governanceRuntime = await buildGovernanceRuntime(globalConfig.execution, gatewayLogger, auditPipeline)
 
   const createMcpServer = buildMcpServerFactory({
     registry,
@@ -90,7 +91,7 @@ export async function createMcpGateway(
     logger: gatewayLogger,
     metrics: gatewayMetrics,
     stdioToken: transportMode === 'stdio' ? stdioPat : undefined,
-    codeMode,
+    governanceRuntime,
     auditPipeline
   })
 
@@ -98,7 +99,7 @@ export async function createMcpGateway(
   // and metrics in the same order; any transport-specific teardown (e.g.
   // closing the HTTP listener) runs *before* this.
   const shutdownShared = () => {
-    void codeMode.shutdown().catch(err => gatewayLogger.warn({ error: errorMessage(err) }, 'Code Mode store shutdown failed'))
+    void governanceRuntime.shutdown().catch(err => gatewayLogger.warn({ error: errorMessage(err) }, 'Code Mode store shutdown failed'))
     void auditPipeline.close()
     tokenCacheStrategy.destroy()
     registry.shutdownAll()
@@ -111,9 +112,10 @@ export async function createMcpGateway(
 
     const http = startHttpGateway({
       host, port,
+      ...(globalConfig.mcp.maxBodyBytes !== undefined ? { maxBodyBytes: globalConfig.mcp.maxBodyBytes } : {}),
       createMcpServer, registry, logger: gatewayLogger,
       oauthConfig: globalConfig.oauth,
-      codeMode
+      governanceRuntime
     })
 
     const httpShutdown = (signal: string) => {
@@ -128,6 +130,14 @@ export async function createMcpGateway(
 
   if (!stdioPat) {
     gatewayLogger.error('MCP_TOKEN env var required for stdio transport — exiting')
+    process.exit(1)
+  }
+  // Every stdio call presents MCP_TOKEN as its bearer; one the bearer parser
+  // refuses (too short, not a JWT) would fail every tool call with
+  // TOKEN_INVALID after a clean-looking boot. Refuse it here instead.
+  const stdioBearer = extractBearerFromHeader(`Bearer ${stdioPat}`)
+  if (!stdioBearer.ok) {
+    gatewayLogger.error({ reason: stdioBearer.reason }, 'MCP_TOKEN is not an acceptable bearer (a JWT, or an opaque token of at least 32 base64url characters) — exiting')
     process.exit(1)
   }
 

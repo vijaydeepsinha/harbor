@@ -28,16 +28,18 @@ Then run `npm install` again.
 **Gateway starts but no services register**
 
 Check:
-1. Does `services/<name>/spec.yaml` (or `spec.json`) exist?
-2. Is the spec valid OpenAPI 3.x? Run: `npx @redocly/cli lint services/<name>/spec.yaml`
-3. Is `"enabled": false` set in `config.json`?
-4. Check startup logs for `"Skipping service"` or spec parse errors
+1. Does `services/<name>/spec.yaml` (or `spec.json` / `spec.yml`) exist?
+2. Does `services/<name>/config.json` exist **with an `auth` block**? Without it the service is skipped (`config.auth is required`).
+3. Is the spec valid OpenAPI 3.x? Run: `npx @redocly/cli lint services/<name>/spec.yaml`
+4. Is `"enabled": false` set in `config.json`?
+5. Is the gateway reading the folder you think? Unset, `SERVICES_DIR` is the `services/` folder of the install, not of the working directory.
+6. Check startup logs for `Failed to scan service "<name>" — skipping`, `Failed to build service resources — skipping service` or `Service "<name>" is disabled — skipping` — the `error` field says why.
 
 ---
 
 **`node --version` shows 18 or 20, not 22**
 
-Node 22+ is required (for `using` / `Symbol.dispose` and performance improvements in V8).
+Node 22+ is required (`engines` in `package.json`; CI and the Docker image run Node 22).
 
 ```bash
 # With nvm:
@@ -81,7 +83,13 @@ const { body } = await api.request(...)  // undefined!
 
 **`api.request()` with `ok: false` — is that an error?**
 
-No. `ok: false` means the backend returned a 4xx. The function returns normally. Only 5xx (after retries exhausted), policy violations (circuit open, permission denied, call limit), or sandbox errors throw.
+No. `ok: false` means the backend returned a 4xx (`ok` is `true` for 2xx and 3xx). The function returns normally. What throws:
+
+- a 5xx or a transport failure (timeout, reset) — after `maxRetries` extra attempts for `GET`/`PUT`/`DELETE`, at once for `POST`/`PATCH`, which Harbor never re-sends;
+- a policy violation — `CIRCUIT_OPEN`, `PERMISSION_DENIED`, `CALL_LIMIT_EXCEEDED`, `CONCURRENT_LIMIT_EXCEEDED`, `INVALID_API_REQUEST` (e.g. an absolute URL, `..` segments, a malformed path, non-object `params`). Headers Harbor owns (`Authorization`, `X-Correlation-ID`, …) are not an error — the program's copies are dropped;
+- a governance stop — `GOVERNANCE_DENIED`, an approval pause, `REPLAY_DIVERGED`, `ACTIVITY_OUTCOME_UNKNOWN` (see [Governance and approvals](#governance-and-approvals)).
+
+Catching a policy violation or governance stop does not help: the run still ends with that error, and later `api.request()` calls in the same run are refused.
 
 ```javascript
 const { data, status, ok } = await api.request({ method: 'POST', path: '/api/v1/items', body: { name: '' } })
@@ -113,26 +121,30 @@ No. `search_code` only injects `spec`. `api.request()` is not available. Use `ap
 
 **My sandbox code times out**
 
-Increase `SANDBOX_EXECUTE_TIMEOUT_MS` (default: 8000ms) for `api_execute`, or `SANDBOX_SEARCH_TIMEOUT_MS` (default: 3000ms) for `search_code`.
+Increase `SANDBOX_EXECUTE_TIMEOUT_MS` (default: 8000ms) for `api_execute`, or `SANDBOX_SEARCH_TIMEOUT_MS` (default: 3000ms) for `search_code` — or the service's `sandbox` block in `config.json`.
 
 Or reduce the work your code does — avoid loading large objects unnecessarily.
+
+`SANDBOX_TIMEOUT` means the run's own wall-clock budget ran out. A slow backend looks different: `api.request()` rejects with the HTTP client's timeout, and if the program does not catch it the run ends as `SANDBOX_RUNTIME`. For that, raise `api.requestTimeoutMs` in the service's `config.json`.
 
 ---
 
 ## Authentication
 
-**`MISSING_TOKEN` error — I'm sending the token**
+**HTTP 401 / `MISSING_TOKEN` / `TOKEN_INVALID` — I'm sending the token**
 
-Check:
-1. Header name: must be `Authorization` (capital A)
-2. Scheme: must be `Bearer` (capital B)
-3. No extra spaces: `Authorization: Bearer <token>` (one space between Bearer and token)
+The header name and the `Bearer` scheme are case-insensitive. What matters:
+1. The value is `Bearer <token>` with a single token after the scheme.
+2. The token is a JWT, or an opaque token of at least 32 base64url characters (`A–Z a–z 0–9 - _`). A shorter or otherwise-shaped token is refused (`reason: weak_credentials`) — `openssl rand -hex 32` produces a usable demo token.
+3. Exactly one `Authorization` header — two are refused (`duplicate_authorization_header`), even if a proxy added the second.
+
+For stdio the same rule applies to `MCP_TOKEN`, checked once at boot.
 
 ---
 
 **`TOKEN_EXPIRED` — token just issued**
 
-For `oauth-introspection`, the auth server's response may not map correctly to `TokenPayload.expires_in`. Check `responseMapping` in `config.json`:
+For `oauth-introspection`, the auth server's response may not map correctly to `TokenPayload.expires_in`. Harbor reads the mapped field, else `expiresIn` / `expires_in`, else RFC 7662's absolute `exp`; a value above 10⁹ is taken as an epoch timestamp. Check `responseMapping` in `config.json`:
 
 ```json
 {
@@ -142,7 +154,7 @@ For `oauth-introspection`, the auth server's response may not map correctly to `
 }
 ```
 
-If the mapping is wrong, `expires_in` defaults to `0` and the token appears expired immediately.
+If no usable lifetime is found, or it is ≤ 0, the token is reported as expired immediately. (A response with `active` set to anything but `true` is `TOKEN_INVALID` instead.)
 
 ---
 
@@ -156,7 +168,7 @@ This is intentional — the gateway cannot refresh without a valid refresh token
 
 **`INTROSPECTION_FAILED` — intermittent**
 
-The auth server was unreachable during the introspection call. This is marked `retryable: true`. The AI client should retry the tool call.
+The auth server was unreachable (or answered 5xx) during the introspection call. This is marked `retryable: true`. The AI client should retry the tool call. The error carries only the failure code (e.g. `ECONNREFUSED`), never the auth server's address.
 
 If it happens frequently, check:
 - Auth server host/port in `config.json`
@@ -175,9 +187,9 @@ No. All token cache failures are `warn`-logged and non-fatal. The gateway falls 
 
 **`CIRCUIT_OPEN` error**
 
-The circuit breaker opened because the backend returned too many 5xx errors (default: 5 consecutive failures). Wait `recoveryTimeMs` (default: 30 seconds) before retrying.
+The `count-based` circuit breaker opened because `failureThreshold` consecutive calls to that endpoint (default 5) failed with a 5xx or a transport error — each logical call counts once, however many retries it took. Wait `recoveryTimeMs` (default 30 seconds); then one probe call is let through, and its success closes the circuit. The error is `retryable: true`; under Code Mode the execution is `INTERRUPTED` and can be resumed.
 
-To check which endpoint opened: look for `"circuit-open"` in logs with the `endpoint` field.
+To check which endpoint opened: the error message names it, and the audit record's `outcome` is `circuit_open`.
 
 To disable per service: `"circuitBreaker": { "type": "noop" }` in `config.json`.
 
@@ -185,7 +197,49 @@ To disable per service: `"circuitBreaker": { "type": "noop" }` in `config.json`.
 
 **Circuit breaker opens for one URL but not another**
 
-Correct behavior. Paths are normalized before circuit state is tracked (`/orders/123` → `/orders/{id}`). Each normalized path has its own circuit state. One endpoint failing doesn't affect others.
+Correct behavior. Circuit state is kept per endpoint: the OpenAPI path template the call resolved to (`/orders/{orderId}`), or, for a path the spec does not describe, the path with id-like segments collapsed (`/orders/123` → `/orders/{id}`). One endpoint failing doesn't affect others. State is per gateway process.
+
+---
+
+## Governance and approvals
+
+**Which calls are governed?**
+
+Out of the box, none: no rule file ships active, so every call is allowed as `NO_GOVERNANCE`. Add YAML files to `governance/rules/` (format: [`governance/rules/README.md`](../governance/rules/README.md)); an invalid file stops boot. A call some rule targets but no rule matches gets `GOVERNANCE_DEFAULT_DECISION` (default `DENY`). A call no rule targets is allowed — including a path the spec does not describe, unless a `*` or `/**` rule covers it.
+
+---
+
+**`GOVERNANCE_DENIED`**
+
+A rule denied the call (or the default did, for a targeted call), or a human rejected the approval. Nothing was sent, the execution is `DENIED`, and the error is not retryable; the message names the matched rules. Change the request or the rule.
+
+---
+
+**The call paused for approval — what now?**
+
+If the client declares the `elicitation` capability, `api_execute` returns `input_required` with an approval form (`approve: boolean`, `comment`) and a sealed `requestState`. The client shows it to a human and retries the **same** `tools/call` with the answer and the echoed `requestState`. Harbor records the decision once and resumes the persisted program in a fresh isolate: completed calls are replayed from the journal, not re-sent. `accept` approves only with `approve: true`.
+
+Without elicitation the tool returns `APPROVAL_REQUIRED` with `harbor/execution-id` and `harbor/approval-id` in `_meta`. Decide with `POST /executions/{id}/approvals/{approvalId}` and a body such as `{"action":"accept","approve":true}` (or `decline` / `cancel`), then call `api_execute` again with `_meta["harbor/execution-id"]` set. Both steps need a bearer of the principal that started the execution — there is no separate approver role. The `requestState` expires after `GOVERNANCE_APPROVAL_TTL_SEC` (600 s).
+
+---
+
+**`REPLAY_DIVERGED`**
+
+On resume, the program issued a different request (method or path — and, for a call awaiting or holding approval, its query or body) at a step that is already journaled. Nothing ran and the execution is `FAILED`. The usual cause is a program that depends on something that changes between runs, such as the clock or `Math.random()`. Resume always runs the originally submitted program, whatever code the retry carries. Start a new execution.
+
+---
+
+**`ACTIVITY_OUTCOME_UNKNOWN`**
+
+An earlier call's outcome is unknown — a `POST` that timed out or got a 5xx, or a gateway that died mid-call — and Harbor will not send it again. Inspect `GET /executions/{id}` and the backend, then start a new execution.
+
+---
+
+**`EXECUTION_LOCKED`, `EXECUTION_NOT_RESUMABLE`, `APPROVAL_ALREADY_DECIDED`**
+
+`EXECUTION_LOCKED`: another run or decision on the same execution is in progress; retry. `EXECUTION_NOT_RESUMABLE`: the execution has finished, or the approval you answered is no longer the one it waits on. `APPROVAL_ALREADY_DECIDED`: your answer conflicts with the decision already recorded; repeating the recorded decision simply resumes.
+
+More: [`code-mode-governance.md`](code-mode-governance.md).
 
 ---
 
@@ -202,22 +256,21 @@ Correct behavior. Paths are normalized before circuit state is tracked (`/orders
 
 **Skills not showing up in `discover_skills`**
 
-1. Verify the `.md` file has valid YAML frontmatter with `id` and `title` fields:
+1. Frontmatter is optional. The skill id is the file name; the title comes from frontmatter `title`, else the first `#` heading, else the file name; `tags` are read from frontmatter. A file whose frontmatter does not parse is skipped with a warning (`Skipping skill "<file>"`) — the other skills still load.
    ```markdown
    ---
-   id: my-skill
    title: What this skill does
    tags: [keyword1, keyword2]
    ---
    ```
-2. Check startup log: `{"msg":"Service registered","service":"my-service","skills":N}` — N should be > 0
+2. Check startup log: `{…,"service":"my-service","skills":N,"msg":"Service registered"}` — N should be > 0
 3. No subdirectories — skill files must be directly in `skills/`, not nested
 
 ---
 
 **Spec refresh not picking up new endpoints**
 
-Check `serviceRefreshIntervalMs` in `config.json`. `0` means load once at startup. Set to a non-zero value:
+Check `serviceRefreshIntervalMs` in `config.json`. `0` means load once at startup. Set it to an interval of at least 1000 ms (spec and skills reload together; a failed spec load keeps both as they were):
 
 ```json
 { "serviceRefreshIntervalMs": 60000 }
@@ -231,10 +284,12 @@ Or restart the gateway — it always loads the latest spec on startup.
 
 **Can I use stdio instead of HTTP?**
 
-Yes. Set `MCP_TRANSPORT=stdio`. The process reads JSON-RPC from stdin and writes to stdout. Logs go to stderr.
+Yes. Set `MCP_TRANSPORT=stdio` and `MCP_TOKEN`. The process reads JSON-RPC from stdin and writes to stdout. Logs go to stderr.
+
+`MCP_TOKEN` is the bearer every stdio call presents. It is required and must be a JWT or at least 32 base64url characters; otherwise the gateway exits at boot.
 
 ```bash
-MCP_TRANSPORT=stdio node dist/index.js
+MCP_TRANSPORT=stdio MCP_TOKEN="$(openssl rand -hex 32)" node dist/index.js
 ```
 
 In `claude_desktop_config.json`:
@@ -242,7 +297,7 @@ In `claude_desktop_config.json`:
 {
   "command": "node",
   "args": ["/path/to/dist/index.js"],
-  "env": { "MCP_TRANSPORT": "stdio" }
+  "env": { "MCP_TRANSPORT": "stdio", "MCP_TOKEN": "<YOUR_BEARER_TOKEN>" }
 }
 ```
 
@@ -254,18 +309,25 @@ Yes. HTTP mode is stateless — each request is independent. Multiple clients (o
 
 ---
 
+**Can I run several gateway pods behind a load balancer?**
+
+Yes, with two settings. Executions, approvals and the run lock must be shared: set `EXECUTION_STORE_TYPE=memcache` (with `EXECUTION_STORE_MEMCACHE_HOST` / `_PORT`). And every pod must seal and open the approval `requestState` with the same key: set one `GOVERNANCE_REQUEST_STATE_KEY` (≥ 32 characters) on all of them — unset, each pod uses its own random key and refuses the others' state. Give every pod the same Governance Rules. The token cache and idempotency backends can be shared the same way (`TOKEN_CACHE_TYPE=memcache`, a `memcache` idempotency block). See [`configuration.md`](configuration.md#code-mode-governance-layer).
+
+---
+
 ## Connectors and Extensibility
 
 **Can I add Redis support without modifying the framework?**
 
-Yes. Use the registration API:
+Yes. Register the backend in your own entry point, before `createMcpGateway` runs, with the registration API in `src/wiring/strategy-builders.ts`:
 
 ```typescript
-import { registerTokenCacheBackend } from './runtime/gateway/strategy-builders.js'
-registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCache(config, ttlMs))
+// Your entry file under src/ (next to src/index.ts), which then boots the gateway
+import { registerTokenCacheBackend } from './wiring/strategy-builders.js'
+registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCache(config, ttlMs, logger))
 ```
 
-Then set `TOKEN_CACHE_TYPE=redis` in your environment (token cache is global, not per-service).
+Then set `TOKEN_CACHE_TYPE=redis` in your environment (token cache is global, not per-service). Any lower-case kebab-case name works; one nothing registered stops boot. The factory receives only `{ type }`, so the backend reads its own connection settings. `registerIdempotencyBackend` (`IDEMPOTENCY_TYPE`, or `"type"` in a service's `idempotency` block), `registerExecutionStoreBackend` (`EXECUTION_STORE_TYPE`), `registerAuditSinkBackend` (`AUDIT_SINKS`) and `registerGovernanceRuleSourceBackend` (`GOVERNANCE_RULES_SOURCE`) work the same way.
 
 See [`adapter-guide.md`](adapter-guide.md) for complete walkthroughs.
 
@@ -273,7 +335,7 @@ See [`adapter-guide.md`](adapter-guide.md) for complete walkthroughs.
 
 **Can I replace the HTTP client with gRPC?**
 
-Yes. Implement `ConnectorAPI` from `src/spi/connector/connector-api.ts` and pass your implementation to `ServiceResources.apiClient`.
+Yes. Implement `ConnectorAPI` from `src/spi/connector/connector-api.ts` and use it as `ServiceResources.apiClient` (built in `src/runtime/gateway/service-resources-factory.ts`; `createMcpGateway` has no injection option yet). Your connector replaces `ApiClient` wholesale: retries, idempotency, circuit-breaker failure recording and the Harbor-owned outbound headers (`X-Correlation-ID`, `X-Harbor-Server-ID`, …) are `ApiClient`'s, so provide what your transport needs. A connector that throws fails the call; it is not retried.
 
 See `adapter-guide.md → Writing a Custom Outbound Transport`.
 
@@ -296,6 +358,8 @@ Or in `.env`: `LOG_LEVEL=debug`
 ```bash
 ENABLE_AUDIT=false npm run dev
 ```
+
+`ENABLE_AUDIT` takes `true`, `false`, `1` or `0` exactly; any other value stops boot. Off means no `api_execute` audit records and no execution-state events.
 
 **Log output is numeric levels (30, 40, 50) instead of info/warn/error**
 
@@ -323,6 +387,19 @@ python3 tests/demo_e2e.py  # without --start-services (already running)
 
 Or use `--start-services` to let the test script manage startup.
 
+**How do I run the governance E2E suite?**
+
+```bash
+npm run test:governance              # Docker: builds the production image, runs E2E + Postman
+npm run test:governance -- --local   # same suite with the gateway and mock backend as host processes
+```
+
+It drives real MCP 2026-07-28 calls through the gateway, the rules engine and the V8 isolate against a deterministic mock backend. `npm test` does not include it (`tests/e2e/` is excluded). Details: [`TESTING.md`](../TESTING.md).
+
+**A test fails in `tests/unit/doc-paths.test.ts`**
+
+Every repository path a Markdown file cites in backticks or a link must exist in git, and every `#anchor` link must land on a heading. Fix the path in the doc (sources live under `src/`), or, for a file the reader is meant to create, add it to the test's allow-list with the reason.
+
 **`python3 tests/demo_e2e.py` — Python 3.9 union type error**
 
 The demo_e2e.py is Python 3.9 compatible. If you see `TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'`, you may have a custom modification using `str | None` syntax (Python 3.10+). Use `Optional[str]` from `typing` instead.
@@ -335,9 +412,9 @@ The demo_e2e.py is Python 3.9 compatible. If you see `TypeError: unsupported ope
 
 See [`CONTRIBUTING.md`](../CONTRIBUTING.md) → Section 10: Good First Contributions.
 
-**CI fails on my PR with "SPDX header missing"**
+**Do new files need an SPDX header?**
 
-Every new `.ts` file requires:
+Yes — no CI step checks it, but reviewers do. Every new `.ts` file starts with:
 ```typescript
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.

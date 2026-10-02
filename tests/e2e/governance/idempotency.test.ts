@@ -125,6 +125,7 @@ describe('idempotency of approvals and resumes', () => {
     expect(keys).toHaveLength(3)
     expect(keys.map(k => k.slice(k.lastIndexOf('-') + 1))).toEqual(['1', '2', '3'])
     expect(new Set(keys.map(k => k.slice(0, k.lastIndexOf('-')))).size).toBe(1) // same execution prefix
+    expect(keys[0]).toContain(paused.executionId) // …which is the execution id, across the resume
   })
 
   it('should_create_a_new_execution_for_every_fresh_submission_even_with_identical_code_and_request_id', async () => {
@@ -136,5 +137,9 @@ describe('idempotency of approvals and resumes', () => {
     s().track(first.meta.executionId); s().track(second.meta.executionId)
     expect(first.meta.executionId).not.toBe(second.meta.executionId)
     expect((await s().mock.state())['orders']).toHaveLength(2)
+    // Two intents, two keys: a backend (or a non-noop idempotency strategy) must not fold them into one.
+    const keys = (await s().mock.requests({ method: 'POST', path: '/orders' })).map(r => r.headers['x-idempotency-key'] as string)
+    expect(keys).toHaveLength(2)
+    expect(keys[0]).not.toBe(keys[1])
   })
 })

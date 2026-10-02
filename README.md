@@ -28,6 +28,7 @@ AI client  →  Harbor  →  Your backend APIs
                     ├── V8 sandbox isolation
                     ├── Per-service auth (OAuth 2.1 / static token)
                     ├── Circuit breaker + retry
+                    ├── Governance Rules + human approval
                     └── Audit logging
 ```
 
@@ -38,12 +39,13 @@ AI client  →  Harbor  →  Your backend APIs
 - **Five MCP tools** — `discover_services`, `discover_skills`, `get_skill_details`, `search_code`, `api_execute`
 - **V8 sandbox isolation** — AI-written JavaScript cannot access the network, filesystem, or framework internals
 - **Pluggable auth** — `static-token`, `oauth-introspection`, `jwt-validation` (local JWKS, no AS round-trip), `oauth-2.1` (RFC 8414/OIDC auto-discovery)
-- **OAuth 2.1 Protected Resource** — RFC 9728 discovery metadata, `WWW-Authenticate` on 401, full MCP auth flow
-- **Pluggable backends** — register custom token-cache backends without forking the codebase
+- **OAuth 2.1 Protected Resource** — RFC 9728 discovery metadata, `WWW-Authenticate` on a 401 for a missing or malformed bearer (an invalid token is refused per tool call; see [`docs/mcp-2026-07-28-compatibility.md`](docs/mcp-2026-07-28-compatibility.md))
+- **Code Mode governance** — durable executions, an activity journal with replay, declarative Governance Rules (ALLOW / DENY / REQUIRE_APPROVAL) evaluated before every backend call, and human approval over MCP ([`docs/code-mode-governance.md`](docs/code-mode-governance.md))
+- **Pluggable backends** — register token-cache, idempotency, execution-store, audit-sink and rule-source backends in your entry point and select them by name, without forking the codebase
 - **Per-service configuration** — each service declares its own auth, circuit breaker, and spec source
 - **Zero API changes** — your backend never changes; Harbor is a pure adapter
 - **Service skills** — Markdown SOP files the AI reads before making API calls
-- **Circuit breaker** — count-based, per endpoint, per service
+- **Circuit breaker + safe retries** — count-based breaker per endpoint, per service; only idempotent methods (`GET`, `PUT`, `DELETE`) are retried, so a `POST` is never sent twice
 - **Structured audit logging** — every `api_execute` call recorded with code, endpoints, duration, outcome, and sent to pluggable sinks (`AUDIT_SINKS`, console by default)
 - **Streamable HTTP + stdio** — both MCP transports supported
 
@@ -59,11 +61,13 @@ cd harbor
 npm install
 ```
 
-**Run the demo** (three local backends + MCP gateway):
+**Run the demo** (four local backends — product, order, tasks, IRCTC — plus the MCP gateway):
 
 ```bash
 bash examples/demo/start.sh
 ```
+
+The IRCTC backend is a Python (≥ 3.13) FastAPI app: create its virtualenv once, as a `.venv` inside `examples/demo/irctc/` (that is the interpreter `start.sh` runs), as described in [`examples/demo/irctc/README.md`](examples/demo/irctc/README.md).
 
 **Verify** (E2E smoke test, stdlib only):
 
@@ -97,6 +101,8 @@ python3 tests/demo_e2e.py --start-services
 }
 ```
 
+`<YOUR_BEARER_TOKEN>` must be a JWT or an opaque token of at least 32 base64url characters (`A–Z a–z 0–9 - _`) — e.g. the output of `openssl rand -hex 32`. Anything else is refused with HTTP 401. The demo services forward whatever bearer you send.
+
 Full setup guide → [`docs/getting-started.md`](docs/getting-started.md)
 
 ---
@@ -108,22 +114,26 @@ Full setup guide → [`docs/getting-started.md`](docs/getting-started.md)
 | [`docs/getting-started.md`](docs/getting-started.md) | Full setup, demo walkthrough, Cursor integration |
 | [`docs/service-onboarding.md`](docs/service-onboarding.md) | Adding services, full `config.json` reference |
 | [`docs/skill-authoring.md`](docs/skill-authoring.md) | Writing skills — frontmatter, `api.request()` patterns, error handling |
-| [`docs/configuration.md`](docs/configuration.md) | All environment variables |
+| [`docs/configuration.md`](docs/configuration.md) | All environment variables and the per-service `config.json` reference |
 | [`docs/adapter-guide.md`](docs/adapter-guide.md) | Custom connectors — Redis, gRPC, GraphQL |
 | [`docs/oauth-2.1-guide.md`](docs/oauth-2.1-guide.md) | OAuth 2.1 setup and auth strategies |
 | [`docs/architecture.md`](docs/architecture.md) | System design, layers, extension points |
 | [`docs/tool-layer.md`](docs/tool-layer.md) | MCP protocol, sandbox model, tool contracts |
 | [`docs/request-lifecycle.md`](docs/request-lifecycle.md) | End-to-end request trace |
 | [`docs/faq.md`](docs/faq.md) | Troubleshooting and common questions |
+| [`docs/code-mode-governance.md`](docs/code-mode-governance.md) | Durable executions, replay, Governance Rules, human approval over MCP |
+| [`governance/rules/README.md`](governance/rules/README.md) | Governance Rule file format and operators |
+| [`docs/mcp-2026-07-28-compatibility.md`](docs/mcp-2026-07-28-compatibility.md) | MCP 2026-07-28 protocol support |
+| [`TESTING.md`](TESTING.md) | Test layers and how to run each |
 | [`ROADMAP.md`](ROADMAP.md) | Planned features and milestones |
-- [Code Mode governance](docs/code-mode-governance.md) — durable executions, replay, Governance Rules, human approval over MCP
 
 ---
 
 ## Governance test suite
 
 `npm run test:governance` runs the MCP governance suite end to end: real MCP
-2026-07-28 calls against the production image, the real Governance Rules
+2026-07-28 calls against the production image (Docker; `npm run test:governance -- --local`
+runs the same suite with the gateway and mock as host processes), the real Governance Rules
 engine, the real V8 isolate, the file store and a deterministic mock backend —
 allow / deny / approval, multi-step workflows with several approvals, resume in
 a fresh isolate, replay, restart survival, crash mid-call, security and
@@ -135,8 +145,9 @@ protocol edge cases — plus a Postman collection. See [`TESTING.md`](TESTING.md
 
 ```bash
 npm run dev          # tsx watch — live reload
-npm test             # vitest — 312 unit + integration tests
+npm test             # vitest — unit + integration (743 passing, 1 skipped)
 npm run typecheck    # tsc --noEmit (strict)
+npm run lint         # eslint
 npm run build        # tsc → dist/
 ```
 

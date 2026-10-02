@@ -1,6 +1,13 @@
 # MCP Governance E2E Harness — Implementation Report
 
-Date: 2026-09-21 · Branch: `poc/aug28-governance-automation` · Author: the harness build session (Claude Fable 5.1, reviewed by the repository owner)
+> **Historical.** This is the hand-over report of the harness build as of
+> 2026-09-21. The branch was merged into main in PR #5 (`ffb47ee`), and the
+> code and tests have moved on since. The body below is kept as the hand-over
+> record; the next section says what has changed. For the current state read
+> [`TESTING.md`](../TESTING.md), [`TEST_ARCHITECTURE.md`](../TEST_ARCHITECTURE.md) and
+> [`tests/REQUIREMENT_COVERAGE.md`](../tests/REQUIREMENT_COVERAGE.md).
+
+Date: 2026-09-21 · Branch: `poc/aug28-governance-automation` (merged in PR #5) · Author: the harness build session (Claude Fable 5.1, reviewed by the repository owner)
 
 This report closes out the "MCP Governance — End-to-End Automation & CI Test
 Harness" specification. It records what was found in the repository, what was
@@ -9,7 +16,42 @@ this branch. Companion documents: [`TEST_ARCHITECTURE.md`](../TEST_ARCHITECTURE.
 (analysis and design), [`TESTING.md`](../TESTING.md) (how to run),
 [`tests/REQUIREMENT_COVERAGE.md`](../tests/REQUIREMENT_COVERAGE.md) (requirement → test).
 
-## Verification at hand-over
+## Status as of 2026-09-27
+
+Last full run: `npm run test:governance` (Docker Compose), commit `035a261`, after the
+review of main.
+
+| Suite | Then (2026-09-21) | Now (2026-09-27) |
+|---|--:|--:|
+| Governance E2E (vitest, 15 files) | 138 tests | 156 tests, all passed |
+| Postman `mcp-governance` | 14 folders, 84 requests, 177 assertions | 15 folders, 118 requests, 224 assertions, all passed |
+| Unit + integration (`npm test`) | 444 tests | 66 files: 743 passed + 1 skipped |
+
+The §K findings for the owner:
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | A program can override the outbound `Authorization` header | **Resolved** by 24bdc72: identity, Harbor-owned and routing headers a program sets are dropped. The pinned test is now `bypass › should_not_let_program_supplied_headers_change_the_outbound_identity_or_routing`. |
+| 2 | An uncaught backend timeout is reported as `SANDBOX_TIMEOUT` | **Resolved** by a46d977: errors are classified by what happened; this one is `SANDBOX_RUNTIME` (execution `FAILED`, not retryable). The test is now `failures › should_report_an_uncaught_backend_timeout_as_a_runtime_error_not_a_sandbox_timeout`. |
+| 3 | Any valid bearer can inspect and decide another principal's execution over `/executions/*` | **Resolved** on main by owner binding (3cbc9df, 12ca119): anyone but the owner gets 403 and the approval stays pending. Pinned by `authorization › should_bind_http_inspection_and_decisions_to_the_execution_owner`. |
+| 4 | `Dockerfile` `HEALTHCHECK` resolves `localhost` to IPv6 on Alpine | **Open.** |
+
+What has changed since hand-over, so the body no longer says it:
+
+- A POST that gets a 5xx or times out is sent once, not retried (78ead14); only GET, PUT and DELETE are retried. The §D/§H "500 retried once" case is now `failures › should_not_retry_a_post_that_got_a_500_and_journal_the_activity_as_failed_with_unknown_outcome`.
+- The default decision is DENY and applies only to a call some rule targets but none matches (`NO_MATCHING_RULE`); a call no rule targets is ALLOW `NO_GOVERNANCE` (5928732). The §D "default ALLOW with `NO_MATCHING_RULE`" case is now `allow › should_allow_an_ungoverned_call_when_no_rule_targets_it`.
+- A resume while the approval is still pending gets the pause again rather than `EXECUTION_NOT_RESUMABLE` (4f9a832). A stale answer is not applied; the current approval is reissued (`authorization › should_not_apply_a_stale_answer_and_reissue_the_current_approval`).
+- A terminal execution's `originalCode` is dropped by default (`EXECUTION_CODE_RETENTION`, 79622ee).
+- Rules can refresh (`GOVERNANCE_RULES_REFRESH_SEC`, 66f7b41), and a `memcache` store shares the journal and run lock across pods (0a9dc25).
+- Replay binds the approved request: `APPROVED`, `WAITING_APPROVAL` and `EXECUTING` records bind query and body as well as method and path (241d217).
+- The bridge logic the §K mutations targeted now lives in `src/runtime/sandbox/bridge-request-handler.ts` and `src/runtime/execution/activity-gate.ts` (see `TESTING.md`).
+- Per-file E2E counts in §D changed: approval 12 → 14, bypass 8 → 22, idempotency 7 → 8, protocol 24 → 25.
+
+`poc/sept01-governance`, which §K names for principal-aware rules, was never merged: rules on
+main still see no principal. The review's still-open items are listed in
+[`tests/REQUIREMENT_COVERAGE.md`](../tests/REQUIREMENT_COVERAGE.md#open-items-from-the-2026-09-27-review-not-fixed-decisions-for-the-owner).
+
+## Verification at hand-over (2026-09-21)
 
 Last full run, Docker Compose mode (`npm run test:governance`), on the production image:
 
@@ -43,8 +85,8 @@ were left untracked on purpose.
 - **Protocol.** MCP revision 2026-07-28 only (`legacy: 'reject'`), SDK v2 `@modelcontextprotocol/server` 2.0.0. Stateless Streamable HTTP: one `McpServer` per request, no `initialize`, no session id; `server/discover` is the probe. Every `POST /mcp` needs `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` (for `tools/call`) and the `_meta` envelope; the SDK answers `-32022` (unsupported version), `-32602` (missing envelope), `-32020` (header/body mismatch), `-32600` (batches) before Harbor runs. Tool-argument validation failures are `isError` tool results, not JSON-RPC errors.
 - **Tools.** Exactly five, frozen; `api_execute { service, code }`.
 - **Auth.** Bearer format enforced at the transport (JWT or ≥ 32 base64url chars, else 401 with a `reason`). The E2E services use `static-token`, which forwards the client bearer unchanged and derives the principal as `sha256(bearer)` — distinct bearers are distinct principals.
-- **Governance.** At the host bridge, before every outbound call: resolve the OpenAPI operation → evaluate YAML rules (`match` on service/operation/method/path template, `conditions` on body/query/path values, `DENY > REQUIRE_APPROVAL > ALLOW`, configurable default) → persist the decision with `name@version#hash12` tags → execute / stop / pause. Invalid rule files stop boot. Rules carry **no principal attributes** on this branch.
-- **Execution.** A workflow is the agent's JavaScript program; each `api.request()` is activity #N. Pause = activity `WAITING_APPROVAL`, run-stopping violation (every later call in that isolate refused), isolate disposed, `input_required` + `elicitation/create` form + HMAC-sealed `requestState` (TTL, bound to `tools/call`, carries `userIdHash`). Resume reruns the **stored** program in a fresh isolate, replays `COMPLETED` activities from the journal, executes the `APPROVED` one, governs new ones. Fallback for clients without elicitation: `APPROVAL_REQUIRED` + ids, `POST /executions/{id}/approvals/{approvalId}`, resume via `_meta["harbor/execution-id"]`. Explicit HTTP statuses are journaled `COMPLETED` (replayable); transport failures are `FAILED` with `outcomeKnown:false` and are never repeated; an `EXECUTING` record found after a crash re-executes only for `GET`. Per-execution in-process lock; terminal or pending-approval executions are `EXECUTION_NOT_RESUMABLE`.
+- **Governance.** At the host bridge, before every outbound call: resolve the OpenAPI operation → evaluate YAML rules (`match` on service/operation/method/path template, `conditions` on body/query/path values, `DENY > REQUIRE_APPROVAL > ALLOW`, configurable default) → persist the decision with `name@version#hash12` tags → execute / stop / pause. Invalid rule files stop boot. Rules carry **no principal attributes** (still true on main).
+- **Execution.** A workflow is the agent's JavaScript program; each `api.request()` is activity #N. Pause = activity `WAITING_APPROVAL`, run-stopping violation (every later call in that isolate refused), isolate disposed, `input_required` + `elicitation/create` form + HMAC-sealed `requestState` (TTL, bound to `tools/call`, carries `userIdHash`). Resume reruns the **stored** program in a fresh isolate, replays `COMPLETED` activities from the journal, executes the `APPROVED` one, governs new ones. Fallback for clients without elicitation: `APPROVAL_REQUIRED` + ids, `POST /executions/{id}/approvals/{approvalId}`, resume via `_meta["harbor/execution-id"]`. Explicit 4xx statuses are journaled `COMPLETED` (replayable); a 5xx after retries and transport failures are `FAILED` with `outcomeKnown:false` and are never repeated; an `EXECUTING` record found after a crash re-executes only for `GET`. Per-execution in-process lock; terminal or pending-approval executions are `EXECUTION_NOT_RESUMABLE`.
 - **Persistence.** `in-memory` or `file` (one JSON document per execution, written through before the next step). The rules engine, store and approval channel are embedded in the gateway — no separate services exist to containerise.
 - **Existing tests.** Unit and integration layers exercise the real governance path with fake connectors and a fake `ServerContext`; the Python smoke covers the five tools and auth strategies. Nothing exercised a real listener, real downstream HTTP, container lifecycle, the file store across a restart, TTL expiry, the fail-closed default, boot refusal, or a Postman flow.
 

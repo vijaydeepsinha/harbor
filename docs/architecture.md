@@ -1,51 +1,60 @@
 # Architecture
 
-_Harbor v0.1.0 — Architecture Reference_
-_Last updated: 2026-05-27_
+_Harbor 1.0.0 — Architecture Reference_
+_Last updated: 2026-09-27_
 
 ---
 
 ## 1. System Overview
 
-Harbor sits between an AI agent (Claude, Cursor, or any MCP client) and one or more backend microservices. It speaks the **Model Context Protocol (MCP)** inbound and delegates outbound calls through the **ConnectorAPI** interface — HTTP/REST by default. Skill code supplied per-service runs inside a **V8 isolate**; the agent's JavaScript never touches the gateway process directly.
+Harbor sits between an AI agent (Claude, Cursor, or any MCP client) and one or more backend microservices. It speaks the **Model Context Protocol (MCP)**, revision 2026-07-28 only, inbound and delegates outbound calls through the **ConnectorAPI** interface — HTTP/REST by default. The agent's program (the `code` of an `api_execute` call) runs inside a **V8 isolate**; it never touches the gateway process, filesystem or network directly. Its only way out is `api.request()`, and every such call passes the host bridge: path canonicalisation, the activity journal, Governance Rules, the permission guard and the circuit breaker, in that order, before anything goes on the wire.
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  AI Agent  (Claude / Cursor / any MCP client)                        │
-└────────────────────────┬─────────────────────────────────────────────┘
-                         │  MCP — Streamable HTTP  (or stdio)
-                         ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  HARBOR                                                              │
-│                                                                      │
-│   ┌─────────────────────┐    ┌──────────────────────────────────┐   │
-│   │   tools/   │    │   runtime/                       │   │
-│   │                     │───▶│   server-factory   registry      │   │
-│   │  discover_services  │    │   sandbox          http-gw       │   │
-│   │  discover_skills    │    │   spec-store       audit         │   │
-│   │  get_skill_details  │    │   observability    session-mgr   │   │
-│   │  search_code        │    └──────────────┬───────────────────┘   │
-│   │  api_execute        │                   │                        │
-│   └─────────────────────┘           spi/ contracts                  │
-│                                             │                        │
-│   ┌──────────────────────────────────────┐  │                        │
-│   │  spi/                                │◀─┘                        │
-│   │  auth  idempotency  permissions      │                           │
-│   │  resilience  spec  connector         │                           │
-│   └──────────────────┬───────────────────┘                           │
-│                      │ implemented by                                 │
-│   ┌──────────────────▼───────────────────┐                           │
-│   │  adapters/                           │                           │
-│   │  auth  idempotency  infra  resilience│                           │
-│   └──────────────────────────────────────┘                           │
-└────────────────────────────────────────────────────────────┬─────────┘
-                                                             │  ConnectorAPI
-                                                             ▼
-                                              ┌─────────────────────────┐
-                                              │  Backend microservices  │
-                                              │  (HTTP / gRPC / any)    │
-                                              └─────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  AI Agent  (Claude / Cursor / any MCP client)                            │
+└───────────────────────────┬──────────────────────────────────────────────┘
+                            │  MCP 2026-07-28 — Streamable HTTP (stateless) or stdio
+                            ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  HARBOR                                                                  │
+│                                                                          │
+│  src/runtime/http/  ─ /mcp (bearer format, body limit) · /health ·       │
+│                       /.well-known/oauth-protected-resource* ·           │
+│                       /executions/{id}[/approvals/{approvalId}]          │
+│        │  one McpServer per request                                      │
+│        ▼                                                                 │
+│  src/tools/  discover_services · discover_skills · get_skill_details ·   │
+│              search_code · api_execute                                   │
+│        │                                                                 │
+│        ▼                                                                 │
+│  src/runtime/                                                            │
+│   registry (services, specs, skills)   sandbox (isolate + host bridge)   │
+│   execution (executions, journal,      governance (operation resolver,   │
+│     activity gate, approvals,            rule store / evaluator,         │
+│     requestState codec)                  rule refresher)                 │
+│   api-client (ApiClient)   spec (refresher)   observability (audit,      │
+│   gateway (service resources)                   metrics, logger)         │
+│        │ contracts                         ▲ built by                    │
+│        ▼                                   │                             │
+│  src/spi/   auth · connector · execution (ExecutionPersistence) ·               │
+│             governance (GovernanceRuleSource) · observability            │
+│             (AuditSink) · idempotency · permissions · resilience · spec  │
+│        ▲ implemented by                    │                             │
+│  src/adapters/  auth · idempotency · execution · observability ·         │
+│                 resilience · infra                                       │
+│                                            │                             │
+│  src/wiring/  composition root ────────────┘ builders, register*Backend  │
+│  src/core/    constants, config, types, utils (imported by every layer)  │
+└──────────────────────────────────────────────────────────┬───────────────┘
+                                                           │  ConnectorAPI
+                                                           ▼
+                                            ┌─────────────────────────┐
+                                            │  Backend microservices  │
+                                            │  (HTTP / gRPC / any)    │
+                                            └─────────────────────────┘
 ```
+
+There is no session state anywhere: every MCP request gets its own `McpServer`, and everything that must outlive a request — executions, the activity journal, approvals — lives in the `ExecutionPersistence`.
 
 ---
 
@@ -53,165 +62,207 @@ Harbor sits between an AI agent (Claude, Cursor, or any MCP client) and one or m
 
 ### `src/core/` — Framework Nucleus   ✅ Stable
 
-Zero runtime dependencies. Every other module imports from here. Nothing here imports from other framework modules.
+Every other layer imports from here; nothing here imports from another Harbor layer. Its only third-party imports are `zod` (config validation), the `pino` logger type and the MCP SDK's reserved `_meta` key constants.
 
 | File | Responsibility |
 |------|----------------|
-| `constants.ts` | All string literals — tool names, metric keys, log prefixes, env names, store type IDs, auth schemes, HTTP methods |
-| `config/config.ts` | Zod validation of `process.env`; K8s ConfigMap file loader; produces typed `GlobalConfig`; exits on misconfiguration |
-| `types/auth.types.ts` | `AuthStrategy`, `TokenCacheStrategy`, `TokenPayload` |
-| `types/circuit-breaker.types.ts` | `CircuitBreakerStrategy`, `CircuitOpenError` |
-| `types/config.types.ts` | `GlobalConfig`, `SandboxLimits`, `SandboxOverride`, `TokenCacheBackendConfig`, `IdempotencyBackendConfig` |
-| `types/connector.types.ts` | `ApiRequest`, `ApiResponse`, `ExecuteRequestContext` — shared transport contract types |
+| `constants.ts` | String literals and enums — tool names, `ERR` codes, `OUTCOME`, `EXECUTION_STATUS`, `ACTIVITY_STATUS`, `GOVERNANCE_DECISION`/`GOVERNANCE_REASON`, HTTP routes and headers, `harbor/*` `_meta` keys, store type ids, metric names, log prefixes. Env var names are not here; they are the Zod keys in `config/config.ts` |
+| `config/config.ts` | Zod validation of `process.env`; `MCP_CONFIG_FILE` loader (K8s ConfigMap, `KEY: value` lines); produces the typed `GlobalConfig`; exits on misconfiguration |
+| `types/auth.types.ts` | `AuthStrategy`, `TokenCacheStrategy`, `TokenPayload`, `AuthResult`, the `AuthError` hierarchy |
+| `types/audit.types.ts` | `AuditRecord` — one `api_execute` call in the audit trail |
+| `types/circuit-breaker.types.ts` | `CircuitBreakerStrategy`, `CircuitState`, `CircuitOpenError` |
+| `types/config.types.ts` | `GlobalConfig`, `ExecutionConfig`, `SandboxLimits`, `SandboxOverride`, `ServiceAuthConfig`, token-cache / idempotency / execution-store backend configs |
+| `types/connector.types.ts` | `ApiRequest`, `ApiResponse`, `ExecuteRequestContext` — the transport contract types |
+| `types/execution.types.ts` | `ExecutionRecord`, `ActivityRecord`, `ApprovalRecord`, `GovernanceDecisionRecord`; the `ExecutionError` hierarchy (`ApprovalRequiredError`, `GovernanceDeniedError`, `ReplayDivergedError`, `ExecutionLockedError`, …) |
 | `types/idempotency.types.ts` | `IdempotencyStrategy` |
+| `types/logger.types.ts` | `Logger` (pino) |
+| `types/metrics.types.ts` | `MetricsCollector` |
+| `types/oauth.types.ts` | `OAuthResourceConfig`, `ProtectedResourceMetadata` (RFC 9728) |
 | `types/permission.types.ts` | `PermissionGuard`, `PermissionDeniedError` |
-| `types/sandbox-error.types.ts` | `SandboxError` hierarchy — execution, call-limit, concurrent-limit, timeout, syntax, invalid-request |
-| `types/spec.types.ts` | `SpecLoaderStrategy`, `ParsedSpec`, `OpenAPISpec` |
+| `types/sandbox-error.types.ts` | `SandboxError` hierarchy — timeout, memory, syntax, runtime, call limit, concurrency limit, invalid `api.request`, internal |
+| `types/spec.types.ts` | `OpenAPISpec`, `SpecLoaderStrategy`, `SpecLoadError` |
 | `utils/errors.ts` | `ensureError`, `errorCode`, `errorRetryable`, `errorMessage` |
-| `utils/url.ts` | `joinUrl`, `normalizeEndpointPath` |
+| `utils/header-value.ts` | `SAFE_HEADER_VALUE`, `safeHeaderValue` — what may be forwarded as `X-Harbor-*` |
+| `utils/url.ts` | `joinUrl`, `normalizeEndpointPath`, `redactUrl` |
+| `utils/user-id-hash.ts` | `hashAuthenticatedPrincipal` — sha256 of `metadata.userId` when it is a non-empty string or finite number, else of the raw inbound bearer |
 
 ---
 
-### `src/spi/` — Extension Contracts   ✅ Stable
+### `src/spi/` — Extension Contracts   ✅ Stable / 🟡 Experimental (execution, governance)
 
-SPI = _Service Provider Interface_. Defines what the framework calls; `src/adapters/` (or third-party code) implements it. Interfaces here are frozen — changing them is a breaking change.
+SPI = _Service Provider Interface_. Defines what the framework calls; `src/adapters/` (or third-party code) implements it. Several interfaces are declared in `src/core/types/` and have their default implementation here. `ExecutionPersistence` and `GovernanceRuleSource` belong to the Code Mode governance layer, new in 1.0.0, and may still gain members in a minor release (`API_STABILITY.md`).
 
 | Contract | Interface | Default |
 |----------|-----------|---------|
-| `src/spi/auth/abstract-token-cache.ts` | `AbstractTokenCache` | — (in-memory is default) |
-| `src/spi/auth/auth-middleware.ts` | `AuthStrategy` | — (required per-service) |
-| `src/spi/auth/bearer-authorization.ts` | Bearer token validation helpers | — |
+| `src/core/types/auth.types.ts` | `AuthStrategy` | — (chosen per service by `config.json` `auth.type`) |
+| `src/spi/auth/abstract-token-cache.ts` | `AbstractTokenCache` (implements `TokenCacheStrategy`) | in-memory adapter |
+| `src/spi/auth/auth-middleware.ts` | `AuthMiddleware` — token cache, validation, proactive refresh | — |
+| `src/spi/auth/bearer-authorization.ts`, `bearer-header-parser.ts` | Bearer header parsing: one header, `Bearer` scheme, a JWT or ≥ 32 base64url characters | — |
 | `src/spi/connector/connector-api.ts` | `ConnectorAPI` | `ApiClient` (HTTP/axios) |
+| `src/spi/execution/execution-store.ts` | `ExecutionPersistence` — executions, activities, approvals, decisions, run lock | in-memory adapter |
+| `src/spi/governance/rule-source.ts` | `GovernanceRuleSource` | `DirectoryRuleSourceStrategy` (`dir`); `UrlRuleSourceStrategy` (`url`) — both in `src/spi/governance/strategies/` |
+| `src/spi/observability/audit-sink.ts` | `AuditSink`, `AuditEvent`, `ExecutionStateSnapshot` | `ConsoleAuditSink` (adapter) |
 | `src/spi/idempotency/strategies/` | `IdempotencyStrategy` | `NoopIdempotencyStrategy` |
-| `src/spi/permissions/strategies/` | `PermissionGuard` | `ForwardTokenPermissionGuardStrategy` |
+| `src/spi/permissions/strategies/` | `PermissionGuard` | `ForwardTokenPermissionGuardStrategy` (admits everything) |
 | `src/spi/resilience/strategies/` | `CircuitBreakerStrategy` | `NoopCircuitBreakerStrategy` |
-| `src/spi/spec/strategies/` | `SpecLoaderStrategy` | `FileSpecLoaderStrategy` |
+| `src/spi/spec/strategies/` | `SpecLoaderStrategy` | file loader; `url` and `url-with-fallback` loaders |
 
 **`ConnectorAPI`**:
 ```typescript
 // src/spi/connector/connector-api.ts
 export interface ConnectorAPI {
   request(
-    apiRequest: ApiRequest,
-    ctx: ExecuteRequestContext  // includes idempotencyKeyTtlMs, correlationId, sessionId
+    apiRequest: ApiRequest,       // canonical path, method, params, body, program headers
+    ctx: ExecuteRequestContext    // tokenPayload, invalidate, idempotencyKey, idempotencyKeyTtlMs,
+                                  // correlationId, sessionId, clientId?, endpoint?, signal?
   ): Promise<ApiResponse>
 }
 ```
-`SandboxExecutionContext.apiClient` and `ServiceResources.apiClient` are typed as `ConnectorAPI`. The `ApiClient` (HTTP/axios) implements this interface and is the default. Swap it by injecting any `ConnectorAPI` implementation into `ServiceResources`.
+`SandboxExecutionContext.apiClient` and `ServiceResources.apiClient` are typed as `ConnectorAPI`. `ApiClient` implements it and is what `src/runtime/gateway/service-resources-factory.ts` builds for every service. `ApiClient` is also where the outbound headers, the forbidden-header filter, retries, idempotency and the circuit breaker's `recordFailure` live — see [§5](#5-extension-points) before replacing it.
 
 ---
 
 ### `src/adapters/` — Built-in Implementations   ✅ Stable
 
-Concrete implementations of `src/spi/` contracts. All optional — disable any by not wiring it.
+Concrete implementations of `src/spi/` contracts, selected by env or `config.json`.
 
 ```
 src/adapters/
 ├── auth/strategies/
-│   ├── static-token.strategy.ts           validates static bearer (demo / test)
-│   ├── oauth-introspection.strategy.ts    POST /oauth/token introspect; caches result
-│   ├── jwt-validation.strategy.ts         local JWT verification via JWKS endpoint
-│   ├── oauth-discovery.strategy.ts        OAuth 2.1 AS auto-discovery + JWT verification
-│   ├── in-memory-token-cache.strategy.ts  Map<token, payload> + TTL eviction
+│   ├── static-token.strategy.ts           forwards the caller's bearer; the config token is only a fallback
+│   ├── oauth-introspection.strategy.ts    RFC 7662-style introspection (GET + query by default; method,
+│   │                                      path, token placement and response mapping configurable);
+│   │                                      honours `active`, relative `expires_in` or absolute `exp`
+│   ├── jwt-validation.strategy.ts         local JWT verification via JWKS; exp required; RS/PS/ES/EdDSA only
+│   ├── oauth-discovery.strategy.ts        OAuth 2.1 AS metadata discovery → JWKS → JWT verification
+│   ├── resource-binding.ts                fail-closed `audience` check (jwt-validation, oauth-2.1)
+│   ├── in-memory-token-cache.strategy.ts  Map + TTL eviction
 │   ├── memcache-token-cache.strategy.ts   Memcache KV with TTL
 │   └── couchbase-token-cache.strategy.ts  Couchbase KV with TTL
+├── execution/
+│   ├── in-memory-execution-store.ts       ExecutionPersistence in process memory (default); process-local lock
+│   ├── file-execution-store.ts            in-memory store persisted to EXECUTION_STORE_DIR
+│   └── memcache-execution-store.ts        shared across pods: records + run lock (add + TTL) in memcache
 ├── idempotency/strategies/
-│   ├── in-memory-idempotency.strategy.ts  Map<key, result> dedup
+│   ├── in-memory-idempotency.strategy.ts  Map<key, result> dedup for the key TTL
 │   ├── memcache-idempotency.strategy.ts
 │   ├── couchbase-idempotency.strategy.ts
-│   └── keygen.ts                           mcp-{service}-{random} key generator
+│   └── keygen.ts                          generateKey helper: mcp-{userIdHash}-{timestamp}-{random}
 ├── infra/
-│   ├── couchbase-client.ts                singleton cluster + bucket wrapper
-│   └── memcache-client.ts                 singleton memjs client
+│   ├── couchbase-client.ts                Couchbase REST document client (http, basic auth)
+│   └── memcache-client.ts                 memjs client factory
+├── observability/
+│   └── console-audit-sink.ts              AUDIT_SINKS=console: `audit` and `execution-state` log lines
 └── resilience/strategies/
-    └── count-based-circuit-breaker.strategy.ts   opens after N consecutive 5xx; half-open probe
+    └── count-based-circuit-breaker.strategy.ts   OPEN after N failed calls per endpoint; one HALF_OPEN probe
 ```
 
-**External registration** — plug in custom backends without forking:
+`keygen.ts` backs `IdempotencyStrategy.generateKey`, which nothing in the request path calls; the key a backend call actually carries is built by the tool and the bridge — see [Idempotency keys](#idempotency-keys).
+
+**External registration** — plug in custom backends without forking, then select them by name:
 ```typescript
-import { registerTokenCacheBackend, registerIdempotencyBackend } from './runtime/gateway/strategy-builders.js'
+// An entry point in src/, like src/index.ts. The register functions are in src/wiring/strategy-builders.ts
+// (src/runtime/gateway/strategy-builders.ts re-exports them).
+import {
+  registerTokenCacheBackend, registerIdempotencyBackend, registerExecutionStoreBackend,
+  registerAuditSinkBackend, registerGovernanceRuleSourceBackend
+} from './wiring/strategy-builders.js'
 
 // Called once at startup, before createMcpGateway()
 registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCache(config, ttlMs))
 registerIdempotencyBackend('postgres', (config, logger) => new PostgresIdempotency(config))
+registerExecutionStoreBackend('postgres', (config, logger) => new PostgresExecutionStore(config))
 ```
-Set `TOKEN_CACHE_TYPE=redis` or `IDEMPOTENCY_TYPE=postgres` in env. The registry is checked before the built-in switch; unrecognised types fall through to the switch and exit with an error.
+`TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept a built-in type or any kebab-case name (`^[a-z][a-z0-9-]*$`); a per-service `config.json` `idempotency.type` may name a registered backend too. The builder checks the registry before its built-in switch and refuses a name nothing registered: at boot for the env vars, by skipping the service for `config.json`. `AUDIT_SINKS` and `GOVERNANCE_RULES_SOURCE` resolve the same way.
 
 ---
 
-### `src/runtime/` — Gateway Orchestration   ✅ Stable / 🟡 Experimental (sandbox only)
+### `src/runtime/` — Gateway Orchestration   ✅ Stable / 🟡 Experimental (sandbox, governance layer)
 
 ```
 src/runtime/
-├── server-factory.ts              bootstrap — scans services, builds registry, wires tools, starts transport
+├── server-factory.ts              boot: scan services, token cache, registry, audit pipeline, Code Mode
+│                                  runtime, MCP server factory, transport; shutdown
 ├── api-client/
-│   └── api-client.ts              implements ConnectorAPI; outbound axios; auth headers; retry + backoff
+│   └── api-client.ts              implements ConnectorAPI: outbound headers (program may not set Harbor's or
+│                                  routing ones), idempotency, retries for GET/PUT/DELETE, breaker recordFailure
 ├── gateway/
 │   ├── service-resources-factory.ts   wires ServiceDefinition → ServiceResources
-│   └── strategy-builders.ts           thin re-export of wiring/strategy-builders.ts
+│   └── strategy-builders.ts           thin re-export of src/wiring/strategy-builders.ts
 ├── execution/                     Code Mode governance layer (see docs/code-mode-governance.md)
-│   ├── execution-manager.ts       execution lifecycle, run lock, history
-│   ├── activity-gate.ts           replay / governance decision for each call of a governed run
+│   ├── execution-manager.ts       create / load / beginRun (run lock) / endRun / inspect / history
+│   ├── activity-gate.ts           per call of a governed run: replay | execute | stop; governance for new activities
 │   ├── activity-journal.ts        CallLog (the run's call outcomes) + ActivityJournal (durable activity record)
-│   ├── approval-service.ts        human approvals bound to one activity
-│   ├── request-state.ts           HMAC-sealed MRTR requestState codec
-│   └── code-mode-runtime.ts       process-wide wiring of store, manager, approvals, rules
+│   ├── approval-service.ts        human approvals bound to one activity; decide() exactly once
+│   ├── request-state.ts           HMAC-sealed MRTR requestState codec (TTL, bound to the JSON-RPC method)
+│   ├── execution-retention.ts     sweeps terminal executions after EXECUTION_RETENTION_SEC
+│   └── governance-runtime.ts       process-wide wiring of store, manager, approvals, rules, codec
+├── governance/
+│   ├── operation-resolver.ts      canonical path + method → OpenAPI template, operationId, path params
+│   ├── rule-schema.ts             Zod schema of a Governance Rule (match, conditions, levels, final)
+│   ├── rule-loader.ts             parses and validates rule documents; all-or-nothing
+│   ├── rule-store.ts              the rule set in force; atomic swap
+│   ├── rule-evaluator.ts          pure evaluateGovernance(): ALLOW | DENY | REQUIRE_APPROVAL + reason
+│   └── rule-refresher.ts          GOVERNANCE_RULES_REFRESH_SEC reloads; a failed or emptying refresh keeps the set
 ├── http/
-│   ├── http-gateway.ts            Streamable HTTP server (node:http); /mcp + /health endpoints
+│   ├── http-gateway.ts            node:http server: /mcp, /health, protected-resource metadata, /executions
+│   ├── read-body.ts               bounded body reader (413 PAYLOAD_TOO_LARGE + Connection: close)
+│   ├── execution-routes.ts        GET /executions/{id}, POST /executions/{id}/approvals/{approvalId}; owner-bound
+│   ├── mcp-server-factory.ts      per-request McpServer: registers the five tools, requestState.verify hook
+│   ├── mcp-request-identity.ts    advisory MCP-Protocol-Version / Mcp-Method / Mcp-Name view (logging only)
 │   ├── http-error.ts              typed HTTP error
-│   ├── oauth-metadata-handler.ts  RFC 9728 protected resource metadata
-│   └── send-response.ts           SSE response writer
+│   ├── oauth-metadata-handler.ts  RFC 9728 protected resource metadata document
+│   └── send-response.ts           JSON response helpers (sendJson, sendGatewayError)
 ├── observability/
-│   ├── audit.ts                   AuditCollector — projection of the run's call log (endpoints called); writeAuditRecord
+│   ├── audit.ts                   AuditCollector — projection of the run's call log; writeAuditRecord
 │   ├── audit-pipeline.ts          fans audit records and execution-state events out to the AUDIT_SINKS sinks
 │   ├── logger.ts                  pino factory; pino-caller adds source location in non-prod
-│   ├── metrics.ts                 MetricsRegistry — in-memory counters (no push endpoint yet)
+│   ├── metrics.ts                 MetricsRegistry — in-memory counters, logged as `metrics_flush` every 60 s
 │   └── progress.ts                ProgressCollector — projection of the run's call log (per-call status, created ids)
 ├── registry/
-│   ├── filesystem-scanner.ts      scans services/*; parses spec + config.json + skills/*.md
-│   ├── service-registry.ts        in-memory map of service name → ServiceResources
-│   └── skill-store.ts             in-memory map of skill id → SkillDocument; atomic swap on refresh
+│   ├── filesystem-scanner.ts      scans services/*: config.json, spec, skills/*.md → ServiceDefinition
+│   ├── service-registry.ts        service name → ServiceResources
+│   └── skill-store.ts             SkillMetadata[] of one service; atomic swap on refresh
 ├── sandbox/
-│   ├── sandbox-core.ts            isolated-vm isolate lifecycle; dual-timeout fence; JSON bridge
-│   ├── execute-api-in-sandbox.ts  runs one program: wires the bridge into the isolate; violation promotion
-│   ├── bridge-request-handler.ts  per-run api.request() pipeline (ConnectorAPI bridge); violation capture
-│   ├── skills-search-in-sandbox.ts  skill relevance filter inside sandbox
-│   └── spec-search-in-sandbox.ts    OpenAPI endpoint search inside sandbox
+│   ├── sandbox-core.ts            isolated-vm isolate lifecycle; wall-clock + CPU timeouts; error classification
+│   ├── execute-api-in-sandbox.ts  runs one program: installs api.request, drains un-awaited calls, promotes violations
+│   ├── bridge-request-handler.ts  the host bridge: per-call pipeline and the run's bookkeeping
+│   ├── request-path.ts            canonicalises the api.request path once; refuses ambiguous spellings
+│   ├── skills-search-in-sandbox.ts  discover_skills program over the skill list
+│   └── spec-search-in-sandbox.ts    search_code program over the (permission-filtered) spec
 ├── spec/
-│   ├── spec-store.ts              swagger-parser validation + atomic spec swap
-│   └── service-refresher.ts       per-service background reload (interval from config.json)
+│   ├── spec-store.ts              the service's dereferenced OpenAPI document; atomic swap
+│   └── service-refresher.ts       per-service reload of spec + skills together; no overlapping refreshes
 └── transport/
-    └── stdio-gateway.ts           MCP over stdio for embedded / local use
+    └── stdio-gateway.ts           MCP over stdio (serveStdio, legacy: 'reject') for embedded / local use
 ```
 
 ---
 
 ### `src/wiring/` — Composition Root   ✅ Stable
 
-The only layer that imports from both `src/adapters/` and `src/spi/`. Keeps the layer invariant intact: `src/runtime/` imports only from `src/wiring/` (via re-exports), never from `src/adapters/` directly.
+The only layer that imports concrete classes from `src/adapters/`. `src/runtime/` reaches adapters only through it (directly, or via the `src/runtime/gateway/strategy-builders.ts` re-export).
 
 | File | Responsibility |
 |------|----------------|
-| `strategy-builders.ts` | Factory registry for token-cache and idempotency backends; `buildTokenCacheStrategy`, `buildIdempotencyStrategy`, `buildSpecLoader`, `buildGovernanceRuleSource`, `buildAuditSinks`; external `registerTokenCacheBackend` / `registerIdempotencyBackend` / `registerGovernanceRuleSourceBackend` / `registerAuditSinkBackend` registration points |
-| `service-wiring.ts` | `resolveAuth` — instantiates the correct `AuthStrategy` from a `ServiceAuthConfig` descriptor; `resolveCircuitBreaker` — instantiates `CircuitBreakerStrategy` from config |
-
-`src/runtime/gateway/strategy-builders.ts` is a thin re-export shell (`export * from '../../wiring/strategy-builders.js'`) so existing import paths stay valid.
+| `strategy-builders.ts` | Builders: `buildTokenCacheStrategy`, `buildIdempotencyStrategy`, `buildExecutionStore`, `buildAuditSinks`, `buildGovernanceRuleSource`, `buildSpecLoader`. Registration points: `registerTokenCacheBackend`, `registerIdempotencyBackend`, `registerExecutionStoreBackend`, `registerAuditSinkBackend`, `registerGovernanceRuleSourceBackend` |
+| `service-wiring.ts` | `resolveAuth` — the `AuthStrategy` for a `ServiceAuthConfig` (no `auth` ⇒ the service is skipped; `audience` required for `jwt-validation` and `oauth-2.1`); `resolveCircuitBreaker` — noop unless `count-based` is configured |
 
 ---
 
 ### `src/tools/` — MCP Tool Layer   ✅ Stable
 
-Five tools registered per session on `McpServer`. Tool names and input schemas are public API — changing either is a breaking change.
+Five tools, registered on a fresh `McpServer` for every request by `src/runtime/http/mcp-server-factory.ts` (stdio uses the same factory). Tool names and input schemas are public API and frozen.
 
-| Tool | MCP name | Auth required | Sandbox |
-|------|----------|---------------|---------|
-| `discover-services.tool.ts` | `discover_services` | No | No — reads registry |
-| `discover-skills.tool.ts` | `discover_skills` | No | Yes — JS relevance filter |
-| `get-skill-details.tool.ts` | `get_skill_details` | No | No — reads skill store |
-| `search-code.tool.ts` | `search_code` | No | Yes — JS endpoint search |
-| `execute-api.tool.ts` | `api_execute` | Yes | Yes — runs skill code |
+| Tool | MCP name | Auth (`validateAuth`) | Sandbox |
+|------|----------|-----------------------|---------|
+| `discover-services.tool.ts` | `discover_services` | No | No — reads the registry |
+| `discover-skills.tool.ts` | `discover_skills` | Yes | Yes — agent's filter over the skill list |
+| `get-skill-details.tool.ts` | `get_skill_details` | Yes | No — reads the skill store |
+| `search-code.tool.ts` | `search_code` | Yes | Yes — agent's search over `PermissionGuard.filterSpec(spec)` |
+| `execute-api.tool.ts` | `api_execute` | Yes | Yes — runs the agent's program |
 
-`api_execute` is the only tool that touches auth, permission guard, circuit breaker, idempotency, audit, and the ConnectorAPI bridge. The other four are stateless reads.
+`tool-helpers.ts` holds the shared pieces: `mcpSuccess` / `mcpError` (serverInfo in `_meta`), service resolution (`UNKNOWN_SERVICE`, not retryable), `validateAuth`, the `runSandboxTool` pipeline and the advisory request `_meta` reader. `api_execute` is the only tool that makes backend calls, and therefore the only one that touches executions, governance, the circuit breaker, idempotency and the audit trail.
 
 ---
 
@@ -219,124 +270,148 @@ Five tools registered per session on `McpServer`. Tool names and input schemas a
 
 ### `api_execute` — Full Path
 
+The booted gateway always builds a `GovernanceRuntime`, so every `api_execute` is a governed, durable execution. (Without a runtime — tests, or an embedder calling `registerExecuteApiTool` without one — the tool runs the legacy path: no execution, journal or governance, only the in-run `CallLog`.)
+
 ```
 AI Agent
-  │
-  │  POST /mcp
-  │  Accept: application/json, text/event-stream
-  │  Authorization: Bearer <client-token>
+  │  POST /mcp   Authorization: Bearer <token>
+  │  MCP-Protocol-Version: 2026-07-28 · Mcp-Method · Mcp-Name · params._meta envelope
   ▼
-http-gateway.ts
-  ├─ extract Bearer token from header (every request)
-  ├─ create fresh stateless transport + McpServer
-  └─ McpServer.handle(request)
-       ▼
-  MCP SDK  →  route tools/call  →  execute-api.tool.ts handler
-       ▼
-execute-api.tool.ts
-  ├─ 1.  ServiceRegistry.get(serviceName)
-  │         ServiceResources | → UNKNOWN_SERVICE error
-  │
-  ├─ 2.  AuthMiddleware.validate(clientToken)
-  │         TokenPayload    | → SessionExpiredError / MissingTokenError
-  │
-  ├─ 3.  PermissionGuard.filterSpec(spec, tokenPayload)
-  │         filtered OpenAPISpec | → PermissionDeniedError
-  │
-  ├─ 4.  CircuitBreakerStrategy.check(endpoint)
-  │         pass | → CircuitOpenError
-  │
-  ├─ 5.  IdempotencyStrategy.checkAndExecute(key, fn, ttl)
-  │         cached result (return early) | null (proceed to sandbox)
-  │
-  ├─ 6.  CallLog for the run (the execution's ActivityJournal when governed);
-  │       AuditCollector / ProgressCollector are read-only projections of it
-  │
-  ├─ 7.  runApiInSandbox(userCode, sandboxCtx)
-  │       │
-  │       └─ sandbox-core.ts
-  │            ├─ new ivm.Isolate({ memoryLimitMb })
-  │            ├─ wall-clock timer → dispose isolate on executeTimeoutMs
-  │            ├─ inject __makeRequest bridge into isolate global
-  │            ├─ compile + run userCode as async function
-  │            │    │
-  │            │    └─ api.request(opts) → BridgeRequestHandler.handle
-  │            │         ├─ enforce maxApiCalls + maxConcurrentCalls
-  │            │         ├─ validate opts (path, method)
-  │            │         ├─ ActivityGate.admit (governed runs): replay | execute | pause | stop
-  │            │         ├─ PermissionGuard.canExecute(path, method, tokenPayload)
-  │            │         ├─ CircuitBreakerStrategy.check(path)
-  │            │         ├─ ConnectorAPI.request(apiRequest, ctx, ttlMs)
-  │            │         │      └─ ApiClient → HTTP → backend service
-  │            │         └─ journal: one record of the outcome (durable activity when governed)
-  │            │
-  │            └─ enforce: V8 CPU timeout (script.run) + wall-clock (setTimeout)
-  │
-  ├─ 8.  CircuitBreakerStrategy.recordSuccess(endpoint)
-  ├─ 9.  MetricsRegistry.increment(TOOL_CALLS, {outcome: success})
-  └─ 10. writeAuditRecord() → audit pipeline → each AUDIT_SINKS sink (console: pino line; endpoints from AuditCollector)
-          └─ mcpSuccess(result) → SSE event → AI Agent
+src/runtime/http/http-gateway.ts
+  ├─ bearer *format* check (one Authorization header; JWT or ≥ 32 base64url chars)
+  │     missing / malformed / duplicate ⇒ HTTP 401 (+ WWW-Authenticate when HARBOR_RESOURCE_URI is set)
+  ├─ readBoundedBody ≤ MCP_MAX_BODY_BYTES (4 MiB) ⇒ 413 PAYLOAD_TOO_LARGE; not JSON ⇒ JSON-RPC -32700
+  └─ createMcpHandler (legacy: 'reject') → buildMcpServerFactory → new McpServer + five tools
+        an echoed MRTR requestState is verified by the SDK (HMAC, TTL, method binding) before the handler
+  ▼
+src/tools/execute-api.tool.ts
+  ├─ 1. resolveService(service)                    ⇒ UNKNOWN_SERVICE (not retryable)
+  ├─ 2. validateAuth → AuthMiddleware.validateRequest (token cache; strategy.validate on a miss)
+  │        a token the auth strategy rejects is a tool error (HTTP 200), not a 401
+  │     userIdHash = hashAuthenticatedPrincipal(payload, bearer)
+  ├─ 3. resolveExecution
+  │        requestState (MRTR retry) or _meta["harbor/execution-id"] ⇒ resume:
+  │           load; same principal and service or EXECUTION_NOT_RESUMABLE;
+  │           apply the human's answer (ApprovalService.decide) — reject/cancel end it here;
+  │           still pending without an answer ⇒ input_required again
+  │        otherwise ⇒ ExecutionManager.create — the program is persisted as the authoritative original
+  ├─ 4. ExecutionManager.beginRun — run lock, RUNNING, runCount + 1
+  │        EXECUTION_LOCKED (retryable) · EXECUTION_NOT_RESUMABLE · approval still pending ⇒ the pause again
+  │     makeBridge → ActivityJournal, resolveOperation, governance decide()
+  ├─ 5. program = persisted originalCode (incoming code is ignored on resume)
+  │     idempotency key base = mcp-{service}-{executionId}
+  ├─ 6. runApiInSandbox(program, sandboxCtx)                 src/runtime/sandbox/execute-api-in-sandbox.ts
+  │     ├─ sandbox-core.ts: new isolate (memoryLimitMb); wall-clock timer (executeTimeoutMs)
+  │     │   disposes it; ivm CPU timeout inside
+  │     ├─ api.request(arg) → BridgeRequestHandler.handle   src/runtime/sandbox/bridge-request-handler.ts
+  │     │   ├─ admit: run already stopped? call limit (maxApiCalls)? concurrency (maxConcurrentCalls)?
+  │     │   ├─ validate arg; canonicalise path (request-path.ts)       ⇒ INVALID_API_REQUEST, nothing sent
+  │     │   ├─ resolve → OpenAPI template (src/runtime/governance/operation-resolver.ts)
+  │     │   ├─ per-run admission lock — one call at a time, in arrival order:
+  │     │   │    ├─ stop check (a sibling paused or stopped the run ⇒ refused with that reason)
+  │     │   │    ├─ ActivityGate.admit: journal lookup → replay (COMPLETED) | execute | stop;
+  │     │   │    │     new activity → evaluateGovernance → ALLOW | DENY | REQUIRE_APPROVAL
+  │     │   │    ├─ authorize: PermissionGuard.canExecute, CircuitBreaker.check(template)
+  │     │   │    └─ ActivityGate.begin → activity journaled EXECUTING
+  │     │   ├─ ConnectorAPI.request(apiRequest, ctx)   (outside the lock: calls still overlap)
+  │     │   │     ApiClient: idempotency.checkAndExecute(key-{sequence}) → axios;
+  │     │   │     retries GET/PUT/DELETE only; recordFailure(ctx.endpoint) once per failed call
+  │     │   └─ record: journal COMPLETED (any HTTP status) + CircuitBreaker.recordSuccess;
+  │     │         a throw ⇒ FAILED, outcome unknown
+  │     ├─ drain: calls the program did not await get the rest of executeTimeoutMs, then are
+  │     │   aborted (journaled FAILED) — a connector ignoring the abort is abandoned after 1 s
+  │     └─ throwIfViolated: the first run-stopping violation (pause, deny, divergence,
+  │         unknown outcome) becomes the run's typed error, even if the program caught it
+  ├─ 7. ExecutionManager.endRun(completed | waitingApproval | interrupted | failed | denied | cancelled)
+  │     releases the lock; the new state is published to the audit sinks
+  ├─ 8. metrics.increment(tool_calls_total) · writeAuditRecord → AuditPipeline → each AUDIT_SINKS sink
+  └─ 9. response (_meta: harbor/execution-id, harbor/execution-status[, harbor/approval-id])
+         completed            → mcpSuccess(result)
+         ApprovalRequired     → client declared elicitation ? input_required (form elicitation +
+                                sealed requestState) : APPROVAL_REQUIRED tool error naming
+                                POST /executions/{id}/approvals/{approvalId}
+         anything else        → mcpError(message, code, retryable, progress)
 ```
 
-### Read Path (`discover_services`, `discover_skills`, `search_code`)
+Why the admission lock: the journal lookup, governance, the stop check and journaling EXECUTING must see each other's results. Without it, two `Promise.all` siblings could both pass the stop check while the first was opening an approval, and the second would execute on a run that had already paused. Only admission is serialised; the backend calls themselves still run concurrently.
+
+#### Idempotency keys
+
+Every backend call carries `X-Idempotency-Key`, and the configured `IdempotencyStrategy` deduplicates on it for `idempotencyKeyTtlMs`.
+
+| Path | Key |
+|------|-----|
+| Governed (always, in the booted gateway) | `mcp-{service}-{executionId}-{sequence}` — two executions of one program never share a key; a resume keeps its keys |
+| Legacy (no `GovernanceRuntime`) | `mcp-{service}-{userIdHash12}-{codeHash16}-c{n}` — `n` is the call's arrival index in the run, so an agent retrying the identical tool call is deduplicated |
+
+### Read Path (`discover_services`, `discover_skills`, `get_skill_details`, `search_code`)
 
 ```
-AI Agent → McpServer → tool handler
-  ├─ discover_services: ServiceRegistry.listServices()  — zero sandbox, zero auth
-  ├─ discover_skills:   runSkillSearchInSandbox(query)  — sandbox, no auth, no CB
-  └─ search_code:       runSpecSearchInSandbox(query)   — sandbox, no auth, no CB
+AI Agent → per-request McpServer → tool handler
+  ├─ discover_services:  ServiceRegistry.listServices()                         — no auth, no sandbox
+  ├─ discover_skills:    validateAuth → runSkillsSearchInSandbox(code, skills)  — sandbox, searchTimeoutMs
+  ├─ get_skill_details:  validateAuth → SkillStore lookup                       ⇒ UNKNOWN_SKILL
+  └─ search_code:        validateAuth → PermissionGuard.filterSpec(spec, token)
+                           → runSpecSearchInSandbox(code, spec)                 — sandbox, searchTimeoutMs
 ```
+
+None of them calls a backend, the circuit breaker or the execution store.
 
 ---
 
 ## 4. Service Registration Lifecycle
 
 ```
-src/index.ts                      ← SERVICES_DIR defaults to <repo root>/services/
-  ├─ dotenv/config  — load .env
-  ├─ validateGlobalConfig()  — Zod parse process.env; exit on error
+src/index.ts
+  ├─ dotenv/config — load .env
+  ├─ src/core/config/config.ts loads MCP_CONFIG_FILE (default /etc/harbor-config/config.yaml) into
+  │    process.env when present; variables already set win
+  ├─ servicesDir = SERVICES_DIR (resolved against the working directory) or <install root>/services
+  ├─ validateGlobalConfig() — Zod parse of process.env; exit on error
   └─ createMcpGateway(servicesDir, globalConfig)
-       │
        ▼
-server-factory.ts
+src/runtime/server-factory.ts
+  ├─ 1. scanServicesDirectory(servicesDir)                src/runtime/registry/filesystem-scanner.ts
+  │       for each entry of services/ (an unreadable entry is skipped):
+  │         a. config.json — enabled: false ⇒ skipped
+  │         b. spec.json | spec.yaml | spec.yml → SwaggerParser.dereference (relative $refs beside the file)
+  │         c. api config — config.api, else spec servers[0].url (no port ⇒ 80/443)
+  │         d. resolveAuth (config.auth required) · resolveCircuitBreaker · idempotency block ·
+  │            sandbox overrides · spec source · refresh interval / timeout checks
+  │         e. scanSkills — skills/*.md; a file that cannot be read or parsed is skipped alone
+  │       a service that throws is logged ("Failed to scan service …") and skipped; none left ⇒ exit
   │
-  ├─ 1. scanServicesDirectory(servicesDir)
-  │       for each subdir in services/:
-  │         a. find spec.yaml / spec.json
-  │         b. SwaggerParser.dereference(specPath)   — validates OpenAPI
-  │         c. read config.json                      — ServiceConfig
-  │         d. resolveAuth(config)                   — instantiates AuthStrategy
-  │         e. resolveCircuitBreaker(config)
-  │         f. scanSkills(serviceDir)                — reads skills/*.md
-  │         g. return ServiceDefinition
+  ├─ 2. buildTokenCacheStrategy(TOKEN_CACHE_TYPE)        — one cache shared by all services
   │
-  ├─ 2. buildTokenCacheStrategy(globalConfig)        — shared across all services
+  ├─ 3. for each ServiceDefinition: buildServiceResources   src/runtime/gateway/service-resources-factory.ts
+  │         ├─ SpecStore / SkillStore seeded from the scan
+  │         ├─ buildSpecLoader(spec source) + ServiceRefresher
+  │         ├─ AuthMiddleware(svc.auth, shared token cache)
+  │         ├─ buildIdempotencyStrategy(config.json block ?? IDEMPOTENCY_TYPE) — unknown type ⇒ throws
+  │         ├─ SandboxLimits = config.json sandbox overrides ∪ SANDBOX_* defaults
+  │         ├─ ApiClient(baseUrl, api config, circuit breaker, idempotency, …)
+  │         └─ refresher.start() — last, so a service that failed above leaves no timer behind
+  │       ServiceRegistry.register(name, resources); a throw skips the service; none left ⇒ exit
   │
-  ├─ 3. for each ServiceDefinition:
-  │       buildServiceResources(svc, globalConfig, tokenCacheStrategy)
-  │         ├─ SpecStore.swap(svc.spec)
-  │         ├─ SkillStore.swap(svc.skills)
-  │         ├─ buildSpecLoader(svc.specSource)
-  │         ├─ new ServiceRefresher(...)
-  │         │     refresher.start()  ← per-service interval from config.json
-  │         ├─ new AuthMiddleware(svc.auth, tokenCacheStrategy)
-  │         ├─ buildIdempotencyStrategy(svc.idempotencyBackend)
-  │         ├─ merge sandboxOverride ∪ globalConfig.sandbox  → SandboxLimits
-  │         └─ new ApiClient(api, circuitBreaker, idempotency)
-  │               ApiClient satisfies ConnectorAPI
+  ├─ 4. AuditPipeline — buildAuditSinks(AUDIT_SINKS) when ENABLE_AUDIT, else no sinks
   │
-  ├─ 4. ServiceRegistry.register(name, resources)  × N services
+  ├─ 5. buildGovernanceRuntime(globalConfig.execution, logger, auditPipeline)
+  │         ├─ buildExecutionStore(EXECUTION_STORE_TYPE)
+  │         ├─ ExecutionManager (state changes → audit pipeline) · retention sweeper · ApprovalService
+  │         ├─ Governance Rules: buildGovernanceRuleSource → load → validate
+  │         │     unreadable source or invalid rule ⇒ boot fails; rules directory absent ⇒ WARN, no rules
+  │         ├─ GovernanceRuleRefresher (GOVERNANCE_RULES_REFRESH_SEC; 0 = boot only)
+  │         └─ requestState codec (GOVERNANCE_REQUEST_STATE_KEY, else a per-process random key)
   │
-  ├─ 5. createMcpServer(clientToken): McpServer
-  │       registerDiscoverServicesTool(...)
-  │       registerDiscoverSkillsTool(...)
-  │       registerGetSkillDetailsTool(...)
-  │       registerSearchCodeTool(...)
-  │       registerExecuteApiTool(...)
+  ├─ 6. buildMcpServerFactory({ registry, globalConfig, logger, metrics, stdioToken, governanceRuntime, auditPipeline })
   │
-  └─ 6. start transport
-          HTTP:  startHttpGateway({ host, port, createMcpServer })
-          stdio: startStdioGateway({ clientToken, createMcpServer })
+  └─ 7. start transport
+          HTTP:  startHttpGateway({ host, port, maxBodyBytes, createMcpServer, registry, logger,
+                                   oauthConfig, governanceRuntime })
+          stdio: MCP_TOKEN required and must pass the bearer parser, else exit;
+                 startStdioGateway({ createMcpServer, registry, logger })
+          SIGTERM / SIGINT: close the HTTP listener, then governanceRuntime.shutdown(), auditPipeline.close(),
+                 token cache destroy, registry.shutdownAll() (refreshers, metrics), gateway metrics stop
 ```
 
 ---
@@ -347,35 +422,65 @@ server-factory.ts
 
 **File:** `src/spi/connector/connector-api.ts`
 
-**What it unlocks:** swap the outbound transport without touching sandbox code. Implement `ConnectorAPI`, pass the instance into `ServiceResources.apiClient`. The sandbox bridge calls the interface — it never sees HTTP, gRPC, or anything else directly.
+**What it unlocks:** a different outbound transport (gRPC, GraphQL, a message bus) without touching sandbox code. The bridge calls the interface; it never sees HTTP.
 
-**How to use:**
+**How to use:** there is no registration hook. Build your connector in `src/runtime/gateway/service-resources-factory.ts` in place of `ApiClient`, or construct `ServiceResources` yourself when embedding.
+
 ```typescript
+// A module in src/ — the interface is src/spi/connector/connector-api.ts.
 import type { ConnectorAPI, ApiRequest, ApiResponse, ExecuteRequestContext } from './spi/connector/connector-api.js'
 
 class GrpcConnector implements ConnectorAPI {
   async request(req: ApiRequest, ctx: ExecuteRequestContext): Promise<ApiResponse> {
-    // call gRPC backend, return { data, status, ok }
-    // access ctx.idempotencyKeyTtlMs, ctx.correlationId etc. from ctx
+    // call the backend, return { data, status, ok }
   }
 }
 ```
-Wire by replacing `apiClient` in `service-resources-factory.ts` or injecting into `ServiceResources` directly.
+
+A custom connector takes over everything `ApiClient` does after the bridge hands the call over:
+- deduplication through `ctx.idempotencyKey` / `ctx.idempotencyKeyTtlMs`;
+- retries, and only for methods whose repetition is harmless;
+- `circuitBreaker.recordFailure(ctx.endpoint)` once per failed call, so failures land on the key the bridge checks;
+- dropping program-supplied identity and routing headers, and sending the correlation, idempotency and `X-Harbor-*` headers;
+- honouring `ctx.signal`, and `ctx.invalidate()` on a backend 401.
+
+A throw becomes a FAILED activity with an unknown outcome. The run stops there and the call is never retried silently.
 
 ---
 
 ### ✅ External Backend Registration
 
-**File:** `src/runtime/gateway/strategy-builders.ts`
+**File:** `src/wiring/strategy-builders.ts`
 
-**What it unlocks:** custom token-cache and idempotency backends without forking the framework.
+**What it unlocks:** custom token caches, idempotency stores, execution stores, audit sinks and Governance Rule sources without forking.
+
+| Register | Selected by | Contract |
+|----------|-------------|----------|
+| `registerTokenCacheBackend(type, factory)` | `TOKEN_CACHE_TYPE` | `TokenCacheStrategy` (extend `AbstractTokenCache`) |
+| `registerIdempotencyBackend(type, factory)` | `IDEMPOTENCY_TYPE`, or `config.json` `idempotency.type` | `IdempotencyStrategy` |
+| `registerExecutionStoreBackend(type, factory)` | `EXECUTION_STORE_TYPE` | `ExecutionPersistence`; run the contract suite in `tests/unit/execution-store.test.ts` |
+| `registerAuditSinkBackend(type, factory)` | an entry of `AUDIT_SINKS` | `AuditSink` |
+| `registerGovernanceRuleSourceBackend(type, factory)` | `GOVERNANCE_RULES_SOURCE` | `GovernanceRuleSource` (`load()` throws rather than return part of a set) |
+
+Register before `createMcpGateway()`. Built-in types (in-memory, memcache, couchbase, noop, file, dir, url, console) keep working unchanged. An unregistered name stops boot, or skips the service for a `config.json` idempotency type. See `docs/adapter-guide.md`.
+
+---
+
+### ✅ `AuditSink`
+
+**Where:** `src/spi/observability/audit-sink.ts`, fanned out by `src/runtime/observability/audit-pipeline.ts`.
+
+Every `api_execute` audit record (`{ kind: 'audit', record }`) and every execution state change (`{ kind: 'execution', state }` — statuses, approvals and decisions, no request/response bodies and no program text) goes to each sink listed in `AUDIT_SINKS`. Built in: `console` (the `audit` and `execution-state` log lines). Register others (S3, PostgreSQL, a SIEM) without forking:
 
 ```typescript
-registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCache(config, ttlMs))
-registerIdempotencyBackend('postgres', (config, logger) => new PostgresIdempotency(config))
+// An entry point in src/ (see External registration above).
+import { registerAuditSinkBackend } from './wiring/strategy-builders.js'
+
+registerAuditSinkBackend('s3', ({ loggerFor }) => new S3AuditSink(/* bucket, prefix */))
+// AUDIT_SINKS=console,s3
 ```
 
-Set env vars: `TOKEN_CACHE_TYPE=redis`, `IDEMPOTENCY_TYPE=postgres`. Built-in types (in-memory, memcache, couchbase) still work unchanged.
+A sink that throws is logged and skipped; the other sinks and the request are unaffected. An unknown name in `AUDIT_SINKS` stops boot, and so does an empty `AUDIT_SINKS` while `ENABLE_AUDIT` is on.
 
 ---
 
@@ -383,13 +488,13 @@ Set env vars: `TOKEN_CACHE_TYPE=redis`, `IDEMPOTENCY_TYPE=postgres`. Built-in ty
 
 **File that needs it:** `src/runtime/server-factory.ts`
 
-**Problem:** transport selection is hardcoded `if/else` on `config.mcp.transport`. Adding WebSocket or Unix socket requires editing the bootstrap file.
+**Problem:** transport selection is a hard-coded `if/else` on `config.mcp.transport`. Adding WebSocket or a Unix socket means editing the bootstrap file.
 
 **Proposed interface:**
 ```typescript
 // src/spi/transport/protocol-adapter.ts
 export interface ProtocolAdapter {
-  start(server: McpServer, config: McpConfig, logger: Logger): Promise<void>
+  start(createMcpServer: GatewayMcpServerFactory, config: GlobalConfig, logger: Logger): Promise<void>
   stop(): Promise<void>
 }
 ```
@@ -400,14 +505,14 @@ export interface ProtocolAdapter {
 
 **File that needs it:** `src/runtime/registry/filesystem-scanner.ts` + `skill-store.ts`
 
-**Problem:** skills are loaded from disk at startup. No runtime update, no database source, no remote CMS.
+**Problem:** skills come only from the service folder on disk (read at boot, re-read by the service refresher). There is no database source and no remote CMS.
 
 **Proposed interface:**
 ```typescript
 // src/spi/skill/skill-provider.ts
 export interface SkillProvider {
-  listSkills(serviceName: string): Promise<SkillDocument[]>
-  getSkill(skillId: string): Promise<SkillDocument | undefined>
+  listSkills(serviceName: string): Promise<SkillMetadata[]>
+  getSkill(serviceName: string, skillId: string): Promise<SkillMetadata | undefined>
 }
 ```
 
@@ -415,9 +520,9 @@ export interface SkillProvider {
 
 ### ⚠️ `ToolResolver`   NOT YET IMPLEMENTED
 
-**File that needs it:** `src/runtime/server-factory.ts`
+**File that needs it:** `src/runtime/http/mcp-server-factory.ts`
 
-**Problem:** five tools are hard-registered at startup. No dynamic registration, no custom tools.
+**Problem:** the five tools are hard-registered on every per-request `McpServer`. There is no dynamic registration and no custom tool. The five tools are frozen by design (AGENTS.md), so adding this is an API decision, not a refactor.
 
 **Proposed interface:**
 ```typescript
@@ -429,36 +534,25 @@ export interface ToolResolver {
 
 ---
 
-### ✅ `AuditSink`
-
-**Where:** `src/spi/observability/audit-sink.ts`, fanned out by `src/runtime/observability/audit-pipeline.ts`.
-
-Every `api_execute` audit record and every execution state change (statuses,
-approvals, decisions — no request/response bodies) goes to each sink listed
-in `AUDIT_SINKS`. Built in: `console` (the structured log line, as before).
-Register others — S3, PostgreSQL, a SIEM — without forking:
-
-```typescript
-import { registerAuditSinkBackend } from './runtime/gateway/strategy-builders.js'
-
-registerAuditSinkBackend('s3', ({ loggerFor }) => new S3AuditSink(/* bucket, prefix */))
-// AUDIT_SINKS=console,s3
-```
-
-A sink that throws is logged and skipped; the other sinks and the request are
-unaffected. An unknown name in `AUDIT_SINKS` stops boot.
-
----
-
 ## 6. Known Issues
 
 ### `src/runtime/server-factory.ts` — mixed responsibilities
 
-Bootstrap, tool wiring, transport selection, and shutdown handling are one function. See `ProtocolAdapter` and `ToolResolver` extension points above. Fix when a second transport or dynamic tools are needed.
+Bootstrap, audit and Code Mode wiring, transport selection and shutdown handling are one function. See the `ProtocolAdapter` extension point above. Fix when a second transport is needed.
 
-### No metric for spec refresh failure
+### The transport checks the bearer's format, not its validity
 
-`service-refresher.ts` logs `warn` on failure but does not increment a metric counter. Silent repeated failures are invisible to dashboards. Fix: add `spec_refresh_failed_total` metric.
+`/mcp` refuses a missing, malformed or duplicated `Authorization` header with 401. A well-formed token that the auth strategy rejects (invalid, expired, revoked) is reported by the tool as an error inside an HTTP 200, and `discover_services` needs no valid token at all. `/health` lists service names. There is no `Origin`/`Host` validation. Open decision; see `docs/mcp-2026-07-28-compatibility.md`.
+
+### No seam for metrics, no metric for spec refresh failure
+
+`MetricsRegistry` is constructed directly in `src/runtime/server-factory.ts` and `src/runtime/gateway/service-resources-factory.ts`; there is no way to inject another collector. `service-refresher.ts` logs `warn` on a failed refresh but increments no counter, so repeated failures are invisible to dashboards.
+
+### No size cap on backend responses or program request bodies
+
+`ApiClient` buffers whatever a backend returns, and a program may send a body of any size its isolate can build.
+
+The governance-specific limitations (untargeted calls are ungoverned, rule targets not checked against the specs, self-approval, and others) are listed in `docs/code-mode-governance.md` §14 and tracked in `ROADMAP.md`.
 
 ---
 
@@ -466,39 +560,45 @@ Bootstrap, tool wiring, transport selection, and shutdown handling are one funct
 
 | Module | Status | Notes |
 |--------|--------|-------|
-| `src/core/constants.ts` | ✅ Stable | Public API — env var names and tool names are breaking changes |
-| `src/core/config/config.ts` | ✅ Stable | Zod schema is the config contract |
-| `src/core/types/` | ✅ Stable | All SPI interfaces root here |
-| `src/tools/` | ✅ Stable | Tool names + input schemas are public API |
-| `src/spi/` | ✅ Stable | All interfaces frozen; adding fields is breaking |
+| `src/core/constants.ts` | ✅ Stable | Tool names, `ERR` codes and HTTP routes are public API; `META_PREFIX` (`harbor/`) is a placeholder |
+| `src/core/config/config.ts` | ✅ Stable | The Zod schema (env var names and defaults) is the config contract |
+| `src/core/types/` | ✅ Stable | Most SPI interfaces are declared here |
+| `src/tools/` | ✅ Stable | Tool names + input schemas are public API and frozen |
+| `src/spi/` | ✅ Stable | Interfaces frozen; adding a required member is breaking |
+| `src/spi/execution/`, `src/spi/governance/` | 🟡 Experimental | `ExecutionPersistence`, `GovernanceRuleSource` — may gain members in a minor release |
 | `src/adapters/` | ✅ Stable | Internal field names may change; public factory signatures are stable |
 | `src/runtime/registry/service-registry.ts` | ✅ Stable | `ServiceResources` shape is public API |
-| `src/runtime/http/` | ✅ Stable | HTTP transport + session manager |
+| `src/runtime/http/` | ✅ Stable | Stateless HTTP transport, body limits, protected-resource metadata |
+| `src/runtime/http/execution-routes.ts` | 🟡 Experimental | `/executions` inspection and fallback approval routes |
+| `src/runtime/execution/`, `src/runtime/governance/` | 🟡 Experimental | Code Mode governance layer; journal, rule format and `harbor/*` `_meta` keys may still change |
 | `src/runtime/spec/service-refresher.ts` | ✅ Stable | Per-service interval from `config.json`; `0` = disabled |
-| `src/runtime/observability/` | ✅ Stable | Audit, metrics, logger, progress shapes established |
+| `src/runtime/observability/` | ✅ Stable | Audit record, execution-state event, metrics, logger, progress shapes established |
 | `src/runtime/api-client/api-client.ts` | ✅ Stable | Implements `ConnectorAPI`; re-exports types for backwards compat |
-| `src/runtime/gateway/strategy-builders.ts` | ✅ Stable | Thin re-export of `src/wiring/strategy-builders.ts`; `registerTokenCacheBackend` / `registerIdempotencyBackend` public API preserved |
-| `src/wiring/strategy-builders.ts` | ✅ Stable | Canonical factory registry; built-in switch + external registration |
+| `src/runtime/gateway/strategy-builders.ts` | ✅ Stable | Thin re-export of `src/wiring/strategy-builders.ts` |
+| `src/wiring/strategy-builders.ts` | ✅ Stable | Canonical builders; built-in switch + external registration |
 | `src/wiring/service-wiring.ts` | ✅ Stable | Auth + circuit-breaker resolver; accepts config descriptors, returns strategy instances |
 | `src/runtime/registry/filesystem-scanner.ts` | ✅ Stable | Returns config descriptors; strategy instantiation delegated to `src/wiring/service-wiring.ts` |
-| `src/runtime/server-factory.ts` | 🔴 Needs Refactor | Mixed responsibilities; blocks `ProtocolAdapter` + `ToolResolver` |
-| `src/runtime/sandbox/sandbox-core.ts` | 🟡 Experimental | `isolated-vm` native addon; security model depends on single library |
+| `src/runtime/server-factory.ts` | 🔴 Needs Refactor | Mixed responsibilities; blocks `ProtocolAdapter` |
+| `src/runtime/sandbox/` | 🟡 Experimental | `isolated-vm` native addon; the security model depends on a single library |
 
 ---
 
 ## 8. Future Evolution
 
 - Add `spec_refresh_failed_total` metric to `service-refresher.ts`
-- OpenTelemetry trace propagation through `ConnectorAPI.request()` bridge
+- An injectable `MetricsCollector` (Prometheus / OpenTelemetry)
+- OpenTelemetry trace propagation through the `ConnectorAPI.request()` bridge
 - `ProtocolAdapter` — when a third transport is added
 - `SkillProvider` — when skills need a DB or remote source
-- `ToolResolver` — when custom tools are needed
+- `ToolResolver` — only if the frozen five-tool surface is ever opened up
 - Built-in S3 / GCS audit sinks — the `AuditSink` interface exists; `console` is the only built-in
-- Remote service registry (etcd / Consul) — replace filesystem scanner
+- Remote service registry (etcd / Consul) — replace the filesystem scanner
 - Multi-tenant namespacing — isolated registries per tenant within one gateway
 
 ### Architectural Invariants — Never Break
 
-1. **Sandbox isolation** — skill code must have zero direct access to gateway process, filesystem, or network. `ConnectorAPI` is the only outbound surface from inside the isolate.
-2. **SPI boundary** — `src/runtime/` must only import `src/spi/` interfaces, never `src/adapters/` concrete classes directly. `src/wiring/` is the sole exception by design — it is the composition root whose entire purpose is wiring concrete adapters.
-3. **`src/core/` independence** — `src/core/` has no imports from `src/runtime/`, `src/tools/`, `src/spi/`, or `src/adapters/`. It must stay importable by consumers without pulling in the full framework.
+1. **Sandbox isolation** — the agent's program has no direct access to the gateway process, filesystem or network. `api.request()` → the host bridge → `ConnectorAPI` is the only outbound surface from inside the isolate.
+2. **Governance before side effect, journal before call** — the bridge canonicalises the path, evaluates rules and journals the activity EXECUTING before the connector is called. A completed activity is replayed, never re-executed; an unknown outcome stops the run.
+3. **SPI boundary** — `src/runtime/` imports `src/spi/` contracts and `src/wiring/`, never `src/adapters/` concrete classes directly. `src/wiring/` is the composition root and the sole exception by design.
+4. **`src/core/` independence** — `src/core/` has no imports from `src/runtime/`, `src/tools/`, `src/spi/`, `src/wiring/` or `src/adapters/`. It stays importable by consumers without pulling in the framework.
+5. **Stateless transport** — execution state lives in `ExecutionPersistence`, never in an MCP session or a per-connection map.

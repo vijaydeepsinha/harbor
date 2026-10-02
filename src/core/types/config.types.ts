@@ -44,8 +44,8 @@ export type ExecutionStoreBackendConfig =
   | { type: 'file'; dir: string }
   | ({ type: 'memcache'; keyPrefix?: string; lockTtlSec?: number } & MemcacheConnectionConfig)
 
-/** Code Mode governance layer settings (see docs/code-mode-governance.md). */
-export interface CodeModeConfig {
+/** Durable execution settings, including governance (see docs/code-mode-governance.md). */
+export interface ExecutionConfig {
   store: ExecutionStoreBackendConfig
   /** What is kept once an execution is terminal. */
   retention?: {
@@ -107,6 +107,8 @@ export interface GlobalConfig {
   mcp: {
     host: string
     port: number
+    /** Largest `/mcp` request body read before a 413 (MCP_MAX_BODY_BYTES). Absent ⇒ MCP_DEFAULT_MAX_BODY_BYTES. */
+    maxBodyBytes?: number
     transport: 'http' | 'stdio'
     /** Static bearer used by the stdio transport. Required when transport === 'stdio'. */
     token?: string
@@ -129,7 +131,8 @@ export interface GlobalConfig {
   }
   defaultIdempotency: IdempotencyBackendConfig
   oauth?: OAuthResourceConfig
-  codeMode: CodeModeConfig
+  /** Durable execution settings. */
+  execution: ExecutionConfig
 }
 
 export type { AuthStrategy, TokenCacheStrategy, CircuitBreakerStrategy, IdempotencyStrategy, PermissionGuard, SpecLoaderStrategy, OAuthResourceConfig }

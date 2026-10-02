@@ -4,12 +4,13 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { v4 as uuidv4 } from 'uuid'
 import type { Logger } from '../observability/logger.js'
-import type { CodeModeRuntime } from '../execution/code-mode-runtime.js'
+import type { GovernanceRuntime } from '../execution/governance-runtime.js'
 import type { ServiceRegistry } from '../registry/service-registry.js'
 import type { OAuthResourceConfig } from '../../core/types/oauth.types.js'
 import { extractBearerFromRequest, bearerFailureToHttpResponse } from '../../spi/auth/bearer-authorization.js'
 import { AuthError, type AuthResult } from '../../core/types/auth.types.js'
 import { HttpError } from './http-error.js'
+import { readBoundedBody } from './read-body.js'
 import { sendJson } from './send-response.js'
 import { ERR, HTTP_ROUTES } from '../../core/constants.js'
 import { ExecutionError, ApprovalAlreadyDecidedError, type ExecutionRecord } from '../../core/types/execution.types.js'
@@ -32,7 +33,7 @@ export async function handleExecutionRoutes(
   req: IncomingMessage,
   res: ServerResponse,
   url: string,
-  codeMode: CodeModeRuntime,
+  governanceRuntime: GovernanceRuntime,
   registry: ServiceRegistry,
   logger: Logger,
   oauthConfig?: OAuthResourceConfig
@@ -52,26 +53,29 @@ export async function handleExecutionRoutes(
   try {
     if (approvalId === undefined) {
       if (req.method !== 'GET') throw new HttpError(405, ERR.NOT_FOUND, 'Method not allowed', undefined, { url })
-      const execution = await codeMode.manager.load(executionId)
+      const execution = await governanceRuntime.executionManager.load(executionId)
       await authorizeExecution(execution, extracted.token, registry, url)
-      const inspection = await codeMode.manager.inspect(executionId)
+      const inspection = await governanceRuntime.executionManager.inspect(executionId)
       sendJson(res, 200, inspection)
       return true
     }
 
     if (req.method !== 'POST') throw new HttpError(405, ERR.NOT_FOUND, 'Method not allowed', undefined, { url })
-    const body = await readJsonBody(req)
+    const body = await readJsonBody(req, res)
     const action = body['action']
     if (action !== 'accept' && action !== 'decline' && action !== 'cancel') {
       throw new HttpError(400, ERR.INVALID_API_REQUEST, 'body.action must be one of accept, decline, cancel', undefined, { url })
     }
-    const approval = await codeMode.approvals.get(approvalId)
-    if (approval.executionId !== executionId) {
-      throw new HttpError(404, ERR.APPROVAL_NOT_FOUND, `Approval ${approvalId} does not belong to execution ${executionId}`, undefined, { url })
-    }
-    const execution = await codeMode.manager.load(executionId)
+    // Authorize on the execution first; only then look at the approval, and
+    // report one that belongs elsewhere exactly like an unknown one — the
+    // reply must not confirm that some other execution's approval exists.
+    const execution = await governanceRuntime.executionManager.load(executionId)
     await authorizeExecution(execution, extracted.token, registry, url)
-    const result = await codeMode.approvals.decide(approvalId, {
+    const approval = await governanceRuntime.approvals.get(approvalId)
+    if (approval.executionId !== executionId) {
+      throw new HttpError(404, ERR.APPROVAL_NOT_FOUND, `Unknown approval ${approvalId}`, undefined, { url, approvalExecutionId: approval.executionId })
+    }
+    const result = await governanceRuntime.approvals.decide(approvalId, {
       action,
       executionId,
       ...(typeof body['approve'] === 'boolean' ? { approve: body['approve'] } : {}),
@@ -79,7 +83,7 @@ export async function handleExecutionRoutes(
       via: 'http'
     })
     logger.info({ executionId, approvalId, outcome: result.outcome }, 'Approval decided via HTTP')
-    sendJson(res, 200, { approval: result.approval, outcome: result.outcome, executionStatus: (await codeMode.manager.load(executionId)).status })
+    sendJson(res, 200, { approval: result.approval, outcome: result.outcome, executionStatus: (await governanceRuntime.executionManager.load(executionId)).status })
     return true
   } catch (err) {
     if (err instanceof HttpError) throw err
@@ -123,32 +127,17 @@ async function authorizeExecution(
   }
 }
 
-function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length
-      if (size > MAX_BODY_BYTES) {
-        reject(new HttpError(413, ERR.INVALID_API_REQUEST, 'Request body too large'))
-        req.destroy()
-        return
-      }
-      chunks.push(chunk)
-    })
-    req.on('end', () => {
-      const text = Buffer.concat(chunks).toString('utf8')
-      if (!text.trim()) return resolve({})
-      try {
-        const parsed: unknown = JSON.parse(text)
-        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          return reject(new HttpError(400, ERR.INVALID_API_REQUEST, 'Request body must be a JSON object'))
-        }
-        resolve(parsed as Record<string, unknown>)
-      } catch {
-        reject(new HttpError(400, ERR.INVALID_API_REQUEST, 'Request body is not valid JSON'))
-      }
-    })
-    req.on('error', reject)
-  })
+async function readJsonBody(req: IncomingMessage, res: ServerResponse): Promise<Record<string, unknown>> {
+  const text = await readBoundedBody(req, res, MAX_BODY_BYTES)
+  if (!text.trim()) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new HttpError(400, ERR.INVALID_API_REQUEST, 'Request body is not valid JSON')
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new HttpError(400, ERR.INVALID_API_REQUEST, 'Request body must be a JSON object')
+  }
+  return parsed as Record<string, unknown>
 }

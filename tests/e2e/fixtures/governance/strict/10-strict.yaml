@@ -1,5 +1,7 @@
-# Rule set for the fail-closed instance (GOVERNANCE_DEFAULT_DECISION=DENY):
-# everything not listed here is denied.
+# Rule set for the fail-closed instance (GOVERNANCE_DEFAULT_DECISION=DENY).
+# The DENY default applies only to a call one of these rules targets but none
+# matches (NO_MATCHING_RULE) — e.g. a createOrder of 10000 or less. A call no
+# rule here targets is ungoverned and allowed (NO_GOVERNANCE), not denied.
 rules:
   - name: strict-allow-ping
     version: 1

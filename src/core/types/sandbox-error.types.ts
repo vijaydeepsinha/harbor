@@ -83,7 +83,7 @@ export class SandboxConcurrentLimitError extends SandboxError {
 }
 
 /** User code called `api.request()` with bad arguments — wrong shape, missing path, or invalid method. */
-export type InvalidApiRequestReason = 'bad-object' | 'bad-path' | 'bad-method'
+export type InvalidApiRequestReason = 'bad-object' | 'bad-path' | 'bad-method' | 'bad-params'
 
 export class SandboxInvalidApiRequestError extends SandboxError {
   constructor(

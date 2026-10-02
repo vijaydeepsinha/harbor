@@ -93,3 +93,46 @@ describe('ServiceRefresher', () => {
     expect(clearIntervalSpy).toHaveBeenCalled()
   })
 })
+
+describe('ServiceRefresher — refreshes never overlap, never land late, and keep spec and skills together', () => {
+  it('a slow load is not overtaken: overlapping ticks are skipped, so an older spec never lands after a newer one', async () => {
+    const releases: Array<() => void> = []
+    let version = 0
+    const loader: SpecLoaderStrategy = {
+      name: 'slow',
+      load: vi.fn(() => {
+        const v = ++version
+        return new Promise<OpenAPISpec>(resolve => { releases.push(() => resolve({ paths: { [`/v${v}`]: {} } })) })
+      })
+    }
+    const specStore = new SpecStore()
+    const refresher = new ServiceRefresher(loader, specStore, new SkillStore(), '/tmp/fake-svc', refreshConfig, silentLogger)
+    const first = refresher.forceRefresh()
+    const second = refresher.forceRefresh() // skipped while the first is in flight
+    releases.shift()!()
+    await Promise.all([first, second])
+    expect(loader.load).toHaveBeenCalledTimes(1)
+    expect(Object.keys(specStore.getSpec().paths ?? {})).toEqual(['/v1'])
+  })
+
+  it('nothing is swapped by a refresh that finishes after stop()', async () => {
+    let release!: () => void
+    const loader: SpecLoaderStrategy = { name: 'slow', load: () => new Promise<OpenAPISpec>(r => { release = () => r({ paths: { '/late': {} } }) }) }
+    const specStore = new SpecStore()
+    specStore.swap({ paths: { '/current': {} } })
+    const refresher = new ServiceRefresher(loader, specStore, new SkillStore(), '/tmp/fake-svc', refreshConfig, silentLogger)
+    const pending = refresher.forceRefresh()
+    refresher.stop()
+    release()
+    await pending
+    expect(Object.keys(specStore.getSpec().paths ?? {})).toEqual(['/current'])
+  })
+
+  it('a failed spec load keeps the skills as they were too', async () => {
+    const skillStore = new SkillStore()
+    skillStore.swap([{ id: 's', filename: 's.md', title: 's', tags: [], content: 'x' }])
+    const refresher = new ServiceRefresher(makeMockLoader(undefined, true), new SpecStore(), skillStore, '/tmp/definitely-no-skills-here', refreshConfig, silentLogger)
+    await refresher.forceRefresh()
+    expect(skillStore.getSkills().map(s => s.id)).toEqual(['s'])
+  })
+})

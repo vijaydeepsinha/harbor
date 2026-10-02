@@ -10,6 +10,8 @@ interface EndpointState {
   state: CircuitState
   failures: number
   openedAt?: number
+  /** When the one HALF_OPEN probe was let through; others are refused until it reports or recoveryTimeMs passes. */
+  probeAt?: number
 }
 
 export class CountBasedCircuitBreakerStrategy implements CircuitBreakerStrategy {
@@ -37,12 +39,25 @@ export class CountBasedCircuitBreakerStrategy implements CircuitBreakerStrategy 
     const key = this.normalizeEndpoint(endpoint)
     const s = this.getEndpointState(key)
 
+    const now = Date.now()
     if (s.state === 'OPEN') {
-      const elapsed = Date.now() - (s.openedAt ?? 0)
+      const elapsed = now - (s.openedAt ?? 0)
       if (elapsed < this.config.recoveryTimeMs) {
         throw new CircuitOpenError(endpoint, this.config.recoveryTimeMs - elapsed)
       }
       s.state = 'HALF_OPEN'
+      s.probeAt = now
+      return
+    }
+    if (s.state === 'HALF_OPEN') {
+      // One probe at a time: a recovering backend is not hit by every waiting
+      // caller at once. A probe whose outcome never came back (aborted) stops
+      // blocking after recoveryTimeMs.
+      const sinceProbe = now - (s.probeAt ?? 0)
+      if (sinceProbe < this.config.recoveryTimeMs) {
+        throw new CircuitOpenError(endpoint, this.config.recoveryTimeMs - sinceProbe)
+      }
+      s.probeAt = now
     }
   }
 

@@ -1,7 +1,30 @@
 # Code Mode Governance Layer — Gap Analysis and Implementation Plan
 
+> **Historical plan (2026-08-28).** Implemented on `main` via PR #4 and
+> changed since; kept as the record of the original analysis. Where it
+> disagrees with the code, [`docs/code-mode-governance.md`](../code-mode-governance.md)
+> and [`tests/REQUIREMENT_COVERAGE.md`](../../tests/REQUIREMENT_COVERAGE.md) are
+> authoritative. Notably, since this was written:
+>
+> - The host bridge is `src/runtime/sandbox/bridge-request-handler.ts`, and the
+>   replay/governance decisions live in `src/runtime/execution/activity-gate.ts`;
+>   the `file:line` references below point at the pre-PR #4 code.
+> - `GOVERNANCE_DEFAULT_DECISION` defaults to `DENY`, and only for calls some
+>   rule targets; calls no rule targets are allowed (`NO_GOVERNANCE`). Rules
+>   gained levels, `final`, method lists, `/**` subtrees and condition trees.
+> - A `memcache` store shares executions and the run lock across pods;
+>   registered store backends are selectable by `EXECUTION_STORE_TYPE`.
+>   `INTERRUPTED` joined the lifecycle states.
+> - Replay divergence also binds the concrete path, and — for approved,
+>   waiting and in-flight activities — the query and body.
+> - `ApiClient` retries only GET, PUT and DELETE; a POST or PATCH is sent once.
+> - Resume is `resolveExecution` → `ExecutionManager.beginRun`; there is no
+>   `ExecutionManager.resume()`. The sealed `requestState` also carries
+>   `userIdHash`, and `/executions` is bound to the execution's owner.
+> - The SDK is 2.0.0 (not 2.0.0-beta.4).
+
 Branch: `poc/aug28-governance` (from `mcp28_july_changes`). Requirements: [`requirements-aug28.md`](requirements-aug28.md).
-Written 2026-08-28 after reading the code on this branch; nothing below is assumed.
+Written 2026-08-28 after reading the code on that branch; nothing below is assumed.
 
 ## 1. What exists today (the Code Mode execution path)
 

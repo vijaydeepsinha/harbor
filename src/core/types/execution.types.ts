@@ -274,6 +274,22 @@ export class ApprovalNotFoundError extends ExecutionError {
   }
 }
 
+/** An `accept` must say `approve: true` or `approve: false`; anything else is not a decision (fail closed). */
+export class ApprovalAnswerInvalidError extends ExecutionError {
+  constructor(readonly approvalId: string) {
+    super(`Approval ${approvalId}: an accept must carry approve: true or approve: false`, ERR.INVALID_API_REQUEST, false)
+    this.name = 'ApprovalAnswerInvalidError'
+  }
+}
+
+/** The approval no longer governs anything: its execution finished, or its activity moved on without it. */
+export class ApprovalStaleError extends ExecutionError {
+  constructor(readonly approvalId: string, detail: string) {
+    super(`Approval ${approvalId} can no longer be decided: ${detail}`, ERR.EXECUTION_NOT_RESUMABLE, false)
+    this.name = 'ApprovalStaleError'
+  }
+}
+
 /** Approvals are single-use: a second decision on the same approval is refused, never re-applied. */
 export class ApprovalAlreadyDecidedError extends ExecutionError {
   constructor(readonly approvalId: string, readonly status: ApprovalStatus) {

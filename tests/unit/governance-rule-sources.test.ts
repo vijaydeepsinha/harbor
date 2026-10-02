@@ -8,15 +8,15 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pino from 'pino'
-import { DirectoryRuleSourceStrategy } from '../../src/spi/governance/strategies/directory-rule-source.strategy.js'
+import { DirectoryRuleSourceStrategy, GovernanceRulesDirectoryAbsentError } from '../../src/spi/governance/strategies/directory-rule-source.strategy.js'
 import { UrlRuleSourceStrategy } from '../../src/spi/governance/strategies/url-rule-source.strategy.js'
 import type { GovernanceRuleDocument, GovernanceRuleSource } from '../../src/spi/governance/rule-source.js'
 import { parseRuleDocuments, GovernanceRuleLoadError } from '../../src/runtime/governance/rule-loader.js'
 import { GovernanceRuleStore } from '../../src/runtime/governance/rule-store.js'
 import { GovernanceRuleRefresher } from '../../src/runtime/governance/rule-refresher.js'
 import { buildGovernanceRuleSource, registerGovernanceRuleSourceBackend } from '../../src/wiring/strategy-builders.js'
-import { buildCodeModeRuntime } from '../../src/runtime/execution/code-mode-runtime.js'
-import type { CodeModeConfig } from '../../src/core/types/config.types.js'
+import { buildGovernanceRuntime } from '../../src/runtime/execution/governance-runtime.js'
+import type { ExecutionConfig } from '../../src/core/types/config.types.js'
 import type { Logger } from '../../src/core/types/logger.types.js'
 import { GOVERNANCE_DECISION } from '../../src/core/constants.js'
 
@@ -61,7 +61,54 @@ describe('Governance Rule sources', () => {
     expect(source.name).toBe(`dir:${dir}`)
     const docs = await source.load()
     expect(docs.map(d => [d.name, d.format])).toEqual([['10-a.json', 'json'], ['20-b.yaml', 'yaml']])
-    expect(await new DirectoryRuleSourceStrategy(join(dir, 'missing')).load()).toEqual([])
+    // An absent directory is a failure, not "no rules" (the source contract): see the refresher test below.
+    await expect(new DirectoryRuleSourceStrategy(join(dir, 'missing')).load()).rejects.toBeInstanceOf(GovernanceRulesDirectoryAbsentError)
+  })
+
+  it('dir: a rules directory that disappears keeps the last valid set in force; it is picked up again once back', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'harbor-src-'))
+    const live = join(dir, 'rules')
+    mkdirSync(live)
+    writeFileSync(join(live, '10-a.yaml'), ruleYaml('a'))
+    const source = new DirectoryRuleSourceStrategy(live)
+    const store = new GovernanceRuleStore()
+    store.swap(parseRuleDocuments(await source.load()))
+    const refresher = new GovernanceRuleRefresher(source, store, 60, silent)
+    rmSync(live, { recursive: true }) // a volume remount / move-style deploy
+    expect(await refresher.refresh()).toBe('failed')
+    expect(store.getRules().map(r => r.rule.name)).toEqual(['a'])
+    mkdirSync(live)
+    writeFileSync(join(live, '10-a.yaml'), ruleYaml('a'))
+    writeFileSync(join(live, '20-b.yaml'), ruleYaml('b'))
+    expect(await refresher.refresh()).toBe('swapped')
+    expect(store.getRules().map(r => r.rule.name)).toEqual(['a', 'b'])
+  })
+
+  it('a refresh never replaces rules in force with an empty set (file renamed aside, URL answering rules: [])', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'harbor-src-'))
+    writeFileSync(join(dir, '10-a.yaml'), ruleYaml('a'))
+    const source = new DirectoryRuleSourceStrategy(dir)
+    const store = new GovernanceRuleStore()
+    store.swap(parseRuleDocuments(await source.load()))
+    const refresher = new GovernanceRuleRefresher(source, store, 60, silent)
+    rmSync(join(dir, '10-a.yaml')) // e.g. a deploy that moves the file aside before writing the new one
+    expect(await refresher.refresh()).toBe('failed')
+    expect(store.getRules().map(r => r.rule.name)).toEqual(['a'])
+    // From nothing to nothing is fine (boot with no rules, still none).
+    const empty = new GovernanceRuleStore()
+    expect(await new GovernanceRuleRefresher(source, empty, 60, silent).refresh()).toBe('unchanged')
+  })
+
+  it('dir: boot tolerates a directory that does not exist yet — no rules, and says so', async () => {
+    const warnings: string[] = []
+    const logger = { ...silent, warn: (_o: unknown, msg: string) => { warnings.push(msg) }, info: () => {}, error: () => {}, debug: () => {}, child: () => logger } as unknown as Logger
+    const governanceRuntime = await buildGovernanceRuntime({
+      store: { type: 'in-memory' },
+      governance: { rulesDir: join(tmpdir(), 'harbor-no-such-rules-' + Date.now()), defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600 }
+    } as ExecutionConfig, logger)
+    expect(governanceRuntime.rules.getRules()).toEqual([])
+    expect(warnings.some(w => w.includes('every call is ungoverned'))).toBe(true)
+    await governanceRuntime.shutdown()
   })
 
   describe('url', () => {
@@ -176,7 +223,7 @@ describe('Governance Rule sources', () => {
   })
 
   describe('wiring', () => {
-    const governance = (extra: Partial<CodeModeConfig['governance']>): CodeModeConfig['governance'] =>
+    const governance = (extra: Partial<ExecutionConfig['governance']>): ExecutionConfig['governance'] =>
       ({ rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600, ...extra })
 
     it('builds dir by default, url when configured (URL required), a registered type, and refuses an unknown one', () => {
@@ -191,23 +238,23 @@ describe('Governance Rule sources', () => {
     it('boot fails closed on an unreadable or invalid first load; then the configured refresh keeps rules current', async () => {
       dir = mkdtempSync(join(tmpdir(), 'harbor-src-'))
       writeFileSync(join(dir, 'bad.yaml'), 'name: bad\nmatch: { service: s }\naction: { type: MAYBE }\n')
-      const config = (g: Partial<CodeModeConfig['governance']>): CodeModeConfig => ({ store: { type: 'in-memory' }, governance: governance(g) })
-      await expect(buildCodeModeRuntime(config({ rulesDir: dir }), silent)).rejects.toThrow(GovernanceRuleLoadError)
-      await expect(buildCodeModeRuntime(config({ rulesSource: 'url', rulesUrl: 'http://127.0.0.1:1/rules.yaml', rulesUrlTimeoutMs: 500 }), silent)).rejects.toThrow()
+      const config = (g: Partial<ExecutionConfig['governance']>): ExecutionConfig => ({ store: { type: 'in-memory' }, governance: governance(g) })
+      await expect(buildGovernanceRuntime(config({ rulesDir: dir }), silent)).rejects.toThrow(GovernanceRuleLoadError)
+      await expect(buildGovernanceRuntime(config({ rulesSource: 'url', rulesUrl: 'http://127.0.0.1:1/rules.yaml', rulesUrlTimeoutMs: 500 }), silent)).rejects.toThrow()
 
       const { source, set } = mutableSource([doc('a.yaml', ruleYaml('a'))])
       registerGovernanceRuleSourceBackend('test-mutable', () => source)
       vi.useFakeTimers()
       try {
-        const runtime = await buildCodeModeRuntime(config({ rulesSource: 'test-mutable', rulesRefreshSec: 5 }), silent)
-        expect(runtime.rules.getRules().map(r => r.rule.name)).toEqual(['a'])
+        const governanceRuntime = await buildGovernanceRuntime(config({ rulesSource: 'test-mutable', rulesRefreshSec: 5 }), silent)
+        expect(governanceRuntime.rules.getRules().map(r => r.rule.name)).toEqual(['a'])
         set([doc('a.yaml', ruleYaml('a')), doc('b.yaml', ruleYaml('b'))])
         await vi.advanceTimersByTimeAsync(5_000)
-        expect(runtime.rules.getRules().map(r => r.rule.name)).toEqual(['a', 'b'])
-        await runtime.shutdown()
+        expect(governanceRuntime.rules.getRules().map(r => r.rule.name)).toEqual(['a', 'b'])
+        await governanceRuntime.shutdown()
         set([doc('c.yaml', ruleYaml('c'))])
         await vi.advanceTimersByTimeAsync(10_000)
-        expect(runtime.rules.getRules().map(r => r.rule.name)).toEqual(['a', 'b']) // stopped with the runtime
+        expect(governanceRuntime.rules.getRules().map(r => r.rule.name)).toEqual(['a', 'b']) // stopped with the runtime
       } finally {
         vi.useRealTimers()
       }

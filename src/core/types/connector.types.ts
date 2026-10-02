@@ -27,5 +27,12 @@ export interface ExecuteRequestContext {
   sessionId: string
   /** Sent as X-Harbor-Client-ID: the external caller's id from the inbound request, when it sent one. */
   clientId?: string
+  /**
+   * The endpoint identity the bridge used for this call — the OpenAPI
+   * template in a governed run — so the connector records breaker failures
+   * under the same key the bridge checks and credits. Absent ⇒ the
+   * connector derives one from the path.
+   */
+  endpoint?: string
   signal?: AbortSignal
 }

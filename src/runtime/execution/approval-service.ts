@@ -3,21 +3,27 @@
 
 import { v4 as uuidv4 } from 'uuid'
 import type { ElicitRequestFormParams } from '@modelcontextprotocol/server'
-import type { CodeModeStore } from '../../spi/execution/execution-store.js'
+import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
 import type { ExecutionManager } from './execution-manager.js'
 import {
   type ApprovalRecord,
   type ApprovalSummary,
   ApprovalNotFoundError,
   ApprovalAlreadyDecidedError,
+  ApprovalAnswerInvalidError,
+  ApprovalStaleError,
   ExecutionLockedError
 } from '../../core/types/execution.types.js'
 import { APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR, GOVERNANCE_REASON, type ApprovalStatus } from '../../core/constants.js'
 
 /** The three outcomes MCP elicitation distinguishes (§24), plus the form content. */
+const TERMINAL_EXECUTION_STATUSES: ReadonlySet<string> = new Set([
+  EXECUTION_STATUS.COMPLETED, EXECUTION_STATUS.FAILED, EXECUTION_STATUS.DENIED, EXECUTION_STATUS.CANCELLED
+])
+
 export interface ApprovalDecisionInput {
   action: 'accept' | 'decline' | 'cancel'
-  /** Form field: an `accept` with `approve: false` is a rejection, not an approval. */
+  /** Form field: `accept` approves only with `approve: true`; `approve: false` rejects; anything else is refused. */
   approve?: boolean
   comment?: string
   via: 'mcp-elicitation' | 'http'
@@ -52,7 +58,7 @@ export interface ApprovalElicitation {
  */
 export class ApprovalService {
   constructor(
-    private readonly store: CodeModeStore,
+    private readonly persistence: ExecutionPersistence,
     private readonly manager: ExecutionManager,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly newId: () => string = uuidv4
@@ -67,12 +73,12 @@ export class ApprovalService {
       summary,
       createdAt: this.now()
     }
-    await this.store.putApproval(approval)
+    await this.persistence.putApproval(approval)
     return approval
   }
 
   async get(approvalId: string): Promise<ApprovalRecord> {
-    const approval = await this.store.getApproval(approvalId)
+    const approval = await this.persistence.getApproval(approvalId)
     if (!approval) throw new ApprovalNotFoundError(approvalId)
     return approval
   }
@@ -88,7 +94,7 @@ export class ApprovalService {
     if (observed.status !== APPROVAL_STATUS.PENDING) {
       throw new ApprovalAlreadyDecidedError(approvalId, observed.status)
     }
-    if (!await this.store.acquireLock(observed.executionId)) {
+    if (!await this.persistence.acquireLock(observed.executionId)) {
       throw new ExecutionLockedError(observed.executionId)
     }
 
@@ -99,12 +105,25 @@ export class ApprovalService {
       }
       return await this.applyDecision(approval, input)
     } finally {
-      await this.store.releaseLock(observed.executionId)
+      await this.persistence.releaseLock(observed.executionId)
     }
   }
 
   private async applyDecision(approval: ApprovalRecord, input: ApprovalDecisionInput): Promise<ApprovalDecisionResult> {
-    const outcome = mapDecision(input)
+    const outcome = mapDecision(approval.approvalId, input)
+    // Under the lock, before anything changes: the approval must still be
+    // the question its execution is waiting on. A PENDING approval left on a
+    // finished execution, or one whose activity was re-asked under a new
+    // approval, would otherwise flip a COMPLETED execution to DENIED or
+    // CANCELLED, or rewrite another approval's activity.
+    const execution = await this.manager.load(approval.executionId)
+    if (TERMINAL_EXECUTION_STATUSES.has(execution.status)) {
+      throw new ApprovalStaleError(approval.approvalId, `execution ${execution.executionId} is ${execution.status}`)
+    }
+    const activity = await this.persistence.getActivity(approval.executionId, approval.activitySequence)
+    if (activity && (activity.status !== ACTIVITY_STATUS.WAITING_APPROVAL || activity.approvalId !== approval.approvalId)) {
+      throw new ApprovalStaleError(approval.approvalId, `activity #${approval.activitySequence} is ${activity.status}${activity.approvalId && activity.approvalId !== approval.approvalId ? ` under approval ${activity.approvalId}` : ''}`)
+    }
     const status: ApprovalStatus =
       outcome === 'APPROVED' ? APPROVAL_STATUS.APPROVED
       : outcome === 'REJECTED' ? APPROVAL_STATUS.REJECTED
@@ -116,16 +135,15 @@ export class ApprovalService {
       decidedVia: input.via,
       ...(input.comment ? { comment: input.comment } : {})
     }
-    await this.store.putApproval(decided)
+    await this.persistence.putApproval(decided)
 
-    const activity = await this.store.getActivity(approval.executionId, approval.activitySequence)
     if (activity) {
       activity.status =
         outcome === 'APPROVED' ? ACTIVITY_STATUS.APPROVED
         : outcome === 'REJECTED' ? ACTIVITY_STATUS.DENIED
         : ACTIVITY_STATUS.CANCELLED
       activity.updatedAt = decided.decidedAt as string
-      await this.store.putActivity(activity)
+      await this.persistence.putActivity(activity)
     }
 
     if (outcome === 'REJECTED') {
@@ -178,9 +196,17 @@ export class ApprovalService {
   }
 }
 
-function mapDecision(input: ApprovalDecisionInput): ApprovalDecisionResult['outcome'] {
+/**
+ * `accept` is a form submission, not a decision: its `approve` field is.
+ * Only `approve: true` approves; a missing or non-boolean value is refused
+ * rather than read as a yes (the form declares the field required).
+ */
+function mapDecision(approvalId: string, input: ApprovalDecisionInput): ApprovalDecisionResult['outcome'] {
   switch (input.action) {
-    case 'accept': return input.approve === false ? 'REJECTED' : 'APPROVED'
+    case 'accept':
+      if (input.approve === true) return 'APPROVED'
+      if (input.approve === false) return 'REJECTED'
+      throw new ApprovalAnswerInvalidError(approvalId)
     case 'decline': return 'REJECTED'
     case 'cancel': return 'CANCELLED'
   }

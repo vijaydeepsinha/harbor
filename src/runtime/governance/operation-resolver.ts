@@ -26,10 +26,17 @@ interface PathItemLike { [method: string]: unknown }
 /**
  * Resolves a concrete path to its OpenAPI template and `operationId` (§18)
  * so Governance Rules can target `operation: createCampaign` instead of raw
- * URLs. Matching is segment-by-segment: a literal segment must be equal, a
- * `{param}` segment captures exactly one segment. When several templates
- * match, the one with the most literal segments wins (`/users/me` beats
- * `/users/{id}`); ties keep spec order. The method must exist on the item.
+ * URLs. Matching is segment-by-segment on the percent-decoded segment: a
+ * literal segment must be equal, a `{param}` segment captures exactly one
+ * segment, and a segment mixing both (`{name}.json`, `{id}:cancel`) must fit
+ * its literal parts. When several templates match, the most specific wins —
+ * literal segments over mixed over `{param}` (`/users/me` beats
+ * `/users/{id}`) — then exact letter case, then spec order. The method must
+ * exist on the item.
+ *
+ * Literals also match ignoring letter case: many backends (Express by
+ * default, ASP.NET) route `/Orders/1` to `/orders/{id}`, and a call must not
+ * escape the rules on that operation just by changing case.
  *
  * Falls back to the digit-collapsing `normalizeEndpointPath` heuristic only
  * when the spec has no match, and says so via `matched: false`.
@@ -43,30 +50,27 @@ export function resolveOperation(
   const paths = (spec.paths ?? {}) as Record<string, PathItemLike | undefined>
   const lowerMethod = method.toLowerCase()
 
-  let best: { template: string; literals: number; params: Record<string, string>; item: PathItemLike } | undefined
+  let best: { template: string; score: number; exact: number; params: Record<string, string>; item: PathItemLike } | undefined
   for (const [template, item] of Object.entries(paths)) {
     if (!item || typeof item !== 'object') continue
     if (!(lowerMethod in item)) continue
     const segs = splitPath(template)
     if (segs.length !== concrete.length) continue
     const params: Record<string, string> = {}
-    let literals = 0
+    let score = 0
+    let exact = 0
     let ok = true
     for (let i = 0; i < segs.length; i++) {
-      const t = segs[i] as string
-      const c = concrete[i] as string
-      const param = /^\{([^}]+)\}$/.exec(t)
-      if (param) {
-        params[param[1] as string] = safeDecode(c)
-      } else if (t === c) {
-        literals++
-      } else {
-        ok = false
-        break
-      }
+      const fit = matchSegment(segs[i] as string, safeDecode(concrete[i] as string))
+      if (!fit) { ok = false; break }
+      Object.assign(params, fit.params)
+      score += fit.specificity
+      if (fit.exactCase) exact++
     }
     if (!ok) continue
-    if (!best || literals > best.literals) best = { template, literals, params, item }
+    if (!best || score > best.score || (score === best.score && exact > best.exact)) {
+      best = { template, score, exact, params, item }
+    }
   }
 
   if (!best) {
@@ -92,6 +96,41 @@ function stripQuery(path: string): string {
 /** `/a/b/` → ['a','b']; 'a/b' → ['a','b']; '/' → []. Query strings are ignored. */
 function splitPath(path: string): string[] {
   return stripQuery(path).split('/').filter(seg => seg.length > 0)
+}
+
+/** How one template segment fits one decoded concrete segment; `undefined` when it does not. */
+interface SegmentFit {
+  /** literal 2, mixed literal+param 1, whole `{param}` 0 */
+  specificity: number
+  exactCase: boolean
+  params: Record<string, string>
+}
+
+const WHOLE_PARAM = /^\{([^}]+)\}$/
+const PARAM = /\{([^}]+)\}/g
+
+function matchSegment(template: string, decoded: string): SegmentFit | undefined {
+  const whole = WHOLE_PARAM.exec(template)
+  if (whole) return { specificity: 0, exactCase: true, params: { [whole[1] as string]: decoded } }
+  if (!template.includes('{')) {
+    if (template === decoded) return { specificity: 2, exactCase: true, params: {} }
+    return template.toLowerCase() === decoded.toLowerCase() ? { specificity: 2, exactCase: false, params: {} } : undefined
+  }
+  // Mixed: literal parts escaped, each {name} captures a non-empty run.
+  const names: string[] = []
+  const source = template.split(PARAM).map((part, i) => {
+    if (i % 2 === 1) { names.push(part); return '(.+?)' }
+    return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }).join('')
+  for (const [flags, exactCase] of [['', true], ['i', false]] as const) {
+    const m = new RegExp(`^${source}$`, flags).exec(decoded)
+    if (m) {
+      const params: Record<string, string> = {}
+      names.forEach((name, i) => { params[name] = m[i + 1] as string })
+      return { specificity: 1, exactCase, params }
+    }
+  }
+  return undefined
 }
 
 function safeDecode(seg: string): string {

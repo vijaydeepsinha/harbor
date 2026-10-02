@@ -221,6 +221,10 @@ export const PATH_SUBTREE_SUFFIX = '/**'
 const pathPattern = matchValue.refine(
   p => !p.includes('**') || (p.endsWith(PATH_SUBTREE_SUFFIX) && !p.slice(0, -PATH_SUBTREE_SUFFIX.length).includes('*')),
   { message: '"**" is only allowed as the whole last segment, e.g. /campaigns/**' }
+).refine(
+  // A template without the leading slash (`campaigns/{id}`) can never equal a resolved one: it would load and govern nothing.
+  p => p === '*' || p.startsWith('/'),
+  { message: 'a path is an OpenAPI template starting with "/" (e.g. /campaigns/{id}), a subtree (/campaigns/**) or *' }
 )
 
 export const governanceRuleSchema = z.object({

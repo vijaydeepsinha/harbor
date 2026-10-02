@@ -4,19 +4,19 @@ Minimum configuration to expose a backend API to an AI client.
 
 ## What you need
 
-Each service is a folder under `SERVICES_DIR` with three files:
+Each service is a folder under `SERVICES_DIR` (default: the repo's `services/`); the folder name is the service name:
 
-- `spec.yaml` — OpenAPI 3.x description of your API
-- `config.json` — host, port, auth strategy, circuit breaker, idempotency settings
+- `spec.yaml` (or `spec.json` / `spec.yml`) — OpenAPI 3.x description of your API
+- `config.json` — required, with at least an `auth` block; also host, port, circuit breaker, idempotency settings
 - `skills/<name>.md` — optional guidance the AI reads before making calls
 
-The demo already has three complete examples of this pattern under `services/` (product, order, tasks). Start there.
+The demo already has complete examples of this pattern under `services/`: four enabled (product, order, tasks, irctc) and three `billing` variants disabled for the OAuth mode. Start there.
 
 ## What the AI sees after discovery
 
 ```json
 [
-  { "service": "tasks", "description": "Task management — create, assign, and complete tasks." }
+  { "service": "tasks", "description": "Task management service — create, update, and track tasks. …" }
 ]
 ```
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { CodeModeStore } from '../../spi/execution/execution-store.js'
+import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
 import {
   type ActivityRecord,
   type ActivityRequestRecord,
@@ -9,6 +9,19 @@ import {
   ReplayDivergedError
 } from '../../core/types/execution.types.js'
 import { ACTIVITY_STATUS, type AllowedHttpMethod } from '../../core/constants.js'
+
+/** Records whose request is about to be executed or is in front of a human: they bind query and body too. */
+const CONTENT_BOUND: ReadonlySet<string> = new Set([
+  ACTIVITY_STATUS.APPROVED, ACTIVITY_STATUS.WAITING_APPROVAL, ACTIVITY_STATUS.EXECUTING
+])
+
+/** Key-order-independent JSON, so `{a,b}` and `{b,a}` are the same request. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v !== null && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v) ?? 'undefined'
+}
 
 /** A call as audit, progress and the circuit breaker identify it: method + endpoint (OpenAPI template or normalized path). */
 export interface CallIdentity {
@@ -78,7 +91,7 @@ export class ActivityJournal extends CallLog {
   private cursor = 0
 
   constructor(
-    private readonly store: CodeModeStore,
+    private readonly persistence: ExecutionPersistence,
     readonly executionId: string,
     readonly service: string,
     /** 1-based index of the sandbox run driving this journal (execution.runCount). */
@@ -95,19 +108,37 @@ export class ActivityJournal extends CallLog {
 
   /**
    * Assigns the next sequence to an encountered call and returns the record
-   * already journaled at that sequence, if any. A record whose method or
-   * resolved path differs from the encountered call is a replay divergence
-   * and fails closed (§29): nothing is executed under the old history.
+   * already journaled at that sequence, if any. A mismatch with that record
+   * is a replay divergence and fails closed (§29): nothing is executed under
+   * the old history.
+   *
+   * What must match depends on what the record is about to authorise. Every
+   * record: method, resolved template and concrete path — a replayed response
+   * must belong to the same resource. A record that will be *executed* or
+   * *shown to a human* (APPROVED, WAITING_APPROVAL, an EXECUTING safe call):
+   * query and body as well. An approval is for the request the human saw;
+   * a program that reaches the same sequence with another resource, amount
+   * or filter (a clock-dependent branch, or `Promise.all` siblings arriving
+   * in a different order) must not inherit it.
    */
   async next(request: ActivityRequestRecord): Promise<{ sequence: number; existing?: ActivityRecord }> {
     const sequence = ++this.cursor
-    const existing = await this.store.getActivity(this.executionId, sequence)
+    const existing = await this.persistence.getActivity(this.executionId, sequence)
     if (!existing) return { sequence }
-    if (existing.request.method !== request.method || existing.request.specPath !== request.specPath) {
+    const existingRequest = existing.request
+    const diverged =
+      existingRequest.method !== request.method || existingRequest.specPath !== request.specPath || existingRequest.rawPath !== request.rawPath
+        ? 'path'
+        : CONTENT_BOUND.has(existing.status) &&
+          (canonicalJson(existingRequest.query) !== canonicalJson(request.query) || canonicalJson(existingRequest.body) !== canonicalJson(request.body))
+          ? 'content'
+          : undefined
+    if (diverged) {
+      const suffix = diverged === 'content' ? ' (query/body differ from the recorded request)' : ''
       throw new ReplayDivergedError(
         this.executionId, sequence,
-        `${existing.request.method} ${existing.request.specPath}`,
-        `${request.method} ${request.specPath}`
+        `${existingRequest.method} ${existingRequest.rawPath}`,
+        `${request.method} ${request.rawPath}${suffix}`
       )
     }
     return { sequence, existing }
@@ -126,7 +157,7 @@ export class ActivityJournal extends CallLog {
       record.response = response
       delete record.failure
       record.updatedAt = this.now()
-      await this.store.putActivity(record)
+      await this.persistence.putActivity(record)
     }
     await super.recordResponse(call, response, sequence)
   }
@@ -143,7 +174,7 @@ export class ActivityJournal extends CallLog {
         record.status = ACTIVITY_STATUS.FAILED
         record.failure = { code: failure.code, message: failure.message, outcomeKnown: false }
         record.updatedAt = this.now()
-        await this.store.putActivity(record)
+        await this.persistence.putActivity(record)
       }).catch(() => {})
     }
     await super.recordFailure(call, failure, executingSequence)
@@ -163,7 +194,7 @@ export class ActivityJournal extends CallLog {
     status: ActivityRecord['status'],
     approvalId?: string
   ): Promise<ActivityRecord> {
-    const existing = await this.store.getActivity(this.executionId, sequence)
+    const existing = await this.persistence.getActivity(this.executionId, sequence)
     const at = this.now()
     const record: ActivityRecord = {
       executionId: this.executionId,
@@ -176,12 +207,12 @@ export class ActivityJournal extends CallLog {
       updatedAt: at,
       ...(approvalId ?? existing?.approvalId ? { approvalId: approvalId ?? existing?.approvalId } : {})
     }
-    await this.store.putActivity(record)
+    await this.persistence.putActivity(record)
     return record
   }
 
   private async mustGet(sequence: number): Promise<ActivityRecord> {
-    const record = await this.store.getActivity(this.executionId, sequence)
+    const record = await this.persistence.getActivity(this.executionId, sequence)
     if (!record) throw new Error(`Activity #${sequence} of ${this.executionId} is not journaled`)
     return record
   }

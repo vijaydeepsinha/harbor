@@ -113,7 +113,7 @@ describe('registerGetSkillDetailsTool', () => {
     expect(body.code).toBe(ERR.UNKNOWN_SERVICE)
     expect(metrics.increment).toHaveBeenCalledWith(METRIC.TOOL_CALLS, {
       tool: TOOL.GET_SKILL_DETAILS,
-      service: 'ghost',
+      service: 'unknown', // never the caller's made-up name: one series, however many names are tried
       outcome: OUTCOME.ERROR
     })
   })

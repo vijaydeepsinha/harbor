@@ -31,7 +31,7 @@ import {
   ActivityOutcomeUnknownError,
   ApprovalAlreadyDecidedError
 } from '../core/types/execution.types.js'
-import type { CodeModeRuntime } from '../runtime/execution/code-mode-runtime.js'
+import type { GovernanceRuntime } from '../runtime/execution/governance-runtime.js'
 import type { ResumeState } from '../runtime/execution/request-state.js'
 import { ActivityJournal, CallLog, type CallLogSource } from '../runtime/execution/activity-journal.js'
 import { resolveOperation } from '../runtime/governance/operation-resolver.js'
@@ -45,7 +45,7 @@ import {
 } from './tool-helpers.js'
 import {
   TOOL, LOG_PREFIX, METRIC, OUTCOME, ERR,
-  EXECUTION_STATUS, GOVERNANCE_DECISION,
+  EXECUTION_STATUS, GOVERNANCE_DECISION, APPROVAL_STATUS,
   EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY, APPROVAL_ID_META_KEY, APPROVAL_INPUT_KEY
 } from '../core/constants.js'
 import type { AuditOutcome, ExecutionStatus } from '../core/constants.js'
@@ -53,17 +53,17 @@ import { ensureError, errorCode as getErrorCode, errorRetryable } from '../core/
 import { hashAuthenticatedPrincipal } from '../core/utils/user-id-hash.js'
 
 export function registerExecuteApiTool(
-  server: McpServer,
-  registry: ServiceRegistry,
-  globalConfig: GlobalConfig,
-  logger: Logger,
-  metrics: MetricsCollector,
-  clientToken?: string,
-  /** Absent ⇒ legacy behaviour: no durable execution, no governance. */
-  codeMode?: CodeModeRuntime,
-  /** Where audit records go (AUDIT_SINKS). Absent ⇒ written to the service logger, as before. */
+    server: McpServer,
+    registry: ServiceRegistry,
+    globalConfig: GlobalConfig,
+    logger: Logger,
+    metrics: MetricsCollector,
+    clientToken?: string,
+    /** Absent ⇒ legacy behaviour: no durable execution, no governance. */
+  governanceRuntime?: GovernanceRuntime,
+    /** Where audit records go (AUDIT_SINKS). Absent ⇒ written to the service logger, as before. */
   auditPipeline?: AuditPipeline,
-  /** The caller's X-Harbor-Client-ID from the inbound request, forwarded on every backend call. */
+    /** The caller's X-Harbor-Client-ID from the inbound request, forwarded on every backend call. */
   callerClientId?: string
 ): void {
   const serviceNames = registry.serviceNames()
@@ -198,6 +198,8 @@ async () => {
       let executionId: string | undefined
       // True once beginRun took the run lock — only then is there a run to end.
       let runStarted = false
+      // What actually runs: the persisted original on a resume (the incoming code is ignored then).
+      let program = code
       let userIdHash = 'unknown'
 
       const audit = (extra: Partial<Parameters<typeof writeAuditRecord>[0]>, codeSubmitted: string): void => {
@@ -242,23 +244,41 @@ async () => {
         let execution: ExecutionRecord | undefined
         let bridge: ExecutionBridge | undefined
         let pendingRetry: InputRequiredResult | undefined
-        if (codeMode) {
-          const resumed = await resolveExecution(codeMode, ctx, { service, code, userIdHash }, logger, correlationId)
-          if ('error' in resumed) return resumed.error
+        if (governanceRuntime) {
+          const resumed = await resolveExecution(governanceRuntime, ctx, { service, code, userIdHash }, logger, correlationId)
+          if ('error' in resumed) {
+            // Refused, or the answer itself ended the execution (decline, cancel): nothing ran, but the
+            // decision is part of the audit trail. codeSubmitted stays what this caller sent — never
+            // the persisted program, which may belong to someone else.
+            executionId = resumed.executionId
+            const refusedCode = toolErrorCode(resumed.error)
+            outcome = refusedCode === ERR.GOVERNANCE_DENIED ? OUTCOME.GOVERNANCE_DENIED
+              : refusedCode === ERR.EXECUTION_CANCELLED ? OUTCOME.EXECUTION_CANCELLED
+              : OUTCOME.ERROR
+            audit({ outcome, errorCode: refusedCode, userIdHash: 'unknown' }, code)
+            return resumed.error
+          }
           if ('reprompt' in resumed) pendingRetry = resumed.reprompt
           execution = resumed.execution
           executionId = execution.executionId
           if (pendingRetry) return pendingRetry
-          execution = await codeMode.manager.beginRun(execution.executionId)
+          execution = await governanceRuntime.executionManager.beginRun(execution.executionId)
           runStarted = true
-          bridge = makeBridge(codeMode, execution, svcResources, userIdHash)
+          bridge = makeBridge(governanceRuntime, execution, svcResources, userIdHash)
           callLog = bridge.journal
         }
-        const program = execution?.originalCode ?? code
+        program = execution?.originalCode ?? code
 
         logger.info({ correlationId, service, executionId, step: '3/4 sandbox-run' }, `${LOG_PREFIX.MCP} Executing code in V8 sandbox...`)
+        // A governed run's calls are keyed by the execution (the bridge adds
+        // the activity sequence): two executions of the same program are two
+        // intents and must never share a key, while a resume of one keeps it.
+        // Without an execution (legacy) the key is per user + program, so an
+        // agent retrying the identical tool call is deduplicated.
         const codeHash = createHash('sha256').update(program).digest('hex').slice(0, 16)
-        const idempotencyKey = `mcp-${service}-${userIdHash.slice(0, 12)}-${codeHash}`
+        const idempotencyKey = executionId !== undefined
+          ? `mcp-${service}-${executionId}`
+          : `mcp-${service}-${userIdHash.slice(0, 12)}-${codeHash}`
 
         const sandboxCtx: SandboxExecutionContext = {
           tokenPayload, invalidate, apiClient, circuitBreaker, permissionGuard,
@@ -273,8 +293,8 @@ async () => {
         }
         const result = await runApiInSandbox(program, sandboxCtx)
 
-        if (codeMode && execution) {
-          await codeMode.manager.endRun(execution.executionId, { kind: 'completed', result })
+        if (governanceRuntime && execution) {
+          await governanceRuntime.executionManager.endRun(execution.executionId, { kind: 'completed', result })
         }
 
         const durationMs = Date.now() - startTime
@@ -351,7 +371,7 @@ async () => {
 
         // ── Persist the run outcome and, for approvals, hand the question to the client ──
         let approvalId: string | undefined
-        if (codeMode && executionId && status) {
+        if (governanceRuntime && executionId && status) {
           const outcomeForStore =
             err instanceof ApprovalRequiredError ? { kind: 'waitingApproval' as const, approvalId: err.approvalId }
             : status === EXECUTION_STATUS.DENIED ? { kind: 'denied' as const, code: errorCode, message: errObj.message }
@@ -362,18 +382,18 @@ async () => {
           // pending) — then no run started, there is no lock to release and the
           // stored execution must stay exactly as it was.
           if (runStarted) {
-            await codeMode.manager.endRun(executionId, outcomeForStore).catch(e =>
+            await governanceRuntime.executionManager.endRun(executionId, outcomeForStore).catch(e =>
               logger.error({ correlationId, executionId, error: ensureError(e).message }, 'Failed to persist run outcome'))
           }
           if (err instanceof ApprovalRequiredError) {
             approvalId = err.approvalId
-            audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, code)
-            return await approvalResult(codeMode, ctx, err, userIdHash, logger, correlationId)
+            audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, program)
+            return await approvalResult(governanceRuntime, ctx, err, userIdHash, logger, correlationId)
           }
         }
 
         // Error-path audit keeps the pre-existing shape (userIdHash 'unknown'); see docs/code-mode-governance.md → limitations.
-        audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, code)
+        audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, program)
 
         // Attach structured progress (per-call status + ids extracted from
         // successful POST responses) so the caller can resume a failed
@@ -384,12 +404,18 @@ async () => {
           ...(progressCollector.hasAny() ? { progress: progressCollector.summary() } : {}),
           ...(executionId !== undefined ? { executionId } : {})
         }
+        // When no run started (beginRun refused: locked, finished, approval
+        // still pending) nothing changed, so `_meta` reports the execution as
+        // it is stored — not the status this error would have given a run.
+        const reportedStatus = runStarted || !governanceRuntime || executionId === undefined
+          ? status
+          : await governanceRuntime.executionManager.load(executionId).then(r => r.status, () => undefined)
         return mcpError(
           errObj.message,
           errorCode,
           errorRetryable(err),
           Object.keys(extra).length ? extra : undefined,
-          executionMeta(executionId, status, approvalId)
+          executionMeta(executionId, reportedStatus, approvalId)
         )
       }
     }
@@ -397,6 +423,20 @@ async () => {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+/** The `code` an mcpError carries in its JSON text. */
+function toolErrorCode(response: ToolResponse): string {
+  try {
+    const body = JSON.parse(response.content[0]?.text ?? '{}') as { code?: unknown }
+    return typeof body.code === 'string' ? body.code : ERR.UNKNOWN
+  } catch {
+    return ERR.UNKNOWN
+  }
+}
+
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  EXECUTION_STATUS.COMPLETED, EXECUTION_STATUS.FAILED, EXECUTION_STATUS.DENIED, EXECUTION_STATUS.CANCELLED
+])
 
 /** Loose view of the handler context fields the governance layer reads (all untrusted, all optional). */
 interface ResumeContextView {
@@ -419,7 +459,8 @@ function executionMeta(executionId?: string, status?: ExecutionStatus, approvalI
 type ResolvedExecution =
   | { execution: ExecutionRecord }
   | { execution: ExecutionRecord; reprompt: InputRequiredResult }
-  | { error: ToolResponse }
+  /** The resume was refused or the human's answer ended it; nothing ran. */
+  | { error: ToolResponse; executionId: string }
 
 /**
  * Decides which execution this call belongs to (§6, §7, §26):
@@ -429,7 +470,7 @@ type ResolvedExecution =
  * Incoming `code` is ignored on resume.
  */
 async function resolveExecution(
-  rt: CodeModeRuntime,
+  governanceRuntime: GovernanceRuntime,
   ctx: ServerContext,
   input: { service: string; code: string; userIdHash: string },
   logger: Logger,
@@ -441,23 +482,23 @@ async function resolveExecution(
   const resumeId = state?.executionId ?? (typeof metaId === 'string' ? metaId : undefined)
 
   if (resumeId === undefined) {
-    const execution = await rt.manager.create({ service: input.service, code: input.code, userIdHash: input.userIdHash })
+    const execution = await governanceRuntime.executionManager.create({ service: input.service, code: input.code, userIdHash: input.userIdHash })
     logger.info({ correlationId, executionId: execution.executionId }, 'Code Mode execution created')
     return { execution }
   }
 
   let execution: ExecutionRecord
   try {
-    execution = await rt.manager.load(resumeId)
+    execution = await governanceRuntime.executionManager.load(resumeId)
   } catch (err) {
-    return { error: mcpError(ensureError(err).message, getErrorCode(err), false) }
+    return { executionId: resumeId, error: mcpError(ensureError(err).message, getErrorCode(err), errorRetryable(err)) }
   }
   // Principal binding: the sealed state and the stored execution both name the caller.
   if ((state && state.userIdHash !== input.userIdHash) || execution.userIdHash !== input.userIdHash) {
-    return { error: mcpError('This execution belongs to a different principal', ERR.EXECUTION_NOT_RESUMABLE, false) }
+    return { executionId: resumeId, error: mcpError('This execution belongs to a different principal', ERR.EXECUTION_NOT_RESUMABLE, false) }
   }
   if (execution.service !== input.service) {
-    return { error: mcpError(`Execution ${resumeId} runs against service "${execution.service}", not "${input.service}"`, ERR.EXECUTION_NOT_RESUMABLE, false) }
+    return { executionId: resumeId, error: mcpError(`Execution ${resumeId} runs against service "${execution.service}", not "${input.service}"`, ERR.EXECUTION_NOT_RESUMABLE, false) }
   }
   if (execution.originalCode !== undefined && input.code !== execution.originalCode) {
     logger.warn({ correlationId, executionId: resumeId }, 'Resume carried different code — ignored; the persisted original program is authoritative')
@@ -469,7 +510,7 @@ async function resolveExecution(
     if (answer.kind === 'elicit') {
       try {
         const content = answer.content ?? {}
-        const decided = await rt.approvals.decide(state.approvalId, {
+        const decided = await governanceRuntime.approvals.decide(state.approvalId, {
           action: answer.action,
           executionId: state.executionId,
           ...(typeof content['approve'] === 'boolean' ? { approve: content['approve'] } : {}),
@@ -479,29 +520,46 @@ async function resolveExecution(
         logger.info({ correlationId, executionId: resumeId, approvalId: state.approvalId, outcome: decided.outcome }, 'Approval decided via MCP elicitation')
         // The human's answer may end the execution here and now — report that consequence, not a failed resume.
         if (decided.outcome === 'REJECTED') {
-          return { error: mcpError(
+          return { executionId: resumeId, error: mcpError(
             `Approval rejected for activity #${state.activitySequence}; the execution is denied and the operation was not executed.`,
             ERR.GOVERNANCE_DENIED, false, { executionId: resumeId, approvalId: state.approvalId },
             executionMeta(resumeId, EXECUTION_STATUS.DENIED, state.approvalId)
           ) }
         }
         if (decided.outcome === 'CANCELLED') {
-          return { error: mcpError(
+          return { executionId: resumeId, error: mcpError(
             `Approval cancelled for activity #${state.activitySequence}; the execution is cancelled and the operation was not executed.`,
             ERR.EXECUTION_CANCELLED, false, { executionId: resumeId, approvalId: state.approvalId },
             executionMeta(resumeId, EXECUTION_STATUS.CANCELLED, state.approvalId)
           ) }
         }
       } catch (err) {
-        // A duplicate retry after the decision was applied is harmless; anything else is not.
-        if (!(err instanceof ApprovalAlreadyDecidedError)) return { error: mcpError(ensureError(err).message, getErrorCode(err), false) }
+        if (!(err instanceof ApprovalAlreadyDecidedError)) {
+          return { executionId: resumeId, error: mcpError(ensureError(err).message, getErrorCode(err), errorRetryable(err), undefined, executionMeta(resumeId, execution.status)) }
+        }
+        // Already decided. A retry carrying the *same* answer (the client
+        // retried after a lost response) resumes; a different answer — a
+        // decline arriving after an HTTP approve — must not quietly run the
+        // approved call on the decliner's behalf.
+        const recorded = err.status
+        const asked = answer.action === 'cancel' ? APPROVAL_STATUS.CANCELLED
+          : answer.action === 'decline' || answer.content?.['approve'] === false ? APPROVAL_STATUS.REJECTED
+          : APPROVAL_STATUS.APPROVED
+        // Only while the execution could still run: a finished one is refused below as not resumable.
+        if (recorded !== asked && !TERMINAL_STATUSES.has(execution.status)) {
+          return { executionId: resumeId, error: mcpError(
+            `${err.message}; this answer (${asked}) was not applied and nothing was executed.`,
+            ERR.APPROVAL_ALREADY_DECIDED, false, { executionId: resumeId, approvalId: state.approvalId },
+            executionMeta(resumeId, execution.status, state.approvalId)
+          ) }
+        }
       }
-      execution = await rt.manager.load(resumeId)
+      execution = await governanceRuntime.executionManager.load(resumeId)
     } else if (execution.status === EXECUTION_STATUS.WAITING_APPROVAL) {
       // The client retried without answering: ask again (spec allows repeated input_required).
-      const approval = await rt.approvals.get(state.approvalId)
+      const approval = await governanceRuntime.approvals.get(state.approvalId)
       if (approval.status === 'PENDING') {
-        const reprompt = await buildInputRequired(rt, ctx, approval.approvalId, state)
+        const reprompt = await buildInputRequired(governanceRuntime, ctx, approval.approvalId, state)
         return { execution, reprompt }
       }
     }
@@ -522,28 +580,28 @@ function safeRequestState(view: ResumeContextView): ResumeState | undefined {
 }
 
 /** The hooks the bridge calls: OpenAPI resolution and governance for new activities. */
-function makeBridge(rt: CodeModeRuntime, execution: ExecutionRecord, svc: ServiceResources, _userIdHash: string): ExecutionBridge {
-  const journal = new ActivityJournal(rt.store, execution.executionId, svc.name, execution.runCount)
+function makeBridge(governanceRuntime: GovernanceRuntime, execution: ExecutionRecord, svc: ServiceResources, _userIdHash: string): ExecutionBridge {
+  const journal = new ActivityJournal(governanceRuntime.persistence, execution.executionId, svc.name, execution.runCount)
   return {
     journal,
     resolve: (method, rawPath) => resolveOperation(svc.specStore.getSpec(), method, rawPath),
     decide: async (sequence: number, request: ActivityRequestRecord): Promise<GovernanceVerdict> => {
-      const outcome = evaluateGovernance(rt.rules.getRules(), {
+      const outcome = evaluateGovernance(governanceRuntime.rules.getRules(), {
         executionId: execution.executionId, activitySequence: sequence, service: svc.name,
         method: request.method, specPath: request.specPath,
         ...(request.operationId !== undefined ? { operationId: request.operationId } : {}),
         ...(request.pathParams !== undefined ? { pathParams: request.pathParams } : {}),
         ...(request.query !== undefined ? { query: request.query } : {}),
         ...(request.body !== undefined ? { body: request.body } : {})
-      }, rt.config.governance.defaultDecision)
-      await rt.store.putDecision({
+      }, governanceRuntime.executionConfig.governance.defaultDecision)
+      await governanceRuntime.persistence.putDecision({
         executionId: execution.executionId, activitySequence: sequence,
         decision: outcome.decision, reason: outcome.reason,
         matchedRules: outcome.matchedRules, ruleVersions: outcome.ruleVersions,
         ...(outcome.decidingRule !== undefined ? { decidingRule: outcome.decidingRule } : {}),
         evaluatedAt: new Date().toISOString()
       })
-      await rt.manager.recordProgress(execution.executionId, sequence)
+      await governanceRuntime.executionManager.recordProgress(execution.executionId, sequence)
       switch (outcome.decision) {
         case GOVERNANCE_DECISION.ALLOW:
           return { decision: 'ALLOW' }
@@ -558,7 +616,7 @@ function makeBridge(rt: CodeModeRuntime, execution: ExecutionRecord, svc: Servic
             ...(request.body !== undefined ? { body: request.body } : {}),
             reason: outcome.reason, matchedRules: outcome.matchedRules
           }
-          const approval = await rt.approvals.request(execution.executionId, sequence, summary)
+          const approval = await governanceRuntime.approvals.request(execution.executionId, sequence, summary)
           return { decision: 'REQUIRE_APPROVAL', approvalId: approval.approvalId, summary }
         }
       }
@@ -568,7 +626,7 @@ function makeBridge(rt: CodeModeRuntime, execution: ExecutionRecord, svc: Servic
 
 /** Either an MRTR `input_required` (client supports elicitation) or an APPROVAL_REQUIRED error with the ids in `_meta`. */
 async function approvalResult(
-  rt: CodeModeRuntime,
+  governanceRuntime: GovernanceRuntime,
   ctx: ServerContext,
   err: ApprovalRequiredError,
   userIdHash: string,
@@ -579,7 +637,7 @@ async function approvalResult(
   const supportsElicitation = caps !== undefined && caps['elicitation'] !== undefined && caps['elicitation'] !== null
   if (supportsElicitation) {
     logger.info({ correlationId, executionId: err.executionId, approvalId: err.approvalId }, 'Execution paused — approval requested via MCP elicitation')
-    return buildInputRequired(rt, ctx, err.approvalId, {
+    return buildInputRequired(governanceRuntime, ctx, err.approvalId, {
       executionId: err.executionId, approvalId: err.approvalId, activitySequence: err.activitySequence, userIdHash
     })
   }
@@ -594,10 +652,10 @@ async function approvalResult(
   )
 }
 
-async function buildInputRequired(rt: CodeModeRuntime, ctx: ServerContext, approvalId: string, state: ResumeState): Promise<InputRequiredResult> {
-  const approval = await rt.approvals.get(approvalId)
-  const elicitation = rt.approvals.buildElicitation(approval)
-  const requestState = await rt.requestState.mint(state, ctx)
+async function buildInputRequired(governanceRuntime: GovernanceRuntime, ctx: ServerContext, approvalId: string, state: ResumeState): Promise<InputRequiredResult> {
+  const approval = await governanceRuntime.approvals.get(approvalId)
+  const elicitation = governanceRuntime.approvals.buildElicitation(approval)
+  const requestState = await governanceRuntime.requestState.mint(state, ctx)
   const result = inputRequired({
     inputRequests: { [APPROVAL_INPUT_KEY]: inputRequired.elicit({ mode: 'form', ...elicitation }) },
     requestState

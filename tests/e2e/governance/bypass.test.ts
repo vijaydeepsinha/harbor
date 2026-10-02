@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest'
 import { useScenario } from '../helpers/diagnostics.js'
 import { expectCompleted, expectPaused, expectToolError } from '../helpers/assertions.js'
-import { ACTIVITY_STATUS, ERR, EXECUTION_STATUS, WIRE } from '../helpers/env.js'
+import { ACTIVITY_STATUS, ERR, EXECUTION_STATUS, WIRE, env } from '../helpers/env.js'
 import * as programs from '../fixtures/programs.js'
 import { IDENTITIES, RESOURCES } from '../fixtures/identities.js'
 
@@ -88,6 +88,28 @@ describe('bypass attempts', () => {
     expect(await s().mock.count('POST', '/admin/users')).toBe(0)
   })
 
+  it('should_not_execute_a_request_other_than_the_one_approved_when_the_persisted_program_branches_on_the_clock', async () => {
+    // The persisted program is authoritative, but a non-deterministic one can reach the approved
+    // sequence with another resource or amount on resume. The approval binds the request the human saw.
+    const c = s().client('alice')
+    const flipAt = Date.now() + 1500
+    const program = `async () => {
+      const late = Date.now() > ${flipAt}
+      const o = await api.request({ method: 'POST', path: '/orders', body: { customerId: '${RESOURCES.customerAllowed}', amount: late ? 999999 : 50000 } })
+      return o.status
+    }`
+    const paused = expectPaused(await c.apiExecute('commerce', program))
+    s().track(paused.executionId)
+    expect(paused.elicitation.message).toContain('50000')
+    await new Promise(r => setTimeout(r, Math.max(0, flipAt - Date.now()) + 200))
+    const out = expectToolError(await c.answerApproval(paused, { action: 'accept' }), ERR.REPLAY_DIVERGED)
+    expect(out.message).toContain('query/body differ')
+    expect(await s().mock.count('POST', '/orders')).toBe(0)
+    const insp = await s().admin.inspect(paused.executionId)
+    expect(insp.execution.status).toBe(EXECUTION_STATUS.FAILED)
+    expect(insp.activities[0]!.request).toMatchObject({ body: { amount: 50000 } }) // the approved request, untouched
+  })
+
   it('should_ignore_forged_execution_status_or_approval_metadata_and_keep_the_approval_pending', async () => {
     const c = s().client('alice')
     const paused = expectPaused(await c.apiExecute('commerce', programs.createOrder(RESOURCES.customerAllowed, 50000)))
@@ -116,25 +138,76 @@ describe('bypass attempts', () => {
     expect(await s().mock.requests()).toHaveLength(0)
   })
 
-  describe('known gaps pinned so they are visible (see TEST_ARCHITECTURE.md §6)', () => {
-    it('known_gap_program_supplied_headers_can_override_the_outbound_authorization_header', async () => {
-      // api-client.ts spreads `apiRequest.headers` after the Authorization header, so a program can change
-      // the identity the backend sees. Governance Rules do not read identity on this branch, so the *decision*
-      // is unaffected — but backend authorization is. Pinned here as current behaviour; flip when fixed.
+  describe('path spellings cannot move a call out from under its rule (RG-007)', () => {
+    // Governance resolves the canonical path, and that same path is what goes on the wire.
+    it.each(['/%6frders/order-001', '/Orders/order-001', 'orders/order-001/'])(
+      'should_deny_an_equivalent_spelling_of_a_denied_delete_%s', async path => {
+        const program = `async () => (await api.request({ method: 'DELETE', path: ${JSON.stringify(path)} })).status`
+        const out = expectToolError(await s().client('alice').apiExecute('commerce', program), ERR.GOVERNANCE_DENIED)
+        s().track(out.meta.executionId)
+        expect(await s().mock.requests()).toHaveLength(0)
+        const insp = await s().admin.inspect(out.meta.executionId!)
+        expect(insp.decisions[0]).toMatchObject({ decision: 'DENY', decidingRule: 'deny-delete-order' })
+      })
+
+    it.each(['/orders/./order-001', '/orders/x/../order-001', '/orders/%2e%2e/orders/order-001', '/orders%2Forder-001', '/orders//order-001', '/orders\\order-001', '/orders/order-001#x'])(
+      'should_refuse_an_aliasing_spelling_before_governance_and_send_nothing_%s', async path => {
+        const program = `async () => (await api.request({ method: 'DELETE', path: ${JSON.stringify(path)} })).status`
+        const out = expectToolError(await s().client('alice').apiExecute('commerce', program), ERR.INVALID_API_REQUEST)
+        s().track(out.meta.executionId)
+        expect(await s().mock.requests()).toHaveLength(0)
+        expect((await s().admin.inspect(out.meta.executionId!)).activities).toHaveLength(0)
+      })
+
+    it('should_never_send_a_call_or_the_callers_bearer_to_an_absolute_url', async () => {
+      // One of these is the mock as the gateway reaches it (Compose service name, or the host address in local mode).
+      const targets = ['http://mock-api:4010/ping', `${env.mockApiUrl}/ping`, '//mock-api:4010/ping']
       const program = `async () => {
-        const r = await api.request({ method: 'GET', path: '/ping', headers: { Authorization: 'Bearer ${IDENTITIES.bob}' } })
-        return { identity: r.data && r.data.identity }
+        const out = []
+        for (const path of ${JSON.stringify(targets)}) {
+          try { out.push((await api.request({ method: 'GET', path })).status) } catch (e) { out.push(e.message.split(':')[0]) }
+        }
+        return out
       }`
+      const out = expectToolError(await s().client('alice').apiExecute('commerce', program), ERR.INVALID_API_REQUEST)
+      s().track(out.meta.executionId)
+      expect(await s().mock.requests()).toHaveLength(0)
+    })
+
+    it('should_govern_a_body_passed_as_a_json_string_like_the_object_it_is_on_the_wire', async () => {
+      const program = `async () => (await api.request({ method: 'POST', path: '/orders', body: JSON.stringify({ customerId: '${RESOURCES.customerAllowed}', amount: 50000 }) })).status`
+      const paused = expectPaused(await s().client('alice').apiExecute('commerce', program))
+      s().track(paused.executionId)
+      expect(paused.elicitation.message).toContain('high-value-order-requires-approval')
+      expect(await s().mock.requests()).toHaveLength(0)
+    })
+
+    it('should_let_rules_read_a_query_written_into_the_path', async () => {
+      const program = `async () => (await api.request({ method: 'GET', path: '/customers/customer-001?include=tier' })).status`
       const out = expectCompleted(await s().client('alice').apiExecute('commerce', program))
       s().track(out.meta.executionId)
-      s().note('outboundIdentitySeenByBackend', (out.value as { identity: string }).identity)
-      const seen = (await s().mock.requests())[0]!.identity
-      expect(['alice', 'bob']).toContain(seen)
-      // Whatever the backend saw, the journal never stored the header (only the persisted program text carries it).
       const insp = await s().admin.inspect(out.meta.executionId!)
-      expect(JSON.stringify(insp.activities)).not.toContain(IDENTITIES.bob)
-      expect(insp.activities[0]!.request).not.toHaveProperty('headers')
-      if (seen === 'bob') console.warn('KNOWN GAP: program-supplied Authorization header overrode the caller identity downstream')
+      expect(insp.activities[0]!.request).toMatchObject({ rawPath: '/customers/customer-001', query: { include: 'tier' } })
+      expect((await s().mock.requests())[0]).toMatchObject({ method: 'GET', path: '/customers/customer-001' })
     })
+  })
+
+  it('should_not_let_program_supplied_headers_change_the_outbound_identity_or_routing', async () => {
+    // Formerly pinned as known_gap_program_supplied_headers_can_override_the_outbound_authorization_header.
+    const program = `async () => {
+      const r = await api.request({ method: 'GET', path: '/ping', headers: {
+        Authorization: 'Bearer ${IDENTITIES.bob}', 'X-HTTP-Method-Override': 'DELETE', 'X-Idempotency-Key': 'forged'
+      } })
+      return { identity: r.data && r.data.identity }
+    }`
+    const out = expectCompleted(await s().client('alice').apiExecute('commerce', program))
+    s().track(out.meta.executionId)
+    const req = (await s().mock.requests())[0]!
+    expect(req.identity).toBe('alice')
+    expect((out.value as { identity: string }).identity).toBe('alice')
+    // The journal never stores program headers (only the persisted program text carries them).
+    const insp = await s().admin.inspect(out.meta.executionId!)
+    expect(JSON.stringify(insp.activities)).not.toContain(IDENTITIES.bob)
+    expect(insp.activities[0]!.request).not.toHaveProperty('headers')
   })
 })

@@ -30,7 +30,21 @@ export function readRuleDirectory(dir: string, logger?: Logger): GovernanceRuleD
     }))
 }
 
-/** `GOVERNANCE_RULES_SOURCE=dir` (default): rule files in `GOVERNANCE_RULES_DIR`, re-read on every refresh. */
+/** The rules directory does not exist. Boot may treat that as "no rules yet"; a refresh must not. */
+export class GovernanceRulesDirectoryAbsentError extends Error {
+  constructor(readonly dir: string) {
+    super(`Governance rules directory ${dir} does not exist`)
+    this.name = 'GovernanceRulesDirectoryAbsentError'
+  }
+}
+
+/**
+ * `GOVERNANCE_RULES_SOURCE=dir` (default): rule files in `GOVERNANCE_RULES_DIR`,
+ * re-read on every refresh. An absent directory throws (per the source
+ * contract, a document that cannot be read never reads as "no rules"): a
+ * volume remount or a move-style deploy that briefly removes the directory
+ * leaves the last valid set in force instead of turning governance off.
+ */
 export class DirectoryRuleSourceStrategy implements GovernanceRuleSource {
   readonly name: string
 
@@ -39,6 +53,7 @@ export class DirectoryRuleSourceStrategy implements GovernanceRuleSource {
   }
 
   async load(): Promise<GovernanceRuleDocument[]> {
+    if (!existsSync(this.dir)) throw new GovernanceRulesDirectoryAbsentError(this.dir)
     return readRuleDirectory(this.dir, this.logger)
   }
 }

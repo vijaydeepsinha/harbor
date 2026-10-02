@@ -26,7 +26,15 @@ export class FileSpecLoaderStrategy implements SpecLoaderStrategy {
         parsed = yaml.load(contents)
       }
 
-      const dereferenced = await SwaggerParser.dereference(parsed as Parameters<typeof SwaggerParser.dereference>[0])
+      // The file's own path is the base for relative $refs (`schemas.yaml`
+      // next to spec.yaml) — dereferencing the parsed object alone resolved
+      // them against the process's working directory, so every refresh of a
+      // multi-file spec failed (or read a same-named file from elsewhere).
+      const dereferenced = await SwaggerParser.dereference(
+        path.resolve(this.filePath),
+        parsed as Parameters<typeof SwaggerParser.dereference>[0],
+        {}
+      )
       return dereferenced as OpenAPISpec
     } catch (err) {
       if (err instanceof SpecLoadError) throw err

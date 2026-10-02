@@ -76,33 +76,54 @@ export async function runApiInSandbox(
 ): Promise<unknown> {
   const abortController = new AbortController()
   const handler = new BridgeRequestHandler(ctx, abortController.signal)
+  const startedAt = Date.now()
 
-  const result = await runInSandbox(
-    userCode,
-    {
-      memoryLimitMb: ctx.limits.memoryLimitMb,
-      timeoutMs: ctx.limits.executeTimeoutMs,
-      onDispose: () => abortController.abort()
-    },
-    async (jail, context, isolate) => {
-      await jail.set('__makeRequest', new ivm.Reference(
-        (apiRequestJson: string): Promise<string> => handler.handle(apiRequestJson)
-      ))
-      const bootstrapScript = await isolate.compileScript(BOOTSTRAP)
-      await bootstrapScript.run(context)
+  let settled: { ok: true; value: unknown } | { ok: false; error: unknown }
+  try {
+    settled = {
+      ok: true,
+      value: await runInSandbox(
+        userCode,
+        {
+          memoryLimitMb: ctx.limits.memoryLimitMb,
+          timeoutMs: ctx.limits.executeTimeoutMs,
+          onDispose: () => abortController.abort()
+        },
+        async (jail, context, isolate) => {
+          await jail.set('__makeRequest', new ivm.Reference(
+            (apiRequestJson: string): Promise<string> => handler.handle(apiRequestJson)
+          ))
+          const bootstrapScript = await isolate.compileScript(BOOTSTRAP)
+          await bootstrapScript.run(context)
+        }
+      )
     }
-  ).catch((err: unknown) => {
+  } catch (error) {
+    settled = { ok: false, error }
+  }
+
+  // Calls the program started but did not await (`ids.forEach(async …)`,
+  // a floating promise) must not outlive the run: they finish within the
+  // run's remaining time, or are aborted, before the caller records the
+  // outcome — never journaling into an execution already marked finished.
+  await handler.drain(
+    Math.max(0, ctx.limits.executeTimeoutMs - (Date.now() - startedAt)),
+    () => abortController.abort()
+  )
+
+  if (!settled.ok) {
     // Typed policy/limit error takes precedence if the bridge recorded one.
     handler.throwIfViolated()
     // Pass typed sandbox errors through; wrap anything else to avoid leaking internals.
-    if (err instanceof SandboxError) throw err
-    throw new SandboxExecutionError(err)
-  })
+    if (settled.error instanceof SandboxError) throw settled.error
+    throw new SandboxExecutionError(settled.error)
+  }
 
   // User code returned successfully but the bridge recorded a violation
-  // (user code caught the bridge error and swallowed it). Promote to a
-  // typed failure so the tool layer records an accurate outcome.
+  // (user code caught the bridge error and swallowed it, or a call it did
+  // not await was paused or denied). Promote to a typed failure so the tool
+  // layer records an accurate outcome.
   handler.throwIfViolated()
 
-  return result
+  return settled.value
 }

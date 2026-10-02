@@ -7,7 +7,7 @@ import type { ServiceRegistry } from '../runtime/registry/service-registry.js'
 import type { Logger } from '../runtime/observability/logger.js'
 import type { MetricsCollector } from '../core/types/metrics.types.js'
 import { mcpError, mcpSuccess, extractCorrelationId, resolveService, isToolError, validateAuth } from './tool-helpers.js'
-import { TOOL, LOG_PREFIX, ERR, METRIC, OUTCOME } from '../core/constants.js'
+import { TOOL, LOG_PREFIX, ERR, METRIC, OUTCOME, UNKNOWN_SERVICE_LABEL } from '../core/constants.js'
 
 const DESCRIPTION = `Retrieves the full Markdown SOP for a specific skill.
 If discover_skills() returned a relevant skill, read it here to understand business rules,
@@ -44,7 +44,8 @@ export function registerGetSkillDetailsTool(
 
       const svcResources = resolveService(registry, service, serviceNames)
       if (isToolError(svcResources)) {
-        metrics.increment(METRIC.TOOL_CALLS, { tool: TOOL.GET_SKILL_DETAILS, service, outcome: OUTCOME.ERROR })
+        // The name is caller input: labelling metrics with it would mint a new series per made-up name.
+        metrics.increment(METRIC.TOOL_CALLS, { tool: TOOL.GET_SKILL_DETAILS, service: UNKNOWN_SERVICE_LABEL, outcome: OUTCOME.ERROR })
         return svcResources
       }
 

@@ -84,6 +84,18 @@ describe('extractBearerFromRequest', () => {
     expect(extractBearerFromRequest(fakeReq)).toEqual({ ok: true, token })
   })
 
+  it('refuses two Authorization headers even though Node keeps only the first', () => {
+    const token = 'TestBearerTokenForE2ETestingOnly'
+    const fakeReq = {
+      headers: { authorization: `Bearer ${token}` }, // what Node exposes: the first one only
+      rawHeaders: ['Authorization', `Bearer ${token}`, 'Host', 'h', 'authorization', 'Basic c29tZW9uZQ==']
+    } as unknown as IncomingMessage
+    const r = extractBearerFromRequest(fakeReq)
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.reason).toBe('duplicate_authorization_header')
+  })
+
   it('surfaces failure when the header is absent', () => {
     const fakeReq = { headers: {} } as unknown as IncomingMessage
     const r = extractBearerFromRequest(fakeReq)
