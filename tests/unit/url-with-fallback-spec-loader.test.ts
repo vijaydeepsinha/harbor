@@ -96,7 +96,7 @@ describe('UrlWithFallbackSpecLoaderStrategy', () => {
 describe('UrlWithFallbackSpecLoaderStrategy — the URL is redacted wherever it is shown', () => {
   beforeEach(() => { urlLoadMock.mockReset(); fileLoadMock.mockReset() })
 
-  it('keeps credentials and the query string out of the fallback log and the combined error', async () => {
+  it('keeps credentials out of the fallback log and the combined error; the query string stays, its token value replaced', async () => {
     const url = 'https://user:pw@specs.example.com/openapi.yaml?token=abc'
     urlLoadMock.mockRejectedValue(new Error('network down'))
     fileLoadMock.mockResolvedValueOnce(spec())
@@ -108,6 +108,6 @@ describe('UrlWithFallbackSpecLoaderStrategy — the URL is redacted wherever it 
     const err = await new UrlWithFallbackSpecLoaderStrategy(url, '/tmp/fallback.yaml').load().catch((e: unknown) => e) as Error
     expect(err).toBeInstanceOf(SpecLoadError)
     expect(err.message).not.toMatch(/pw|token=abc/)
-    expect(err.message).toContain('specs.example.com/openapi.yaml')
+    expect(err.message).toContain('specs.example.com/openapi.yaml?token=REDACTED')
   })
 })

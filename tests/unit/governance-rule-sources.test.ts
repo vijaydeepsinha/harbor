@@ -135,9 +135,11 @@ describe('Governance Rule sources', () => {
       routes['/rules'] = { type: 'application/json', body: JSON.stringify([{ name: 'j', match: { service: 's' }, action: { type: 'ALLOW' } }]) }
       const secretUrl = base.replace('http://', 'http://user:pw@') + '/rules.yaml?token=abc'
       const yamlSource = new UrlRuleSourceStrategy(secretUrl, 2000)
-      expect(yamlSource.name).toBe(`url:${base}/rules.yaml`)
+      // The query string stays (it says which document); the userinfo goes and the token's value is replaced.
+      expect(yamlSource.name).toBe(`url:${base}/rules.yaml?token=REDACTED`)
+      expect(yamlSource.name).not.toMatch(/pw|abc/)
       const [yamlDoc] = await yamlSource.load()
-      expect(yamlDoc).toMatchObject({ name: `${base}/rules.yaml`, format: 'yaml' })
+      expect(yamlDoc).toMatchObject({ name: `${base}/rules.yaml?token=REDACTED`, format: 'yaml' })
       expect(parseRuleDocuments([yamlDoc!]).map(l => l.rule.name)).toEqual(['a'])
       const [jsonDoc] = await new UrlRuleSourceStrategy(`${base}/rules`, 2000).load()
       expect(jsonDoc?.format).toBe('json')
