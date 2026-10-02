@@ -424,7 +424,10 @@ Agent                Harbor (api_execute)          V8 #1              Backend   
 | Answer for an approval the execution no longer waits on | `EXECUTION_NOT_RESUMABLE`; nothing is written (§7) |
 | Concurrent approval decisions | decisions serialize on the execution lock; a contender gets `EXECUTION_LOCKED` (HTTP 409) without changing state, then can retry and observe `APPROVAL_ALREADY_DECIDED` |
 | Resume before the approval is decided | the pause is returned again with the same approval id and `_meta["harbor/execution-status"] = WAITING_APPROVAL`; nothing runs, the execution is untouched |
-| Store write failure | the tool call fails; nothing is executed without its journal entry |
+| Store write failure before a call | the call is refused to the program and never sent: nothing is executed without its journal entry |
+| Store write failure after the outcome was decided (an activity's `FAILED`, a run's end) | the outcome stands and reaches the client unchanged; the failed write is reported (`event: persistence_failure`, `execution_persistence_failures_total`) and recovered by the next run (§12 *Persistence guarantees*) |
+| The program completed but its completion could not be recorded | `RUN_OUTCOME_NOT_RECORDED` (retryable), execution left `RUNNING`; resuming with `_meta["harbor/execution-id"]` replays every call (none is sent again) and records the result — it is never recorded `FAILED` |
+| A decision cut short between its writes | completed by the next decide or resume (§12 *Persistence guarantees*) |
 | Replay mismatch | `REPLAY_DIVERGED`, execution `FAILED` (§4) |
 | Two resumes at once | second gets `EXECUTION_LOCKED` (retryable) |
 
@@ -531,6 +534,49 @@ uses the SPI's `listExpiredExecutions` / `deleteExecution`. Paused and
 interrupted executions are never deleted. Independently, the program text of
 a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
 
+### Persistence guarantees
+
+The run lock serialises runs and decisions on one execution; it does not make
+a sequence of writes atomic. No store here offers a transaction across
+records, so the guarantee Harbor gives is narrower and holds on every
+backend: **each single write is atomic, every multi-write operation has a
+commit point, and whatever a crash or a store outage leaves after the commit
+point is completed by the next run or decision — or, before it, leaves
+nothing that decides anything.**
+
+What a single write means per adapter:
+
+| Store | One write | A crash or an outage | Locks |
+|---|---|---|---|
+| `in-memory` | a map update; cannot fail on its own | the process takes the whole store with it: nothing partial survives because nothing survives | in-process; die with the process |
+| `file` | the execution's whole document, rewritten through a temp file + rename — atomic, never torn | the document keeps the last completed write. No `fsync`: a power loss can lose the most recent writes. A write that fails on disk (full, unwritable) has already changed the copy in memory, so the process keeps running on state that a restart would not see | in-process |
+| `memcache` | one item per record (`set` is atomic per key); index keys are separate writes | an outage or a crash between two writes leaves the earlier ones; items without a TTL can still be evicted under memory pressure — size memcache for what you keep, and treat the audit trail as the durable record | `add` with a TTL; a crashed pod's lock expires after `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC` |
+| registered backend | must make each record write atomic — the recovery below assumes nothing more | | must be held across processes, with an expiry |
+
+What a cut leaves, per operation, and how it recovers (tests:
+`tests/integration/decision-crash-consistency.test.ts`,
+`tests/integration/persistence-failures.test.ts`):
+
+| Operation | Writes, in order (commit point **bold**) | Cut after | Left | Recovery |
+|---|---|---|---|---|
+| A human decision (`ApprovalService.decide`) | **approval decided** → activity → execution (reject / cancel only) | nothing | nothing changed | decide again |
+| | | the approval | approval decided, activity still `WAITING_APPROVAL` | the next decide (refused as already decided) or the next resume completes it first (`completeDecisions`): the approved call runs once, a rejection or cancellation ends the execution. Before this, every resume paused on the old question and every answer was refused — the execution was stuck |
+| | | the activity | execution still `WAITING_APPROVAL` | as above; a resume would also stop at the `DENIED` / `CANCELLED` activity |
+| A call (bridge) | **activity `EXECUTING`** → the call → `COMPLETED` or `FAILED` | `EXECUTING` | the call may or may not have reached the backend | the next run sends a `GET` again and stops on anything else (`ACTIVITY_OUTCOME_UNKNOWN`) — never a silent repeat. A failed `FAILED` write is reported (below) and leaves exactly this |
+| Ending a run (`endRun`) | **execution status** → lock released (always, even when the write fails) | — | execution `RUNNING`, lock free | a resume (`_meta["harbor/execution-id"]`, or the same MRTR retry) replays the journal — nothing completed is sent again — and records the outcome. A completed run whose completion was not recorded is reported to the client as `RUN_OUTCOME_NOT_RECORDED` (retryable), never as a failure |
+| Starting a run (`beginRun`) | lock → **execution `RUNNING`** | the lock | lock held, record unchanged | the lock is released when the write fails; after a crash it dies with the process (or expires, memcache) |
+| A new activity's decision (gate) | decision record → approval → **activity `WAITING_APPROVAL` / `DENIED`** | before the activity | a decision record, perhaps a `PENDING` approval nothing waits on | the call is refused to the program and never sent; an orphan approval cannot be decided once its execution is finished (`ApprovalStaleError`) |
+
+**Secondary failures are reported, not swallowed.** When a write that records
+an outcome already decided fails — an activity's `FAILED`, a run's end — the
+outcome stands (the client gets it unchanged) and the failed write is
+reported once: an error log line with `event: "persistence_failure"`,
+`operation` (`activity.recordFailure`, `execution.endRun`), the execution and
+activity, what the write `intended`, what the store was `left` holding and
+the `recovery` above; and `execution_persistence_failures_total{operation}`
+(`src/runtime/execution/persistence-failure.ts`). Alert on the metric: every
+count is an execution a client may have to resume.
+
 ## 13. Configuration
 
 | Variable | Default | Meaning |
@@ -617,9 +663,12 @@ call rather than a fix.
 **Execution and replay**
 
 - Approval, activity, and execution updates are separate store writes, not a
-  cross-record transaction. The execution lock prevents concurrent decisions
-  from overwriting each other, but a store failure midway through one decision
-  can still leave partially updated records.
+  cross-record transaction (§12 *Persistence guarantees*). A decision cut
+  short is completed by the next decide or resume; an execution nobody
+  touches again keeps the partial records until then (retention does not
+  sweep a `WAITING_APPROVAL` execution).
+- The `file` store does not `fsync`, and a write that fails on disk has
+  already changed the in-memory copy the process keeps running on.
 - A `COMPLETED` activity replays even when the program now sends another
   query or body at that sequence (§4): nothing executes, but the program sees
   the response to the request originally sent.

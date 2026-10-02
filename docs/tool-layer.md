@@ -523,6 +523,7 @@ Records go to every sink listed in `AUDIT_SINKS` (default `console`: the line ab
 - Tool call counts by tool and outcome (`tool_calls_total`; a `service` argument naming no registered service is counted as `service="unknown"`, never under the caller's string)
 - Sandbox error counts by error type (`sandbox_errors_total`)
 - Circuit breaker open events (`circuit_breaker_opens_total`)
+- Store writes that failed after their outcome was decided (`execution_persistence_failures_total{operation}` — `activity.recordFailure`, `execution.endRun`; each is also an error log line with `event: "persistence_failure"`, see `docs/code-mode-governance.md` §12)
 - Token cache hits/misses and refresh attempts (`auth_cache_total`, `auth_refresh_*`)
 
 Counters are flushed as one `metrics_flush` log line every 60 s and on shutdown. They are not pluggable: the gateway constructs `MetricsRegistry` directly and there is no hook to substitute an exporter (Prometheus, StatsD) without changing the code.
@@ -569,6 +570,7 @@ Additional error codes:
 | `EXECUTION_NOT_RESUMABLE` | No | Finished, owned by another principal, or bound to another service |
 | `EXECUTION_CANCELLED` | No | The human cancelled the approval |
 | `ACTIVITY_OUTCOME_UNKNOWN` | No | A previous run's call to this activity failed or was cut off; Harbor will not repeat it |
+| `RUN_OUTCOME_NOT_RECORDED` | Yes | The program completed but the store could not record it; resume with `_meta["harbor/execution-id"]` — every call is replayed, none sent again |
 | `APPROVAL_NOT_FOUND` | No | Unknown approval, or one of another execution |
 | `APPROVAL_ALREADY_DECIDED` | No | A different answer was already recorded |
 

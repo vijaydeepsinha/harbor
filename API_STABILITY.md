@@ -164,7 +164,7 @@ Error bodies from these routes are `{ error, code, … }` with `code` from `ERR`
 | Codes | Status |
 |-------|--------|
 | `UNKNOWN`, `UNKNOWN_SERVICE`, `UNKNOWN_SKILL`, `AUTH_FAILED`, `MISSING_TOKEN`, `TOKEN_EXPIRED`, `TOKEN_INVALID`, `SESSION_EXPIRED`, `INTROSPECTION_FAILED`, `API_ERROR`, `CIRCUIT_OPEN`, `PERMISSION_DENIED`, `CALL_LIMIT_EXCEEDED`, `CONCURRENT_LIMIT_EXCEEDED`, `SANDBOX_INTERNAL_ERROR`, `SANDBOX_TIMEOUT`, `SANDBOX_MEMORY`, `SANDBOX_SYNTAX`, `SANDBOX_RUNTIME`, `INVALID_API_REQUEST`, `NOT_FOUND`, `PAYLOAD_TOO_LARGE`, `INTERNAL` | ✅ |
-| `APPROVAL_REQUIRED`, `GOVERNANCE_DENIED`, `REPLAY_DIVERGED`, `EXECUTION_LOCKED`, `EXECUTION_NOT_FOUND`, `EXECUTION_NOT_RESUMABLE`, `EXECUTION_CANCELLED`, `ACTIVITY_OUTCOME_UNKNOWN`, `APPROVAL_NOT_FOUND`, `APPROVAL_ALREADY_DECIDED` | 🟡 |
+| `APPROVAL_REQUIRED`, `GOVERNANCE_DENIED`, `REPLAY_DIVERGED`, `EXECUTION_LOCKED`, `EXECUTION_NOT_FOUND`, `EXECUTION_NOT_RESUMABLE`, `EXECUTION_CANCELLED`, `ACTIVITY_OUTCOME_UNKNOWN`, `RUN_OUTCOME_NOT_RECORDED`, `APPROVAL_NOT_FOUND`, `APPROVAL_ALREADY_DECIDED` | 🟡 |
 
 The domain errors carrying them all expose `code` and `retryable`: `SandboxError` (`src/core/types/sandbox-error.types.ts`), `AuthError` (`src/core/types/auth.types.ts`), `ExecutionError` (`src/core/types/execution.types.ts`), plus `PermissionDeniedError`, `CircuitOpenError` and `ApiError` (`src/runtime/api-client/api-client.ts`). Class names are ⚠️ Internal; the codes are the contract.
 
