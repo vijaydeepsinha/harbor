@@ -9,7 +9,8 @@ import {
   GovernanceDeniedError,
   ExecutionCancelledError,
   ReplayDivergedError,
-  ActivityOutcomeUnknownError
+  ActivityOutcomeUnknownError,
+  RunOutcomeNotRecordedError
 } from '../core/types/execution.types.js'
 import type { RunOutcome } from '../runtime/execution/execution-manager.js'
 import {
@@ -44,6 +45,8 @@ const FAILURES: ReadonlyArray<readonly [ErrorClass, Omit<FailureClass, 'openedCi
   [ExecutionCancelledError,     { outcome: OUTCOME.EXECUTION_CANCELLED,       status: EXECUTION_STATUS.CANCELLED,        sandboxError: false }],
   [ReplayDivergedError,         { outcome: OUTCOME.REPLAY_DIVERGED,           status: EXECUTION_STATUS.FAILED,           sandboxError: false }],
   [ActivityOutcomeUnknownError, { outcome: OUTCOME.ERROR,                     status: EXECUTION_STATUS.FAILED,           sandboxError: false }],
+  // The store, not the program, failed: the execution is left RUNNING (lock released) for a resume to finish.
+  [RunOutcomeNotRecordedError,  { outcome: OUTCOME.ERROR,                     status: EXECUTION_STATUS.RUNNING,          sandboxError: false }],
   [CircuitOpenError,            { outcome: OUTCOME.CIRCUIT_OPEN,              status: EXECUTION_STATUS.INTERRUPTED,      sandboxError: false }],
   [PermissionDeniedError,       { outcome: OUTCOME.PERMISSION_DENIED,         status: EXECUTION_STATUS.FAILED,           sandboxError: false }],
   [SandboxCallLimitError,       { outcome: OUTCOME.CALL_LIMIT_EXCEEDED,       status: EXECUTION_STATUS.FAILED,           sandboxError: true }],

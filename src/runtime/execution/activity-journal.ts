@@ -8,7 +8,9 @@ import {
   type ActivityResponseRecord,
   ReplayDivergedError
 } from '../../core/types/execution.types.js'
-import { ACTIVITY_STATUS, CALL_OUTCOME, type AllowedHttpMethod } from '../../core/constants.js'
+import { ACTIVITY_STATUS, CALL_OUTCOME, PERSISTENCE_OPERATION, type AllowedHttpMethod } from '../../core/constants.js'
+import { ensureError } from '../../core/utils/errors.js'
+import type { PersistenceFailureReporter } from './persistence-failure.js'
 
 /** Records whose request is about to be executed or is in front of a human: they bind query and body too. */
 const CONTENT_BOUND: ReadonlySet<string> = new Set([
@@ -89,6 +91,8 @@ export class CallLog implements CallLogSource {
  */
 export class ActivityJournal extends CallLog {
   private cursor = 0
+  private readonly now: () => string
+  private readonly reportPersistenceFailure: PersistenceFailureReporter
 
   constructor(
     private readonly persistence: ExecutionPersistence,
@@ -96,9 +100,15 @@ export class ActivityJournal extends CallLog {
     readonly service: string,
     /** 1-based index of the sandbox run driving this journal (execution.runCount). */
     readonly runIndex: number,
-    private readonly now: () => string = () => new Date().toISOString()
+    options: {
+      now?: () => string
+      /** Where a secondary store failure goes (see {@link recordFailure}); absent ⇒ it is dropped. */
+      onPersistenceFailure?: PersistenceFailureReporter
+    } = {}
   ) {
     super()
+    this.now = options.now ?? (() => new Date().toISOString())
+    this.reportPersistenceFailure = options.onPersistenceFailure ?? (() => {})
   }
 
   /** Highest sequence handed out by this run so far. */
@@ -180,17 +190,33 @@ export class ActivityJournal extends CallLog {
   /**
    * An activity journaled as EXECUTING whose call threw ⇒ FAILED with
    * `outcomeKnown: false`: Harbor does not know whether the API executed, and
-   * a later run must not silently repeat it (§32). A store failure while
-   * recording that is swallowed — the run is already failing. Then the run's log.
+   * a later run must not silently repeat it (§32). Then the run's log.
+   *
+   * If the store cannot take that write, the call's own error still stands —
+   * it is what the program sees — and the failed write is reported, not
+   * thrown. The record stays EXECUTING, which every later run already treats
+   * as a call that died mid-flight: a GET is sent again, anything else stops
+   * with ACTIVITY_OUTCOME_UNKNOWN. So nothing is repeated silently either way.
    */
   override async recordFailure(call: CallIdentity, failure: { code: string; message: string; aborted: boolean }, executingSequence?: number): Promise<void> {
     if (executingSequence !== undefined) {
-      await this.mustGet(executingSequence).then(async record => {
+      try {
+        const record = await this.mustGet(executingSequence)
         record.status = ACTIVITY_STATUS.FAILED
         record.failure = { code: failure.code, message: failure.message, outcomeKnown: false }
         record.updatedAt = this.now()
         await this.persistence.putActivity(record)
-      }).catch(() => {})
+      } catch (err) {
+        this.reportPersistenceFailure({
+          operation: PERSISTENCE_OPERATION.ACTIVITY_FAILED,
+          executionId: this.executionId,
+          sequence: executingSequence,
+          intended: `${ACTIVITY_STATUS.FAILED} (outcome unknown)`,
+          left: ACTIVITY_STATUS.EXECUTING,
+          recovery: 'the next run treats the activity as in flight when a run died: a GET is sent again, any other method stops with ACTIVITY_OUTCOME_UNKNOWN',
+          error: ensureError(err)
+        })
+      }
     }
     await super.recordFailure(call, failure, executingSequence)
   }

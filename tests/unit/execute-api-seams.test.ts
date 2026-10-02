@@ -18,7 +18,7 @@ import { PermissionDeniedError } from '../../src/core/types/permission.types.js'
 import { SandboxCallLimitError, SandboxConcurrentLimitError, SandboxRuntimeError } from '../../src/core/types/sandbox-error.types.js'
 import {
   ApprovalRequiredError, ApprovalPendingError, GovernanceDeniedError, ExecutionCancelledError,
-  ReplayDivergedError, ActivityOutcomeUnknownError, ExecutionLockedError
+  ReplayDivergedError, ActivityOutcomeUnknownError, ExecutionLockedError, RunOutcomeNotRecordedError
 } from '../../src/core/types/execution.types.js'
 import {
   OUTCOME, ERR, EXECUTION_STATUS, RUN_OUTCOME, APPROVAL_STATUS,
@@ -100,6 +100,7 @@ describe('outcome mapping — one table for persistence, metrics and audit', () 
       [new ExecutionCancelledError('e', 1), { outcome: OUTCOME.EXECUTION_CANCELLED, status: EXECUTION_STATUS.CANCELLED, sandboxError: false }],
       [new ReplayDivergedError('e', 1, 'a', 'b'), { outcome: OUTCOME.REPLAY_DIVERGED, status: EXECUTION_STATUS.FAILED, sandboxError: false }],
       [new ActivityOutcomeUnknownError('e', 1, 'POST /x'), { outcome: OUTCOME.ERROR, status: EXECUTION_STATUS.FAILED, sandboxError: false }],
+      [new RunOutcomeNotRecordedError('e'), { outcome: OUTCOME.ERROR, status: EXECUTION_STATUS.RUNNING, sandboxError: false }],
       [new CircuitOpenError('/x', 1000), { outcome: OUTCOME.CIRCUIT_OPEN, status: EXECUTION_STATUS.INTERRUPTED, sandboxError: false, openedCircuit: '/x' }],
       [new PermissionDeniedError('/x', 'POST'), { outcome: OUTCOME.PERMISSION_DENIED, status: EXECUTION_STATUS.FAILED, sandboxError: false }],
       [new SandboxCallLimitError(5), { outcome: OUTCOME.CALL_LIMIT_EXCEEDED, status: EXECUTION_STATUS.FAILED, sandboxError: true }],

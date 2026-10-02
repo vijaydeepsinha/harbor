@@ -170,7 +170,7 @@ async () => {
 
       const report = await runApiExecute(
         { service, code, request, resources, tokenPayload, invalidate, userIdHash },
-        { governanceRuntime, logger, ...(callerClientId !== undefined ? { callerClientId } : {}) }
+        { governanceRuntime, logger, metrics, ...(callerClientId !== undefined ? { callerClientId } : {}) }
       )
       return respond(report, {
         service, code, request, resources, userIdHash, startTime,

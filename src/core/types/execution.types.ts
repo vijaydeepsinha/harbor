@@ -284,6 +284,25 @@ export class ApprovalNotFoundError extends ExecutionError {
 }
 
 /**
+ * The program completed, but recording that failed (the store was
+ * unavailable). The execution stays RUNNING with its lock released — never
+ * FAILED, which would make finished work unresumable and invite submitting
+ * it again. Retryable: a resume replays every call from the journal (none is
+ * sent again) and records the result. The store's own error is logged, not
+ * returned: it can name internal hosts.
+ */
+export class RunOutcomeNotRecordedError extends ExecutionError {
+  constructor(readonly executionId: string) {
+    super(
+      `The program completed, but Harbor could not record its result. Nothing will be repeated: call api_execute again with ` +
+      `_meta["harbor/execution-id"] = "${executionId}" to replay it from the journal and record the result.`,
+      ERR.RUN_OUTCOME_NOT_RECORDED, true
+    )
+    this.name = 'RunOutcomeNotRecordedError'
+  }
+}
+
+/**
  * An `accept` must say yes or no — `approve: true` / `false`, or one of the
  * words in `APPROVAL_ANSWER_WORDS`; anything else is not a decision (fail closed).
  */

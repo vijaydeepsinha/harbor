@@ -11,14 +11,16 @@ import {
   type ExecutionBridge,
   type GovernanceVerdict
 } from '../runtime/sandbox/execute-api-in-sandbox.js'
-import { type ActivityRequestRecord, type ExecutionRecord, ApprovalAlreadyDecidedError } from '../core/types/execution.types.js'
+import { type ActivityRequestRecord, type ExecutionRecord, ApprovalAlreadyDecidedError, RunOutcomeNotRecordedError } from '../core/types/execution.types.js'
+import type { MetricsCollector } from '../core/types/metrics.types.js'
+import { persistenceFailureReporter, type PersistenceFailureReporter } from '../runtime/execution/persistence-failure.js'
 import type { GovernanceRuntime } from '../runtime/execution/governance-runtime.js'
 import type { ResumeState } from '../runtime/execution/request-state.js'
 import { ActivityJournal, CallLog, type CallLogSource } from '../runtime/execution/activity-journal.js'
 import { resolveOperation } from '../runtime/governance/operation-resolver.js'
 import { evaluateGovernance } from '../runtime/governance/rule-evaluator.js'
 import {
-  ERR, LOG_PREFIX, EXECUTION_STATUS, GOVERNANCE_DECISION, APPROVAL_STATUS, RUN_OUTCOME,
+  ERR, LOG_PREFIX, EXECUTION_STATUS, GOVERNANCE_DECISION, APPROVAL_STATUS, RUN_OUTCOME, PERSISTENCE_OPERATION,
   type ExecutionStatus
 } from '../core/constants.js'
 import { ensureError, errorCode as getErrorCode, errorRetryable } from '../core/utils/errors.js'
@@ -66,9 +68,14 @@ export interface ApiExecuteRunDeps {
   /** Absent ⇒ legacy behaviour: no durable execution, no governance. */
   governanceRuntime?: GovernanceRuntime
   logger: Logger
+  /** Counts secondary persistence failures (`execution_persistence_failures_total`). */
+  metrics?: MetricsCollector
   /** The caller's X-Harbor-Client-ID from the inbound request, forwarded on every backend call. */
   callerClientId?: string
 }
+
+/** Where a run that could not be recorded is left: resumable, and resumed by replaying its journal. */
+const LEFT_RUNNING = `${EXECUTION_STATUS.RUNNING}, run lock released`
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
   EXECUTION_STATUS.COMPLETED, EXECUTION_STATUS.FAILED, EXECUTION_STATUS.DENIED, EXECUTION_STATUS.CANCELLED
@@ -95,6 +102,8 @@ export async function runApiExecute(input: ApiExecuteRunInput, deps: ApiExecuteR
   let program = code
   // True once beginRun took the run lock — only then is there a run to end.
   let started = false
+  const reportPersistenceFailure = persistenceFailureReporter(logger, deps.metrics, correlationId)
+  let result: unknown
   try {
     let bridge: ExecutionBridge | undefined
     if (governanceRuntime) {
@@ -104,16 +113,12 @@ export async function runApiExecute(input: ApiExecuteRunInput, deps: ApiExecuteR
       const execution = await governanceRuntime.executionManager.beginRun(executionId)
       started = true
       program = execution.originalCode ?? code
-      bridge = makeBridge(governanceRuntime, execution, resources)
+      bridge = makeBridge(governanceRuntime, execution, resources, reportPersistenceFailure)
       calls = bridge.journal
     }
 
     logger.info({ correlationId, service, executionId, step: '3/4 sandbox-run' }, `${LOG_PREFIX.MCP} Executing code in V8 sandbox...`)
-    const result = await runApiInSandbox(program, sandboxContext(input, deps, program, executionId, bridge, calls))
-    if (governanceRuntime && executionId !== undefined) {
-      await governanceRuntime.executionManager.endRun(executionId, { kind: RUN_OUTCOME.COMPLETED, result })
-    }
-    return { kind: 'completed', ...(executionId !== undefined ? { executionId } : {}), program, calls, result }
+    result = await runApiInSandbox(program, sandboxContext(input, deps, program, executionId, bridge, calls))
   } catch (error) {
     const { status } = classifyFailure(error)
     // beginRun may itself have thrown (locked, not resumable, approval still
@@ -121,8 +126,15 @@ export async function runApiExecute(input: ApiExecuteRunInput, deps: ApiExecuteR
     // stored execution must stay exactly as it was.
     if (governanceRuntime && executionId !== undefined && started) {
       const outcome = runOutcomeFor(error, status, getErrorCode(error), ensureError(error).message)
-      await governanceRuntime.executionManager.endRun(executionId, outcome).catch(e =>
-        logger.error({ correlationId, executionId, error: ensureError(e).message }, 'Failed to persist run outcome'))
+      // The run's own outcome is what the client gets, whether or not the
+      // store takes it. If it does not, the record stays RUNNING with its
+      // lock released (endRun releases it either way): a resume replays the
+      // journal and reaches this outcome again, and records it then.
+      const id = executionId
+      await governanceRuntime.executionManager.endRun(id, outcome).catch((e: unknown) => reportPersistenceFailure({
+        operation: PERSISTENCE_OPERATION.RUN_END, executionId: id, intended: status, left: LEFT_RUNNING,
+        recovery: 'a resume replays the journal to the same outcome and records it', error: ensureError(e)
+      }))
     }
     // When no run started nothing changed, so the response reports the
     // execution as it is stored — not the status this error would have given a run.
@@ -134,6 +146,23 @@ export async function runApiExecute(input: ApiExecuteRunInput, deps: ApiExecuteR
       ...(reported !== undefined ? { status: reported } : {})
     }
   }
+
+  if (governanceRuntime && executionId !== undefined) {
+    try {
+      await governanceRuntime.executionManager.endRun(executionId, { kind: RUN_OUTCOME.COMPLETED, result })
+    } catch (e) {
+      // The program completed; only recording it failed. Writing FAILED now
+      // would make finished work unresumable and invite resubmitting it — so
+      // the record stays RUNNING (lock released) and the client is told to
+      // resume, which replays every call from the journal and sends none again.
+      reportPersistenceFailure({
+        operation: PERSISTENCE_OPERATION.RUN_END, executionId, intended: EXECUTION_STATUS.COMPLETED, left: LEFT_RUNNING,
+        recovery: 'a resume replays every call from the journal (none is sent again) and records the result', error: ensureError(e)
+      })
+      return { kind: 'failed', executionId, program, calls, error: new RunOutcomeNotRecordedError(executionId), status: EXECUTION_STATUS.RUNNING }
+    }
+  }
+  return { kind: 'completed', ...(executionId !== undefined ? { executionId } : {}), program, calls, result }
 }
 
 function sandboxContext(
@@ -286,8 +315,13 @@ async function applyAnswer(
 }
 
 /** The hooks the bridge calls: OpenAPI resolution and governance for new activities. */
-function makeBridge(governanceRuntime: GovernanceRuntime, execution: ExecutionRecord, svc: ServiceResources): ExecutionBridge {
-  const journal = new ActivityJournal(governanceRuntime.persistence, execution.executionId, svc.name, execution.runCount)
+function makeBridge(
+  governanceRuntime: GovernanceRuntime,
+  execution: ExecutionRecord,
+  svc: ServiceResources,
+  onPersistenceFailure: PersistenceFailureReporter
+): ExecutionBridge {
+  const journal = new ActivityJournal(governanceRuntime.persistence, execution.executionId, svc.name, execution.runCount, { onPersistenceFailure })
   return {
     journal,
     resolve: (method, rawPath) => resolveOperation(svc.specStore.getSpec(), method, rawPath),
