@@ -31,7 +31,6 @@ export interface SandboxExecutionContext {
   idempotencyKeyTtlMs: number
   /** Outbound X-Correlation-ID: the execution id for a governed run (constant across its runs). */
   correlationId: string
-  sessionId: string
   /** Outbound X-Harbor-Client-ID: the caller's own id from the inbound request, when it sent one. */
   clientId?: string
   /**

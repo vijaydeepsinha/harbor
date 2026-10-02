@@ -24,7 +24,7 @@ function makeCtx(overrides: Partial<SandboxExecutionContext> = {}) {
     apiClient: connector,
     circuitBreaker: noopCircuitBreaker(),
     permissionGuard: forwardTokenPermissionGuard(),
-    idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c', sessionId: 's',
+    idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c',
     callLog: new CallLog(),
     limits: { memoryLimitMb: 64, executeTimeoutMs: 1000, searchTimeoutMs: 1000, maxApiCalls: 2, maxConcurrentCalls: 2 },
     ...overrides

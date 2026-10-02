@@ -124,7 +124,7 @@ describe('registerDiscoverSkillsTool', () => {
 
     const r = await server.handlers[TOOL.DISCOVER_SKILLS]!.handler(
       { service: 'ghost', code: 'async () => skills' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
     expect(r.isError).toBe(true)
     const body = JSON.parse(r.content[0]!.text)

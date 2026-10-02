@@ -179,7 +179,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'ghost', code: 'async () => 1' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
@@ -206,7 +206,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
@@ -233,7 +233,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
@@ -257,7 +257,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => ({ hello: "world" })' },
-      makeServerCtx('cid-ok', 'sid-ok')
+      makeServerCtx('cid-ok')
     )
 
     expect(r.isError).toBeUndefined()
@@ -273,7 +273,7 @@ describe('registerExecuteApiTool', () => {
     const audit = vi.mocked(writeAuditRecord).mock.calls[0]![0]
     expect(audit.outcome).toBe(OUTCOME.SUCCESS)
     expect(audit.service).toBe('tasks')
-    expect(audit.sessionId).toBe('sid-ok')
+    expect(audit).not.toHaveProperty('sessionId') // stateless MCP: there is no session to record
     expect(audit.correlationId).toBe('cid-ok')
     expect(audit.authStrategy).toBe('static-token')
     expect(audit.idempotencyStrategy).toBe('in-memory')
@@ -301,11 +301,11 @@ describe('registerExecuteApiTool', () => {
     const code = 'async () => ({ ok: true })'
     await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
     await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code },
-      makeServerCtx('cid2', 'sid2')
+      makeServerCtx('cid2')
     )
 
     expect(runApiInSandbox).toHaveBeenCalledTimes(2)
@@ -320,7 +320,7 @@ describe('registerExecuteApiTool', () => {
 
     expect(ctxA.idempotencyKeyTtlMs).toBe(svc.idempotencyKeyTtlMs)
     expect(ctxA.correlationId).toBe('cid')
-    expect(ctxA.sessionId).toBe('sid')
+    expect(ctxA).not.toHaveProperty('sessionId')
     expect(ctxA.tokenPayload).toEqual(goodTokenWithUser)
     expect(ctxA.limits).toEqual(svc.sandboxLimits)
   })
@@ -344,7 +344,7 @@ describe('registerExecuteApiTool', () => {
 
     await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => {}' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     const audit = vi.mocked(writeAuditRecord).mock.calls[0]![0]
@@ -371,7 +371,7 @@ describe('registerExecuteApiTool', () => {
 
     await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     const audit = vi.mocked(writeAuditRecord).mock.calls[0]![0]
@@ -396,7 +396,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => api.request({})' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
@@ -436,7 +436,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => api.request({})' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
@@ -470,7 +470,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
@@ -503,7 +503,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
@@ -534,7 +534,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => bogus()' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
@@ -566,7 +566,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
@@ -603,7 +603,7 @@ describe('registerExecuteApiTool', () => {
 
     await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => 1' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(writeAuditRecord).toHaveBeenCalledTimes(1)
@@ -611,7 +611,7 @@ describe('registerExecuteApiTool', () => {
     expect(cfg.observability.enableAudit).toBe(false)
   })
 
-  it('generates correlationId/sessionId when the extra bag is empty and propagates both to the sandbox context', async () => {
+  it('generates a correlationId when the extra bag is empty and propagates it to the sandbox context; there is no session id', async () => {
     const svc = makeResources({ name: 'tasks' })
     vi.mocked(runApiInSandbox).mockResolvedValue({ ok: true })
 
@@ -628,8 +628,20 @@ describe('registerExecuteApiTool', () => {
 
     const ctx = vi.mocked(runApiInSandbox).mock.calls[0]![1]
     expect(ctx.correlationId).toMatch(/^[0-9a-f-]{36}$/)
-    expect(ctx.sessionId).toMatch(/^[0-9a-f-]{36}$/)
-    expect(ctx.correlationId).not.toBe(ctx.sessionId)
+    expect(ctx).not.toHaveProperty('sessionId')
+  })
+
+  it('a session id offered by the transport goes nowhere: not to the sandbox, the backend headers or the audit record', async () => {
+    const svc = makeResources({ name: 'tasks' })
+    vi.mocked(runApiInSandbox).mockResolvedValue({ ok: true })
+    registerExecuteApiTool(server as unknown as McpServer, makeRegistry({ tasks: svc }), globalConfig, silentLogger, metrics as unknown as MetricsRegistry, 'abc')
+
+    await server.handlers[TOOL.API_EXECUTE]!.handler({ service: 'tasks', code: 'async () => 1' }, { sessionId: 'legacy-session', mcpReq: { id: 'cid' } })
+
+    const ctx = vi.mocked(runApiInSandbox).mock.calls[0]![1]
+    expect(JSON.stringify(ctx)).not.toContain('legacy-session')
+    const audit = vi.mocked(writeAuditRecord).mock.calls[0]![0]
+    expect(JSON.stringify(audit)).not.toContain('legacy-session')
   })
 
   it('attaches structured progress to the error payload when the sandbox recorded calls before failing', async () => {
@@ -652,7 +664,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => bogus()' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)
@@ -686,7 +698,7 @@ describe('registerExecuteApiTool', () => {
 
     const r = await server.handlers[TOOL.API_EXECUTE]!.handler(
       { service: 'tasks', code: 'async () => bogus()' },
-      makeServerCtx('cid', 'sid')
+      makeServerCtx('cid')
     )
 
     expect(r.isError).toBe(true)

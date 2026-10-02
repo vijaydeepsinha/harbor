@@ -39,7 +39,7 @@ import { resolveOperation } from '../runtime/governance/operation-resolver.js'
 import { evaluateGovernance } from '../runtime/governance/rule-evaluator.js'
 import {
   mcpError, mcpSuccess,
-  extractCorrelationId, extractSessionId, readRequestMeta,
+  extractCorrelationId, readRequestMeta,
   resolveService, isToolError,
   validateAuth,
   type ToolResponse
@@ -166,7 +166,6 @@ async () => {
     { description: EXECUTE_DESCRIPTION, inputSchema: z.object({ service: z.string(), code: z.string() }) },
     async ({ service, code }, ctx): Promise<ToolResponse | InputRequiredResult> => {
       const correlationId = extractCorrelationId(ctx)
-      const sessionId = extractSessionId(ctx)
       // Advisory-only (never auth) request metadata, logged here as its first
       // real production consumer — see AdvisoryRequestMeta's invariant note.
       const requestMeta = readRequestMeta(ctx)
@@ -210,7 +209,7 @@ async () => {
             timestamp: new Date().toISOString(),
             service: svcResources.name,
             environment: globalConfig.observability.environment,
-            userIdHash, sessionId, correlationId,
+            userIdHash, correlationId,
             tool: TOOL.API_EXECUTE,
             authStrategy: authStrategyName,
             idempotencyStrategy: idempotencyStrategyName,
@@ -288,7 +287,6 @@ async () => {
           // Backends correlate every call of one script by its execution id — it
           // survives the new isolate (and new MCP request) of each approval resume.
           correlationId: executionId ?? correlationId,
-          sessionId,
           ...(callerClientId !== undefined ? { clientId: callerClientId } : {}),
           limits: sandboxLimits,
           ...(bridge ? { executionBridge: bridge } : { callLog })

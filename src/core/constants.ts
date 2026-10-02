@@ -122,6 +122,12 @@ export const HTTP_HEADER = {
   AUTHORIZATION: 'Authorization',
   CORRELATION_ID: 'X-Correlation-ID',
   REQUEST_SOURCE: 'X-Request-Source',
+  /**
+   * No longer sent: MCP 2026-07-28 is stateless, so there is no session to
+   * name (it carried a fresh random id per tool call). Still reserved — a
+   * program cannot set it — so a backend that once read it never starts
+   * trusting a value the program chose.
+   */
   SESSION_ID: 'X-MCP-Session-ID',
   MCP_TOOL: 'X-MCP-Tool',
   MCP_SERVICE: 'X-MCP-Service',
@@ -142,8 +148,7 @@ export const CONTENT_TYPE_JSON = 'application/json'
 export const AUTH_SCHEME = 'Bearer'
 
 // ── HTTP gateway surface ─────────────────────────────────────────────────────
-// These describe the gateway's own HTTP endpoints and the header the MCP
-// Streamable HTTP SDK uses to carry the session id. Kept in one place so the
+// These describe the gateway's own HTTP endpoints. Kept in one place so the
 // gateway, tests, and documentation share a single source of truth.
 
 export const HTTP_ROUTES = {

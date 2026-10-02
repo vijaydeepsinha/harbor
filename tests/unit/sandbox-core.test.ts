@@ -45,7 +45,7 @@ describe('runInSandbox — errors are classified by what happened, not by what a
       apiClient: { request: async () => { throw Object.assign(new Error('timeout of 100ms exceeded'), { code: 'ECONNABORTED' }) } },
       circuitBreaker: noopCircuitBreaker(),
       permissionGuard: forwardTokenPermissionGuard(),
-      idempotencyKey: 'k', idempotencyKeyTtlMs: 1000, correlationId: 'c', sessionId: 's',
+      idempotencyKey: 'k', idempotencyKeyTtlMs: 1000, correlationId: 'c',
       callLog: new CallLog(),
       limits: { memoryLimitMb: 32, executeTimeoutMs: 2000, searchTimeoutMs: 1000, maxApiCalls: 5, maxConcurrentCalls: 2 }
     }

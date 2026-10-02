@@ -132,7 +132,6 @@ describe('execute sandbox', () => {
       idempotencyKey: 'test-idempotency-key',
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'test-correlation-id',
-      sessionId: 'test-session-id',
       limits: testSandboxLimits
     }
     const result = await runApiInSandbox(
@@ -220,7 +219,6 @@ describe('execute sandbox', () => {
             idempotencyKey: 'k',
             idempotencyKeyTtlMs: 600_000,
             correlationId: 'c',
-            sessionId: 's',
             limits: testSandboxLimits
           }
 
@@ -265,7 +263,6 @@ describe('execute sandbox', () => {
       idempotencyKey: 'k',
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'c',
-      sessionId: 's',
       limits: tight
     }
 
@@ -310,7 +307,6 @@ describe('execute sandbox — permissionGuard enforcement', () => {
       idempotencyKey: 'k',
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'c',
-      sessionId: 's',
       limits: testSandboxLimits
     }
 
@@ -345,7 +341,6 @@ describe('execute sandbox — permissionGuard enforcement', () => {
       idempotencyKey: 'k',
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'c',
-      sessionId: 's',
       limits: testSandboxLimits
     }
 
@@ -368,7 +363,6 @@ describe('execute sandbox — error sanitization', () => {
     idempotencyKey: 'k',
     idempotencyKeyTtlMs: 600_000,
     correlationId: 'c',
-    sessionId: 's',
     limits: testSandboxLimits
   })
 
@@ -447,7 +441,6 @@ describe('execute sandbox — resource limits', () => {
       idempotencyKey: 'k',
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'c',
-      sessionId: 's',
       limits: tight
     }
 
@@ -490,7 +483,6 @@ describe('execute sandbox — resource limits', () => {
       idempotencyKey: 'k',
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'c',
-      sessionId: 's',
       limits: tight
     }
 

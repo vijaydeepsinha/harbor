@@ -362,7 +362,6 @@ export class BridgeRequestHandler {
         idempotencyKey: `${ctx.idempotencyKey}-${callKey}`,
         idempotencyKeyTtlMs: ctx.idempotencyKeyTtlMs,
         correlationId: ctx.correlationId,
-        sessionId: ctx.sessionId,
         ...(ctx.clientId !== undefined ? { clientId: ctx.clientId } : {}),
         // The breaker is checked and credited under `endpoint` here; failures must land on the same key.
         endpoint,

@@ -33,7 +33,7 @@ function capturingLogger() {
 }
 
 const record = (service = 'product'): AuditRecord => ({
-  auditId: 'a', timestamp: 't', service, environment: 'dev', userIdHash: 'h', sessionId: 's', correlationId: 'c',
+  auditId: 'a', timestamp: 't', service, environment: 'dev', userIdHash: 'h', correlationId: 'c',
   tool: TOOL.API_EXECUTE, authStrategy: 'static-token', idempotencyStrategy: 'noop', circuitBreakerStrategy: 'noop',
   codeSubmitted: 'async () => 1', endpointsAccessed: [], apiCallCount: 0, durationMs: 1, outcome: 'success'
 })

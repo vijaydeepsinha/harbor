@@ -64,7 +64,7 @@ function makeCtx(
   return {
     tokenPayload, invalidate: async () => {}, apiClient: connector,
     circuitBreaker: noopCircuitBreaker(), permissionGuard: forwardTokenPermissionGuard(),
-    idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c', sessionId: 's',
+    idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c',
     limits: { memoryLimitMb: 64, executeTimeoutMs: 5000, searchTimeoutMs: 1000, maxApiCalls: 20, maxConcurrentCalls: 3 },
     executionBridge: {
       journal: new ActivityJournal(persistence, executionId, 'trafficking', runIndex),
