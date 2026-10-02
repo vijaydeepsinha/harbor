@@ -62,7 +62,7 @@ describe('§47 acceptance: two approval rounds, every side effect exactly once',
     expect(count('GET', '/campaigns')).toBe(1)          // #1 executed
     expect(count('GET', '/campaigns/C1/creatives')).toBe(1) // #2 executed
     expect(count('POST', '/campaigns/C1')).toBe(0)      // #3 paused before executing
-    let acts = await rt.store.listActivities(executionId)
+    let acts = await rt.persistence.listActivities(executionId)
     expect(acts.map(a => [a.sequence, a.status])).toEqual([[1, 'COMPLETED'], [2, 'COMPLETED'], [3, 'WAITING_APPROVAL']])
     expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
 
@@ -73,7 +73,7 @@ describe('§47 acceptance: two approval rounds, every side effect exactly once',
     expect(count('GET', '/campaigns/C1/creatives')).toBe(1) // #2 replayed
     expect(count('POST', '/campaigns/C1')).toBe(1)      // #3 executed after approval
     expect(count('POST', '/campaigns/C1/creative')).toBe(0) // #4 paused
-    acts = await rt.store.listActivities(executionId)
+    acts = await rt.persistence.listActivities(executionId)
     expect(acts.map(a => [a.sequence, a.status])).toEqual([
       [1, 'COMPLETED'], [2, 'COMPLETED'], [3, 'COMPLETED'], [4, 'WAITING_APPROVAL']
     ])

@@ -46,11 +46,11 @@ function makeRouteRegistry() {
   return registry
 }
 
-async function start(codeMode: ReturnType<typeof makeRuntime>, registry = makeRouteRegistry()) {
+async function start(durableExecutionRuntime: ReturnType<typeof makeRuntime>, registry = makeRouteRegistry()) {
   const handle = startHttpGateway({
     host: '127.0.0.1', port: 0,
     createMcpServer: () => { throw new Error('not expected') },
-    registry, logger: silentLogger, codeMode
+    registry, logger: silentLogger, durableExecutionRuntime
   })
   await new Promise<void>(resolve => handle.server.once('listening', () => resolve()))
   const { port } = handle.server.address() as AddressInfo
@@ -68,7 +68,7 @@ async function seedPaused(rt: ReturnType<typeof makeRuntime>, token = TOKEN, use
   })
   const exec = await rt.manager.create({ service: 'trafficking', code: 'async () => 1', userIdHash })
   await rt.manager.beginRun(exec.executionId)
-  const journal = new ActivityJournal(rt.store, exec.executionId, 'trafficking', 1)
+  const journal = new ActivityJournal(rt.persistence, exec.executionId, 'trafficking', 1)
   const request = { method: 'POST' as const, rawPath: '/campaigns/C1', specPath: '/campaigns/{id}', operationId: 'updateCampaign', body: { action: 'activate' } }
   await journal.next(request)
   const approval = await rt.approvals.request(exec.executionId, 1, { ...request, service: 'trafficking', reason: 'r', matchedRules: ['x'] })
@@ -197,7 +197,7 @@ describe('execution routes', () => {
   it('returns a conflict when another operation holds the execution lock', async () => {
     const rt = makeRuntime()
     const { executionId, approvalId } = await seedPaused(rt)
-    expect(await rt.store.acquireLock(executionId)).toBe(true)
+    expect(await rt.persistence.acquireLock(executionId)).toBe(true)
     const { baseUrl, close } = await start(rt); cleanup = close
 
     const decision = await fetch(`${baseUrl}/executions/${executionId}/approvals/${approvalId}`, {
@@ -210,7 +210,7 @@ describe('execution routes', () => {
     expect((await decision.json() as { code: string }).code).toBe(ERR.EXECUTION_LOCKED)
     expect((await rt.approvals.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
     expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
-    await rt.store.releaseLock(executionId)
+    await rt.persistence.releaseLock(executionId)
   })
 
   it('decline over HTTP denies the execution', async () => {
@@ -254,7 +254,7 @@ describe('execution routes', () => {
     expect(res.status).toBe(200)
   })
 
-  it('is absent when no Code Mode runtime is configured', async () => {
+  it('is absent when no durable execution runtime is configured', async () => {
     const handle = startHttpGateway({
       host: '127.0.0.1', port: 0, createMcpServer: () => { throw new Error('no') }, registry: new ServiceRegistry(), logger: silentLogger
     })

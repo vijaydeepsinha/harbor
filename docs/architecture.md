@@ -36,7 +36,7 @@ Harbor sits between an AI agent (Claude, Cursor, or any MCP client) and one or m
 │   gateway (service resources)                   metrics, logger)         │
 │        │ contracts                         ▲ built by                    │
 │        ▼                                   │                             │
-│  src/spi/   auth · connector · execution (CodeModeStore) ·               │
+│  src/spi/   auth · connector · execution (ExecutionPersistence) ·               │
 │             governance (GovernanceRuleSource) · observability            │
 │             (AuditSink) · idempotency · permissions · resilience · spec  │
 │        ▲ implemented by                    │                             │
@@ -54,7 +54,7 @@ Harbor sits between an AI agent (Claude, Cursor, or any MCP client) and one or m
                                             └─────────────────────────┘
 ```
 
-There is no session state anywhere: every MCP request gets its own `McpServer`, and everything that must outlive a request — executions, the activity journal, approvals — lives in the `CodeModeStore`.
+There is no session state anywhere: every MCP request gets its own `McpServer`, and everything that must outlive a request — executions, the activity journal, approvals — lives in the `ExecutionPersistence`.
 
 ---
 
@@ -71,7 +71,7 @@ Every other layer imports from here; nothing here imports from another Harbor la
 | `types/auth.types.ts` | `AuthStrategy`, `TokenCacheStrategy`, `TokenPayload`, `AuthResult`, the `AuthError` hierarchy |
 | `types/audit.types.ts` | `AuditRecord` — one `api_execute` call in the audit trail |
 | `types/circuit-breaker.types.ts` | `CircuitBreakerStrategy`, `CircuitState`, `CircuitOpenError` |
-| `types/config.types.ts` | `GlobalConfig`, `CodeModeConfig`, `SandboxLimits`, `SandboxOverride`, `ServiceAuthConfig`, token-cache / idempotency / execution-store backend configs |
+| `types/config.types.ts` | `GlobalConfig`, `ExecutionConfig`, `SandboxLimits`, `SandboxOverride`, `ServiceAuthConfig`, token-cache / idempotency / execution-store backend configs |
 | `types/connector.types.ts` | `ApiRequest`, `ApiResponse`, `ExecuteRequestContext` — the transport contract types |
 | `types/execution.types.ts` | `ExecutionRecord`, `ActivityRecord`, `ApprovalRecord`, `GovernanceDecisionRecord`; the `ExecutionError` hierarchy (`ApprovalRequiredError`, `GovernanceDeniedError`, `ReplayDivergedError`, `ExecutionLockedError`, …) |
 | `types/idempotency.types.ts` | `IdempotencyStrategy` |
@@ -90,7 +90,7 @@ Every other layer imports from here; nothing here imports from another Harbor la
 
 ### `src/spi/` — Extension Contracts   ✅ Stable / 🟡 Experimental (execution, governance)
 
-SPI = _Service Provider Interface_. Defines what the framework calls; `src/adapters/` (or third-party code) implements it. Several interfaces are declared in `src/core/types/` and have their default implementation here. `CodeModeStore` and `GovernanceRuleSource` belong to the Code Mode governance layer, new in 1.0.0, and may still gain members in a minor release (`API_STABILITY.md`).
+SPI = _Service Provider Interface_. Defines what the framework calls; `src/adapters/` (or third-party code) implements it. Several interfaces are declared in `src/core/types/` and have their default implementation here. `ExecutionPersistence` and `GovernanceRuleSource` belong to the Code Mode governance layer, new in 1.0.0, and may still gain members in a minor release (`API_STABILITY.md`).
 
 | Contract | Interface | Default |
 |----------|-----------|---------|
@@ -99,7 +99,7 @@ SPI = _Service Provider Interface_. Defines what the framework calls; `src/adapt
 | `src/spi/auth/auth-middleware.ts` | `AuthMiddleware` — token cache, validation, proactive refresh | — |
 | `src/spi/auth/bearer-authorization.ts`, `bearer-header-parser.ts` | Bearer header parsing: one header, `Bearer` scheme, a JWT or ≥ 32 base64url characters | — |
 | `src/spi/connector/connector-api.ts` | `ConnectorAPI` | `ApiClient` (HTTP/axios) |
-| `src/spi/execution/execution-store.ts` | `CodeModeStore` — executions, activities, approvals, decisions, run lock | in-memory adapter |
+| `src/spi/execution/execution-store.ts` | `ExecutionPersistence` — executions, activities, approvals, decisions, run lock | in-memory adapter |
 | `src/spi/governance/rule-source.ts` | `GovernanceRuleSource` | `DirectoryRuleSourceStrategy` (`dir`); `UrlRuleSourceStrategy` (`url`) — both in `src/spi/governance/strategies/` |
 | `src/spi/observability/audit-sink.ts` | `AuditSink`, `AuditEvent`, `ExecutionStateSnapshot` | `ConsoleAuditSink` (adapter) |
 | `src/spi/idempotency/strategies/` | `IdempotencyStrategy` | `NoopIdempotencyStrategy` |
@@ -140,7 +140,7 @@ src/adapters/
 │   ├── memcache-token-cache.strategy.ts   Memcache KV with TTL
 │   └── couchbase-token-cache.strategy.ts  Couchbase KV with TTL
 ├── execution/
-│   ├── in-memory-execution-store.ts       CodeModeStore in process memory (default); process-local lock
+│   ├── in-memory-execution-store.ts       ExecutionPersistence in process memory (default); process-local lock
 │   ├── file-execution-store.ts            in-memory store persisted to EXECUTION_STORE_DIR
 │   └── memcache-execution-store.ts        shared across pods: records + run lock (add + TTL) in memcache
 ├── idempotency/strategies/
@@ -171,7 +171,7 @@ import {
 // Called once at startup, before createMcpGateway()
 registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCache(config, ttlMs))
 registerIdempotencyBackend('postgres', (config, logger) => new PostgresIdempotency(config))
-registerExecutionStoreBackend('postgres', (config, logger) => new PostgresCodeModeStore(config))
+registerExecutionStoreBackend('postgres', (config, logger) => new PostgresExecutionStore(config))
 ```
 `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept a built-in type or any kebab-case name (`^[a-z][a-z0-9-]*$`); a per-service `config.json` `idempotency.type` may name a registered backend too. The builder checks the registry before its built-in switch and refuses a name nothing registered: at boot for the env vars, by skipping the service for `config.json`. `AUDIT_SINKS` and `GOVERNANCE_RULES_SOURCE` resolve the same way.
 
@@ -196,7 +196,7 @@ src/runtime/
 │   ├── approval-service.ts        human approvals bound to one activity; decide() exactly once
 │   ├── request-state.ts           HMAC-sealed MRTR requestState codec (TTL, bound to the JSON-RPC method)
 │   ├── execution-retention.ts     sweeps terminal executions after EXECUTION_RETENTION_SEC
-│   └── code-mode-runtime.ts       process-wide wiring of store, manager, approvals, rules, codec
+│   └── durable-execution-runtime.ts       process-wide wiring of store, manager, approvals, rules, codec
 ├── governance/
 │   ├── operation-resolver.ts      canonical path + method → OpenAPI template, operationId, path params
 │   ├── rule-schema.ts             Zod schema of a Governance Rule (match, conditions, levels, final)
@@ -270,7 +270,7 @@ Five tools, registered on a fresh `McpServer` for every request by `src/runtime/
 
 ### `api_execute` — Full Path
 
-The booted gateway always builds a `CodeModeRuntime`, so every `api_execute` is a governed, durable execution. (Without a runtime — tests, or an embedder calling `registerExecuteApiTool` without one — the tool runs the legacy path: no execution, journal or governance, only the in-run `CallLog`.)
+The booted gateway always builds a `DurableExecutionRuntime`, so every `api_execute` is a governed, durable execution. (Without a runtime — tests, or an embedder calling `registerExecuteApiTool` without one — the tool runs the legacy path: no execution, journal or governance, only the in-run `CallLog`.)
 
 ```
 AI Agent
@@ -342,7 +342,7 @@ Every backend call carries `X-Idempotency-Key`, and the configured `IdempotencyS
 | Path | Key |
 |------|-----|
 | Governed (always, in the booted gateway) | `mcp-{service}-{executionId}-{sequence}` — two executions of one program never share a key; a resume keeps its keys |
-| Legacy (no `CodeModeRuntime`) | `mcp-{service}-{userIdHash12}-{codeHash16}-c{n}` — `n` is the call's arrival index in the run, so an agent retrying the identical tool call is deduplicated |
+| Legacy (no `DurableExecutionRuntime`) | `mcp-{service}-{userIdHash12}-{codeHash16}-c{n}` — `n` is the call's arrival index in the run, so an agent retrying the identical tool call is deduplicated |
 
 ### Read Path (`discover_services`, `discover_skills`, `get_skill_details`, `search_code`)
 
@@ -395,7 +395,7 @@ src/runtime/server-factory.ts
   │
   ├─ 4. AuditPipeline — buildAuditSinks(AUDIT_SINKS) when ENABLE_AUDIT, else no sinks
   │
-  ├─ 5. buildCodeModeRuntime(globalConfig.codeMode, logger, auditPipeline)
+  ├─ 5. buildDurableExecutionRuntime(globalConfig.execution, logger, auditPipeline)
   │         ├─ buildExecutionStore(EXECUTION_STORE_TYPE)
   │         ├─ ExecutionManager (state changes → audit pipeline) · retention sweeper · ApprovalService
   │         ├─ Governance Rules: buildGovernanceRuleSource → load → validate
@@ -403,14 +403,14 @@ src/runtime/server-factory.ts
   │         ├─ GovernanceRuleRefresher (GOVERNANCE_RULES_REFRESH_SEC; 0 = boot only)
   │         └─ requestState codec (GOVERNANCE_REQUEST_STATE_KEY, else a per-process random key)
   │
-  ├─ 6. buildMcpServerFactory({ registry, globalConfig, logger, metrics, stdioToken, codeMode, auditPipeline })
+  ├─ 6. buildMcpServerFactory({ registry, globalConfig, logger, metrics, stdioToken, durableExecutionRuntime, auditPipeline })
   │
   └─ 7. start transport
           HTTP:  startHttpGateway({ host, port, maxBodyBytes, createMcpServer, registry, logger,
-                                   oauthConfig, codeMode })
+                                   oauthConfig, durableExecutionRuntime })
           stdio: MCP_TOKEN required and must pass the bearer parser, else exit;
                  startStdioGateway({ createMcpServer, registry, logger })
-          SIGTERM / SIGINT: close the HTTP listener, then codeMode.shutdown(), auditPipeline.close(),
+          SIGTERM / SIGINT: close the HTTP listener, then durableExecutionRuntime.shutdown(), auditPipeline.close(),
                  token cache destroy, registry.shutdownAll() (refreshers, metrics), gateway metrics stop
 ```
 
@@ -458,7 +458,7 @@ A throw becomes a FAILED activity with an unknown outcome. The run stops there a
 |----------|-------------|----------|
 | `registerTokenCacheBackend(type, factory)` | `TOKEN_CACHE_TYPE` | `TokenCacheStrategy` (extend `AbstractTokenCache`) |
 | `registerIdempotencyBackend(type, factory)` | `IDEMPOTENCY_TYPE`, or `config.json` `idempotency.type` | `IdempotencyStrategy` |
-| `registerExecutionStoreBackend(type, factory)` | `EXECUTION_STORE_TYPE` | `CodeModeStore`; run the contract suite in `tests/unit/execution-store.test.ts` |
+| `registerExecutionStoreBackend(type, factory)` | `EXECUTION_STORE_TYPE` | `ExecutionPersistence`; run the contract suite in `tests/unit/execution-store.test.ts` |
 | `registerAuditSinkBackend(type, factory)` | an entry of `AUDIT_SINKS` | `AuditSink` |
 | `registerGovernanceRuleSourceBackend(type, factory)` | `GOVERNANCE_RULES_SOURCE` | `GovernanceRuleSource` (`load()` throws rather than return part of a set) |
 
@@ -565,7 +565,7 @@ The governance-specific limitations (untargeted calls are ungoverned, rule targe
 | `src/core/types/` | ✅ Stable | Most SPI interfaces are declared here |
 | `src/tools/` | ✅ Stable | Tool names + input schemas are public API and frozen |
 | `src/spi/` | ✅ Stable | Interfaces frozen; adding a required member is breaking |
-| `src/spi/execution/`, `src/spi/governance/` | 🟡 Experimental | `CodeModeStore`, `GovernanceRuleSource` — may gain members in a minor release |
+| `src/spi/execution/`, `src/spi/governance/` | 🟡 Experimental | `ExecutionPersistence`, `GovernanceRuleSource` — may gain members in a minor release |
 | `src/adapters/` | ✅ Stable | Internal field names may change; public factory signatures are stable |
 | `src/runtime/registry/service-registry.ts` | ✅ Stable | `ServiceResources` shape is public API |
 | `src/runtime/http/` | ✅ Stable | Stateless HTTP transport, body limits, protected-resource metadata |
@@ -601,4 +601,4 @@ The governance-specific limitations (untargeted calls are ungoverned, rule targe
 2. **Governance before side effect, journal before call** — the bridge canonicalises the path, evaluates rules and journals the activity EXECUTING before the connector is called. A completed activity is replayed, never re-executed; an unknown outcome stops the run.
 3. **SPI boundary** — `src/runtime/` imports `src/spi/` contracts and `src/wiring/`, never `src/adapters/` concrete classes directly. `src/wiring/` is the composition root and the sole exception by design.
 4. **`src/core/` independence** — `src/core/` has no imports from `src/runtime/`, `src/tools/`, `src/spi/`, `src/wiring/` or `src/adapters/`. It stays importable by consumers without pulling in the framework.
-5. **Stateless transport** — execution state lives in `CodeModeStore`, never in an MCP session or a per-connection map.
+5. **Stateless transport** — execution state lives in `ExecutionPersistence`, never in an MCP session or a per-connection map.

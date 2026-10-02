@@ -120,7 +120,7 @@ More requests (`server/discover`, `search_code`, `api_execute`): [`docs/getting-
 src/              All gateway source; tsconfig rootDir, compiled to dist/.
   index.ts        Process entry — validates config, boots the gateway.
   core/           Types, constants, config schema (zod), shared utilities. Imports nothing else in src/.
-  spi/            Contracts: ConnectorAPI, AuthMiddleware, PermissionGuard, SpecLoader, CodeModeStore,
+  spi/            Contracts: ConnectorAPI, AuthMiddleware, PermissionGuard, SpecLoader, ExecutionPersistence,
                   GovernanceRuleSource, AuditSink, …
   adapters/       Concrete implementations: token caches, idempotency, circuit breaker, auth strategies,
                   execution stores (in-memory, file, memcache), console audit sink

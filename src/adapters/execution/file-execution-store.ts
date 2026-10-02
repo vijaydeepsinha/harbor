@@ -4,10 +4,10 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Logger } from '../../core/types/logger.types.js'
-import type { CodeModeStore } from '../../spi/execution/execution-store.js'
+import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
 import { EXECUTION_STORE_TYPE } from '../../core/constants.js'
 import { errorMessage } from '../../core/utils/errors.js'
-import { InMemoryCodeModeStore, type ExecutionSnapshot } from './in-memory-execution-store.js'
+import { InMemoryExecutionStore, type ExecutionSnapshot } from './in-memory-execution-store.js'
 
 /**
  * File-backed store: one JSON document per execution under `dir`, written
@@ -18,7 +18,7 @@ import { InMemoryCodeModeStore, type ExecutionSnapshot } from './in-memory-execu
  * Locks are process-local (inherited) — a durable lock is a follow-up for
  * multi-instance deployments; see docs/code-mode-governance.md.
  */
-export class FileCodeModeStore extends InMemoryCodeModeStore {
+export class FileExecutionStore extends InMemoryExecutionStore {
   override readonly name: string = EXECUTION_STORE_TYPE.FILE
 
   constructor(private readonly dir: string, private readonly logger?: Logger) {
@@ -70,6 +70,6 @@ export class FileCodeModeStore extends InMemoryCodeModeStore {
   }
 }
 
-export function fileCodeModeStore(dir: string, logger?: Logger): CodeModeStore {
-  return new FileCodeModeStore(dir, logger)
+export function fileExecutionStore(dir: string, logger?: Logger): ExecutionPersistence {
+  return new FileExecutionStore(dir, logger)
 }

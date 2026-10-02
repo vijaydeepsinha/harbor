@@ -331,7 +331,7 @@ export function validateGlobalConfig(): GlobalConfig {
       memcachePrefix: 'IDEMPOTENCY_MEMCACHE_',
       couchbasePrefix: 'IDEMPOTENCY_CB_',
     }) as IdempotencyBackendConfig,
-    codeMode: {
+    execution: {
       store: resolveExecutionStoreConfig(env),
       retention: { code: env.EXECUTION_CODE_RETENTION, executionSec: env.EXECUTION_RETENTION_SEC },
       governance: {

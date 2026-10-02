@@ -10,7 +10,7 @@ import { buildTokenCacheStrategy, buildAuditSinks } from './gateway/strategy-bui
 import { buildServiceResources } from './gateway/service-resources-factory.js'
 import { startHttpGateway } from './http/http-gateway.js'
 import { buildMcpServerFactory } from './http/mcp-server-factory.js'
-import { buildCodeModeRuntime } from './execution/code-mode-runtime.js'
+import { buildDurableExecutionRuntime } from './execution/durable-execution-runtime.js'
 import { AuditPipeline } from './observability/audit-pipeline.js'
 import { startStdioGateway } from './transport/stdio-gateway.js'
 import { GATEWAY_NAME, STORE_TYPE } from '../core/constants.js'
@@ -82,8 +82,8 @@ export async function createMcpGateway(
   )
   gatewayLogger.info({ sinks: auditPipeline.sinkNames }, 'Audit pipeline ready')
 
-  // Process-wide Code Mode governance layer: executions outlive requests and isolates.
-  const codeMode = await buildCodeModeRuntime(globalConfig.codeMode, gatewayLogger, auditPipeline)
+  // Process-wide durable execution runtime: executions outlive requests and isolates.
+  const durableExecutionRuntime = await buildDurableExecutionRuntime(globalConfig.execution, gatewayLogger, auditPipeline)
 
   const createMcpServer = buildMcpServerFactory({
     registry,
@@ -91,7 +91,7 @@ export async function createMcpGateway(
     logger: gatewayLogger,
     metrics: gatewayMetrics,
     stdioToken: transportMode === 'stdio' ? stdioPat : undefined,
-    codeMode,
+    durableExecutionRuntime,
     auditPipeline
   })
 
@@ -99,7 +99,7 @@ export async function createMcpGateway(
   // and metrics in the same order; any transport-specific teardown (e.g.
   // closing the HTTP listener) runs *before* this.
   const shutdownShared = () => {
-    void codeMode.shutdown().catch(err => gatewayLogger.warn({ error: errorMessage(err) }, 'Code Mode store shutdown failed'))
+    void durableExecutionRuntime.shutdown().catch(err => gatewayLogger.warn({ error: errorMessage(err) }, 'Code Mode store shutdown failed'))
     void auditPipeline.close()
     tokenCacheStrategy.destroy()
     registry.shutdownAll()
@@ -115,7 +115,7 @@ export async function createMcpGateway(
       ...(globalConfig.mcp.maxBodyBytes !== undefined ? { maxBodyBytes: globalConfig.mcp.maxBodyBytes } : {}),
       createMcpServer, registry, logger: gatewayLogger,
       oauthConfig: globalConfig.oauth,
-      codeMode
+      durableExecutionRuntime
     })
 
     const httpShutdown = (signal: string) => {

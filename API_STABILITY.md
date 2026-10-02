@@ -58,10 +58,10 @@ Adding a required member to any of these is a breaking change for every downstre
 | `PermissionGuard` | `src/core/types/permission.types.ts` | `filterSpec(spec, token)`, `canExecute(endpoint, method, token)` | ✅ |
 | `SpecLoaderStrategy` | `src/core/types/spec.types.ts` | `name`, `load(): Promise<OpenAPISpec>` | ✅ |
 | `AuditSink` | `src/spi/observability/audit-sink.ts` | `name`, `write(event)`, `close?()` | ✅ |
-| `CodeModeStore` | `src/spi/execution/execution-store.ts` | `name`, `destroy?` plus the execution, activity, approval, decision and lock stores it extends | 🟡 |
+| `ExecutionPersistence` | `src/spi/execution/execution-store.ts` | `name`, `destroy?` plus the execution, activity, approval, decision and lock stores it extends | 🟡 |
 | `GovernanceRuleSource` | `src/spi/governance/rule-source.ts` | `name`, `load(): Promise<GovernanceRuleDocument[]>` (throws rather than return part of a set) | 🟡 |
 
-`CodeModeStore` and `GovernanceRuleSource` belong to the Code Mode governance layer, which is new in 1.0.0 and still has open decisions (`ROADMAP.md`); their contracts may gain members in a MINOR release. The `AuditEvent` payload `AuditSink.write` receives is 🟡 (see [Audit event shapes](#audit-event-shapes)).
+`ExecutionPersistence` and `GovernanceRuleSource` belong to the Code Mode governance layer, which is new in 1.0.0 and still has open decisions (`ROADMAP.md`); their contracts may gain members in a MINOR release. The `AuditEvent` payload `AuditSink.write` receives is 🟡 (see [Audit event shapes](#audit-event-shapes)).
 
 ---
 

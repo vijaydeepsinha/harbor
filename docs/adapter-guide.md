@@ -22,7 +22,7 @@ src/runtime/ ──► src/spi/, src/core/types/   (contracts)
 |----------------|----------|-------------|---------------|
 | Token cache | `src/core/types/auth.types.ts → TokenCacheStrategy` (base class: `src/spi/auth/abstract-token-cache.ts`) | `TOKEN_CACHE_TYPE` — one cache for the whole gateway | `registerTokenCacheBackend` |
 | Idempotency | `src/core/types/idempotency.types.ts → IdempotencyStrategy` | `idempotency.type` in a service's `config.json`; `IDEMPOTENCY_TYPE` for services without an `idempotency` block | `registerIdempotencyBackend` |
-| Execution store | `src/spi/execution/execution-store.ts → CodeModeStore` | `EXECUTION_STORE_TYPE` | `registerExecutionStoreBackend` |
+| Execution store | `src/spi/execution/execution-store.ts → ExecutionPersistence` | `EXECUTION_STORE_TYPE` | `registerExecutionStoreBackend` |
 | Audit sink | `src/spi/observability/audit-sink.ts → AuditSink` | `AUDIT_SINKS` — a comma list; every sink receives every event | `registerAuditSinkBackend` |
 | Governance Rule source | `src/spi/governance/rule-source.ts → GovernanceRuleSource` | `GOVERNANCE_RULES_SOURCE` | `registerGovernanceRuleSourceBackend` |
 | Outbound connector | `src/spi/connector/connector-api.ts → ConnectorAPI` | — built per service in `src/runtime/gateway/service-resources-factory.ts` | none (see [below](#writing-a-custom-outbound-connector-connectorapi)) |
@@ -49,7 +49,7 @@ import {
 
 registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCache(ttlMs, logger))
 registerIdempotencyBackend('postgres', (config, logger) => new PostgresIdempotency(String(config['connectionString']), logger))
-registerExecutionStoreBackend('dynamo-db', (config, logger) => new DynamoCodeModeStore(logger))
+registerExecutionStoreBackend('dynamo-db', (config, logger) => new DynamoExecutionStore(logger))
 registerAuditSinkBackend('siem', ({ loggerFor }) => new SiemAuditSink(loggerFor))
 registerGovernanceRuleSourceBackend('config-service', (governance, logger) => new ConfigServiceRuleSource(logger))
 
@@ -86,7 +86,7 @@ or, for idempotency, per service in `config.json`:
 | `IdempotencyFactory` | `(config, logger)`. From `config.json`, the service's whole `idempotency` block, extra keys included; from `IDEMPOTENCY_TYPE`, `{ type }`. Called once per service. |
 | `ExecutionStoreFactory` | `(config, logger)` with `config` = `{ type }`. |
 | `AuditSinkFactory` | `({ loggerFor })` — `loggerFor(service)` returns that service's logger. |
-| `GovernanceRuleSourceFactory` | `(governance, logger)` — the `CodeModeConfig['governance']` block (`rulesDir`, `rulesUrl`, `rulesRefreshSec`, …). |
+| `GovernanceRuleSourceFactory` | `(governance, logger)` — the `ExecutionConfig['governance']` block (`rulesDir`, `rulesUrl`, `rulesRefreshSec`, …). |
 
 ---
 
@@ -166,11 +166,18 @@ See `src/adapters/idempotency/strategies/memcache-idempotency.strategy.ts` for a
 
 **File location:** `src/adapters/execution/<name>-execution-store.ts`
 
-Implement `CodeModeStore` from `src/spi/execution/execution-store.ts` — one object that is all of:
+Implement `ExecutionPersistence` from `src/spi/execution/execution-store.ts` — one object that is all of:
+
+`ExecutionRecordStore` covers execution records; `ExecutionPersistence` combines it
+with the related stores and run locking. One adapter implements the combined contract.
+
+The runtime exposes this contract as `DurableExecutionRuntime.persistence`.
+Its settings are in `GlobalConfig.execution`; the `store` setting selects the
+storage adapter and is configuration, not an `ExecutionPersistence` instance.
 
 | Part | Methods |
 |------|---------|
-| `ExecutionStore` | `createExecution`, `getExecution`, `updateExecution`, `deleteExecution`, `listExpiredExecutions(now, limit)` |
+| `ExecutionRecordStore` | `createExecution`, `getExecution`, `updateExecution`, `deleteExecution`, `listExpiredExecutions(now, limit)` |
 | `ActivityStore` | `putActivity`, `getActivity`, `listActivities` (ascending by sequence) |
 | `ApprovalStore` | `putApproval`, `getApproval`, `listApprovals` (ascending by `createdAt`) |
 | `GovernanceDecisionStore` | `putDecision`, `listDecisions` (ascending by `evaluatedAt`) |
@@ -266,7 +273,7 @@ Look at these for the patterns the built-ins use:
 | `tests/unit/token-cache.test.ts` | token caches |
 | `tests/unit/idempotency.test.ts` | idempotency strategies |
 | `tests/unit/strategy-builders.test.ts` | registration, precedence, unknown names |
-| `tests/unit/execution-store.test.ts` | the `CodeModeStore` contract suite |
+| `tests/unit/execution-store.test.ts` | the `ExecutionPersistence` contract suite |
 | `tests/unit/audit-pipeline.test.ts` | audit sinks |
 | `tests/unit/governance-rule-sources.test.ts` | rule sources, boot and refresh failures |
 
@@ -301,7 +308,7 @@ npx vitest run tests/unit/token-cache.test.ts
 | OAuth 2.1 discovery auth | `src/adapters/auth/strategies/oauth-discovery.strategy.ts` | `oauth-2.1` |
 | HTTP connector | `src/runtime/api-client/api-client.ts` | — |
 
-The token-cache, idempotency, circuit-breaker, auth and permission contracts are in `src/core/types/`; `ConnectorAPI`, `CodeModeStore`, `GovernanceRuleSource` and `AuditSink` are in `src/spi/`. Follow the same pattern for your custom adapters.
+The token-cache, idempotency, circuit-breaker, auth and permission contracts are in `src/core/types/`; `ConnectorAPI`, `ExecutionPersistence`, `GovernanceRuleSource` and `AuditSink` are in `src/spi/`. Follow the same pattern for your custom adapters.
 
 ---
 

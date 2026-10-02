@@ -641,6 +641,6 @@ call rather than a fix.
 | 9 | V8 cannot bypass governance | every call crosses `__makeRequest`; no network in the isolate |
 | 10 | completed POSTs never replay against the service | replay returns the stored response |
 | 11 | transport stateless | no session; per-request `McpServer` |
-| 12 | durability in the store | `CodeModeStore` |
+| 12 | durability in the store | `ExecutionPersistence` |
 | 13 | Skills ≠ Governance Rules | separate directories, code, vocabulary |
 | 14 | decisions deterministic, no LLM | pure evaluator; no model dependency |

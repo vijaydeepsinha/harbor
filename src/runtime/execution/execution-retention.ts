@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import type { Logger } from '../../core/types/logger.types.js'
-import type { CodeModeStore } from '../../spi/execution/execution-store.js'
+import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
 import { errorMessage } from '../../core/utils/errors.js'
 
 /** Deletions per store query, so one sweep never loads an unbounded list. */
@@ -22,7 +22,7 @@ export class ExecutionRetentionSweeper {
   private running = false
 
   constructor(
-    private readonly store: CodeModeStore,
+    private readonly persistence: ExecutionPersistence,
     private readonly retentionSec: number,
     private readonly logger: Logger,
     private readonly now: () => string = () => new Date().toISOString()
@@ -47,9 +47,9 @@ export class ExecutionRetentionSweeper {
     try {
       const now = this.now()
       for (;;) {
-        const expired = await this.store.listExpiredExecutions(now, SWEEP_BATCH)
+        const expired = await this.persistence.listExpiredExecutions(now, SWEEP_BATCH)
         for (const executionId of expired) {
-          await this.store.deleteExecution(executionId)
+          await this.persistence.deleteExecution(executionId)
           deleted++
         }
         if (expired.length < SWEEP_BATCH) break

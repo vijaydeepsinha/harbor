@@ -9,7 +9,7 @@ import type {
 } from '../../core/types/execution.types.js'
 
 /**
- * Persistence contracts for the Code Mode governance layer. The execution
+ * Persistence contracts for durable execution. The execution
  * engine talks only to these interfaces; whether the backend is memory, a
  * file directory or a database is a wiring decision (`EXECUTION_STORE_TYPE`).
  *
@@ -17,7 +17,7 @@ import type {
  * back without affecting the store until they `put*` it again.
  */
 
-export interface ExecutionStore {
+export interface ExecutionRecordStore {
   createExecution(record: ExecutionRecord): Promise<void>
   getExecution(executionId: string): Promise<ExecutionRecord | undefined>
   updateExecution(record: ExecutionRecord): Promise<void>
@@ -61,9 +61,9 @@ export interface ExecutionLockStore {
   releaseLock(executionId: string): Promise<void>
 }
 
-/** One object implementing every store — the shape the engine is wired with. */
-export interface CodeModeStore
-  extends ExecutionStore, ActivityStore, ApprovalStore, GovernanceDecisionStore, ExecutionLockStore {
+/** Complete execution persistence: records, activities, approvals, decisions and run locks. */
+export interface ExecutionPersistence
+  extends ExecutionRecordStore, ActivityStore, ApprovalStore, GovernanceDecisionStore, ExecutionLockStore {
   readonly name: string
   /** Release timers/handles on shutdown. */
   destroy?(): Promise<void> | void

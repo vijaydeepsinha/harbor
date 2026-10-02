@@ -11,7 +11,7 @@ import {
   registerExecutionStoreBackend,
   buildExecutionStore
 } from '../../src/wiring/strategy-builders.js'
-import type { CodeModeStore } from '../../src/spi/execution/execution-store.js'
+import type { ExecutionPersistence } from '../../src/spi/execution/execution-store.js'
 import { STORE_TYPE } from '../../src/core/constants.js'
 import { InMemoryTokenCache } from '../../src/adapters/auth/strategies/in-memory-token-cache.strategy.js'
 import { InMemoryIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
@@ -100,9 +100,9 @@ describe('buildSpecLoader', () => {
 
 describe('registered execution stores and the gateway idempotency default', () => {
   it('buildExecutionStore uses a registered backend by name and refuses an unregistered one', () => {
-    const store = { name: 'dynamo-db' } as unknown as CodeModeStore
-    registerExecutionStoreBackend('dynamo-db', () => store)
-    expect(buildExecutionStore({ type: 'dynamo-db' } as never)).toBe(store)
+    const persistence = { name: 'dynamo-db' } as unknown as ExecutionPersistence
+    registerExecutionStoreBackend('dynamo-db', () => persistence)
+    expect(buildExecutionStore({ type: 'dynamo-db' } as never)).toBe(persistence)
     expect(() => buildExecutionStore({ type: 'nobody-registered-this' } as never)).toThrow('Unknown execution store type')
   })
 })

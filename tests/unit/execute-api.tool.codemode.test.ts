@@ -8,7 +8,7 @@ import {
 } from './code-mode-harness.js'
 import { registerExecuteApiTool } from '../../src/tools/execute-api.tool.js'
 import type { MetricsRegistry } from '../../src/runtime/observability/metrics.js'
-import { MemcacheCodeModeStore } from '../../src/adapters/execution/memcache-execution-store.js'
+import { MemcacheExecutionStore } from '../../src/adapters/execution/memcache-execution-store.js'
 import { FakeMemcache } from './fake-memcache.js'
 import { AuditPipeline } from '../../src/runtime/observability/audit-pipeline.js'
 import type { AuditEvent } from '../../src/spi/observability/audit-sink.js'
@@ -52,7 +52,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     const exec = await rt.manager.load(executionId)
     expect(exec.originalCode).toBeUndefined() // a COMPLETED execution keeps no program text (EXECUTION_CODE_RETENTION=DROP)
     expect(exec.currentActivity).toBe(2)
-    expect((await rt.store.listDecisions(executionId)).map(d => d.decision)).toEqual(['ALLOW', 'ALLOW'])
+    expect((await rt.persistence.listDecisions(executionId)).map(d => d.decision)).toEqual(['ALLOW', 'ALLOW'])
   })
 
   it('REQUIRE_APPROVAL pauses with input_required (elicitation + sealed requestState); accept resumes and executes once', async () => {
@@ -72,7 +72,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     const approvalId = meta[APPROVAL_ID_META_KEY] as string
     expect(meta[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
     expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
-    expect((await rt.store.getActivity(executionId, 2))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
+    expect((await rt.persistence.getActivity(executionId, 2))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
     expect(count('GET', '/campaigns')).toBe(1)
     expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
 
@@ -216,7 +216,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(paused['resultType']).toBe('input_required')
     expect(count('POST', '/campaigns')).toBe(0)
     const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
-    const activity = await rt.store.getActivity(executionId, 1)
+    const activity = await rt.persistence.getActivity(executionId, 1)
     expect(activity?.request.body).toEqual(body(2_000_000))
     expect(activity?.request.query).toEqual(params)
     expect(activity?.request.pathParams).toBeUndefined()
@@ -239,7 +239,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(count('GET', '/campaigns')).toBe(1)                // GET is not a POST: allowed
     expect(count('POST', '/campaigns/C1/finalize')).toBe(0)   // /campaigns/{id}/finalize is under /campaigns/**
     const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
-    expect((await rt.store.listDecisions(executionId)).map(d => [d.decision, d.decidingRule])).toEqual([['ALLOW', undefined], ['REQUIRE_APPROVAL', 'campaign-writes']])
+    expect((await rt.persistence.listDecisions(executionId)).map(d => [d.decision, d.decidingRule])).toEqual([['ALLOW', undefined], ['REQUIRE_APPROVAL', 'campaign-writes']])
   })
 
   it('default DENY applies only where governance applies: untargeted calls run, a targeted unmatched call is denied', async () => {
@@ -255,7 +255,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect(count('GET', '/campaigns')).toBe(1)               // no rule targets it: ungoverned
     expect(count('POST', '/campaigns/C1/finalize')).toBe(0)  // targeted, condition false: default DENY
     const executionId = (r['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
-    expect((await rt.store.listDecisions(executionId)).map(d => [d.decision, d.reason])).toEqual([
+    expect((await rt.persistence.listDecisions(executionId)).map(d => [d.decision, d.reason])).toEqual([
       ['ALLOW', GOVERNANCE_REASON.NO_GOVERNANCE],
       ['DENY', GOVERNANCE_REASON.NO_MATCHING_RULE]
     ])
@@ -264,8 +264,8 @@ describe('api_execute under the Code Mode governance layer', () => {
 
   it('multi-pod on the memcache store: paused on pod A, approved and resumed on pod B, every call made once', async () => {
     const memcache = new FakeMemcache()
-    const podA = makeRuntime([FINALIZE_RULE], GOVERNANCE_DECISION.ALLOW, new MemcacheCodeModeStore(memcache))
-    const podB = makeRuntime([FINALIZE_RULE], GOVERNANCE_DECISION.ALLOW, new MemcacheCodeModeStore(memcache))
+    const podA = makeRuntime([FINALIZE_RULE], GOVERNANCE_DECISION.ALLOW, new MemcacheExecutionStore(memcache))
+    const podB = makeRuntime([FINALIZE_RULE], GOVERNANCE_DECISION.ALLOW, new MemcacheExecutionStore(memcache))
     const { connector, count } = makeConnector()
     const onA = registerGoverned(podA, makeResources('trafficking', connector))
     const onB = registerGoverned(podB, makeResources('trafficking', connector))
@@ -305,7 +305,7 @@ describe('api_execute under the Code Mode governance layer', () => {
     expect((parseContent(r) as { code: string; message?: string }).code).toBe(ERR.GOVERNANCE_DENIED)
     expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
     const executionId = (r['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
-    const decisions = await rt.store.listDecisions(executionId)
+    const decisions = await rt.persistence.listDecisions(executionId)
     expect(decisions[1]).toMatchObject({ decision: 'DENY', matchedRules: ['no-finalize'], ruleVersions: ['no-finalize@1#deadbeefcafe'] })
     expect((await rt.manager.load(executionId)).status).toBe(EXECUTION_STATUS.DENIED)
   })
@@ -372,10 +372,10 @@ describe('api_execute under the Code Mode governance layer', () => {
       const handler = registerGoverned(rt, makeResources('trafficking', makeConnector().connector))
       const paused = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, makeCtx())
       const executionId = (paused['_meta'] as Record<string, string>)[EXECUTION_ID_META_KEY]!
-      expect(await rt.store.acquireLock(executionId)).toBe(true)
+      expect(await rt.persistence.acquireLock(executionId)).toBe(true)
       const r = await handler({ service: 'trafficking', code: PROGRAM_FINALIZE }, await retryCtx(rt, paused, { action: 'accept' }))
       expect(parseContent(r)).toMatchObject({ code: ERR.EXECUTION_LOCKED, retryable: true })
-      await rt.store.releaseLock(executionId)
+      await rt.persistence.releaseLock(executionId)
     })
   })
 

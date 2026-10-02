@@ -19,7 +19,7 @@ Community contributions are welcome. See `CONTRIBUTING.md` for setup, coding gui
 **Architectural changes** require maintainer review and sign-off before merge. Open a GitHub issue describing the change before starting implementation. That covers anything that touches:
 
 - the layer boundaries: `src/core/`, `src/spi/`, `src/adapters/`, `src/wiring/`, `src/runtime/`, `src/tools/`;
-- the public extension points: `ConnectorAPI`, the `CodeModeStore`, `GovernanceRuleSource` and `AuditSink` SPIs, and the five registration functions (`registerTokenCacheBackend`, `registerIdempotencyBackend`, `registerExecutionStoreBackend`, `registerAuditSinkBackend`, `registerGovernanceRuleSourceBackend` in `src/wiring/strategy-builders.ts`);
+- the public extension points: `ConnectorAPI`, the `ExecutionPersistence`, `GovernanceRuleSource` and `AuditSink` SPIs, and the five registration functions (`registerTokenCacheBackend`, `registerIdempotencyBackend`, `registerExecutionStoreBackend`, `registerAuditSinkBackend`, `registerGovernanceRuleSourceBackend` in `src/wiring/strategy-builders.ts`);
 - the MCP tool surface: the five tools (`discover_services`, `discover_skills`, `get_skill_details`, `search_code`, `api_execute`) and their input schemas are frozen;
 - the Governance Rule file format (`governance/rules/README.md`, `src/runtime/governance/rule-schema.ts`).
 

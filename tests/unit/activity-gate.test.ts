@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ActivityGate, type GovernanceVerdict } from '../../src/runtime/execution/activity-gate.js'
 import { ActivityJournal } from '../../src/runtime/execution/activity-journal.js'
-import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-execution-store.js'
 import { resolveOperation } from '../../src/runtime/governance/operation-resolver.js'
 import { ACTIVITY_STATUS, ERR, type ActivityStatus } from '../../src/core/constants.js'
 import { ReplayDivergedError, type ApprovalSummary } from '../../src/core/types/execution.types.js'
@@ -16,11 +16,11 @@ const LIST: ApiRequest = { method: 'GET', path: '/campaigns' }
 const SUMMARY: ApprovalSummary = { service: 'trafficking', method: 'POST', specPath: '/campaigns/{id}/finalize', reason: 'r', matchedRules: ['x'] }
 
 describe('ActivityGate — the single owner of replay and governance for a governed call', () => {
-  let store: InMemoryCodeModeStore
+  let persistence: InMemoryExecutionStore
   let journal: ActivityJournal
   beforeEach(() => {
-    store = new InMemoryCodeModeStore()
-    journal = new ActivityJournal(store, 'exec-1', 'trafficking', 2)
+    persistence = new InMemoryExecutionStore()
+    journal = new ActivityJournal(persistence, 'exec-1', 'trafficking', 2)
   })
 
   const gate = (decide?: (seq: number) => Promise<GovernanceVerdict>) => new ActivityGate({
@@ -33,7 +33,7 @@ describe('ActivityGate — the single owner of replay and governance for a gover
   /** Journals activity #1 as a previous run left it. */
   async function seed(req: ApiRequest, status: ActivityStatus, extra: Record<string, unknown> = {}) {
     const resolved = resolveOperation(campaignSpec, req.method, req.path)
-    await store.putActivity({
+    await persistence.putActivity({
       executionId: 'exec-1', sequence: 1, service: 'trafficking', status,
       // As the journal records it: the request the program sent, query and body included.
       request: {
@@ -68,11 +68,11 @@ describe('ActivityGate — the single owner of replay and governance for a gover
     await seed(LIST, ACTIVITY_STATUS.COMPLETED, { response: { status: 200, ok: true, data: [{ id: 'C1' }] } })
     expect(await admit(gate(), LIST)).toEqual({ kind: 'replay', sequence: 1, response: { status: 200, ok: true, data: [{ id: 'C1' }] } })
 
-    journal = new ActivityJournal(store, 'exec-1', 'trafficking', 2)
+    journal = new ActivityJournal(persistence, 'exec-1', 'trafficking', 2)
     await seed(FINALIZE, ACTIVITY_STATUS.APPROVED, { approvalId: 'ap-1' })
     expect(await admit(gate(), FINALIZE)).toMatchObject({ kind: 'execute', sequence: 1, approvalId: 'ap-1' })
 
-    journal = new ActivityJournal(store, 'exec-1', 'trafficking', 2)
+    journal = new ActivityJournal(persistence, 'exec-1', 'trafficking', 2)
     await seed(LIST, ACTIVITY_STATUS.EXECUTING)
     const again = await admit(gate(), LIST)
     expect(again.kind).toBe('execute')
@@ -82,15 +82,15 @@ describe('ActivityGate — the single owner of replay and governance for a gover
   it('a new activity asks governance: ALLOW executes, DENY and REQUIRE_APPROVAL stop and are journaled', async () => {
     expect(await admit(gate(async () => ({ decision: 'ALLOW' })), FINALIZE)).toMatchObject({ kind: 'execute', sequence: 1, request: { specPath: '/campaigns/{id}/finalize', pathParams: { id: 'C1' } } })
 
-    journal = new ActivityJournal(new InMemoryCodeModeStore(), 'exec-2', 'trafficking', 1)
+    journal = new ActivityJournal(new InMemoryExecutionStore(), 'exec-2', 'trafficking', 1)
     const denied = await admit(gate(async () => ({ decision: 'DENY', reason: 'frozen', matchedRules: ['no-finalize'] })), FINALIZE)
     expect(denied).toMatchObject({ kind: 'stop', stop: { kind: 'governanceDenied', reason: 'frozen', matchedRules: ['no-finalize'] }, code: ERR.GOVERNANCE_DENIED, message: 'Governance denied POST /campaigns/{id}/finalize: frozen' })
 
-    store = new InMemoryCodeModeStore()
-    journal = new ActivityJournal(store, 'exec-3', 'trafficking', 1)
+    persistence = new InMemoryExecutionStore()
+    journal = new ActivityJournal(persistence, 'exec-3', 'trafficking', 1)
     const paused = await admit(gate(async () => ({ decision: 'REQUIRE_APPROVAL', approvalId: 'ap-9', summary: SUMMARY })), FINALIZE)
     expect(paused).toMatchObject({ kind: 'stop', stop: { kind: 'approvalRequired', approvalId: 'ap-9', summary: SUMMARY }, code: ERR.APPROVAL_REQUIRED })
-    expect(await store.getActivity('exec-3', 1)).toMatchObject({ status: ACTIVITY_STATUS.WAITING_APPROVAL, approvalId: 'ap-9' })
+    expect(await persistence.getActivity('exec-3', 1)).toMatchObject({ status: ACTIVITY_STATUS.WAITING_APPROVAL, approvalId: 'ap-9' })
   })
 
   it('without a governance hook a new activity executes (journal + replay only)', async () => {
@@ -113,7 +113,7 @@ describe('ActivityGate — the single owner of replay and governance for a gover
       ? [{ ...LIST, params: { page: 2 } }, LIST]
       : [{ ...FINALIZE, body: { note: 'other' } }, { ...FINALIZE, params: { force: true } }, { ...FINALIZE, path: '/campaigns/C2/finalize' }]
     for (const v of variants) {
-      journal = new ActivityJournal(store, 'exec-1', 'trafficking', 2) // each attempt is a fresh run reaching #1
+      journal = new ActivityJournal(persistence, 'exec-1', 'trafficking', 2) // each attempt is a fresh run reaching #1
       await expect(admit(gate(), v)).rejects.toBeInstanceOf(ReplayDivergedError)
     }
   })
@@ -121,7 +121,7 @@ describe('ActivityGate — the single owner of replay and governance for a gover
   it('journaled COMPLETED binds the resource but not the body: a replay is a read of history, not an execution', async () => {
     await seed(FINALIZE, ACTIVITY_STATUS.COMPLETED, { response: { status: 201, ok: true, data: {} } })
     expect(await admit(gate(), { ...FINALIZE, body: { note: 'drifted' } })).toMatchObject({ kind: 'replay' })
-    journal = new ActivityJournal(store, 'exec-1', 'trafficking', 2)
+    journal = new ActivityJournal(persistence, 'exec-1', 'trafficking', 2)
     await expect(admit(gate(), { ...FINALIZE, path: '/campaigns/C2/finalize' })).rejects.toBeInstanceOf(ReplayDivergedError)
   })
 
@@ -130,14 +130,14 @@ describe('ActivityGate — the single owner of replay and governance for a gover
     const first = await admit(g, FINALIZE)
     if (first.kind !== 'execute') throw new Error('expected execute')
     await g.begin(first)
-    expect((await store.getActivity('exec-1', 1))?.status).toBe(ACTIVITY_STATUS.EXECUTING)
+    expect((await persistence.getActivity('exec-1', 1))?.status).toBe(ACTIVITY_STATUS.EXECUTING)
     await journal.recordResponse({ method: 'POST', endpoint: '/campaigns/{id}/finalize' }, { status: 201, ok: true, data: { id: 'x' } }, 1)
-    expect(await store.getActivity('exec-1', 1)).toMatchObject({ status: ACTIVITY_STATUS.COMPLETED, response: { status: 201 } })
+    expect(await persistence.getActivity('exec-1', 1)).toMatchObject({ status: ACTIVITY_STATUS.COMPLETED, response: { status: 201 } })
 
     const second = await admit(g, LIST)
     if (second.kind !== 'execute') throw new Error('expected execute')
     await g.begin(second)
     await journal.recordFailure({ method: 'GET', endpoint: '/campaigns' }, { code: ERR.API_ERROR, message: 'socket hang up', aborted: false }, 2)
-    expect(await store.getActivity('exec-1', 2)).toMatchObject({ status: ACTIVITY_STATUS.FAILED, failure: { code: ERR.API_ERROR, outcomeKnown: false } })
+    expect(await persistence.getActivity('exec-1', 2)).toMatchObject({ status: ACTIVITY_STATUS.FAILED, failure: { code: ERR.API_ERROR, outcomeKnown: false } })
   })
 })

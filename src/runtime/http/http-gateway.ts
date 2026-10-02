@@ -15,7 +15,7 @@ import { HttpError } from './http-error.js'
 import { ERR, HTTP_ROUTES, MCP_PROTOCOL_VERSION, MCP_DEFAULT_MAX_BODY_BYTES } from '../../core/constants.js'
 import { errorMessage } from '../../core/utils/errors.js'
 import type { GatewayMcpServerFactory } from './mcp-server-factory.js'
-import type { CodeModeRuntime } from '../execution/code-mode-runtime.js'
+import type { DurableExecutionRuntime } from '../execution/durable-execution-runtime.js'
 import { handleExecutionRoutes } from './execution-routes.js'
 import { readBoundedBody } from './read-body.js'
 
@@ -43,7 +43,7 @@ export interface HttpGatewayOptions {
   /** Largest `/mcp` request body read (MCP_MAX_BODY_BYTES); larger ones get 413 before any parsing. */
   maxBodyBytes?: number
   /** Enables GET /executions/{id} and POST /executions/{id}/approvals/{approvalId}. */
-  codeMode?: CodeModeRuntime
+  durableExecutionRuntime?: DurableExecutionRuntime
 }
 
 export interface HttpGatewayHandle {
@@ -61,7 +61,7 @@ export interface HttpGatewayHandle {
  * not need to know about `node:http` or transport wiring.
  */
 export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
-  const { host, port, createMcpServer, registry, logger, oauthConfig, codeMode } = opts
+  const { host, port, createMcpServer, registry, logger, oauthConfig, durableExecutionRuntime } = opts
   const maxBodyBytes = opts.maxBodyBytes ?? MCP_DEFAULT_MAX_BODY_BYTES
 
   // Both `createMcpHandler` and `toNodeHandler` catch every failure internally
@@ -120,8 +120,8 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
         return
       }
 
-      if (codeMode && url.startsWith(HTTP_ROUTES.EXECUTIONS)) {
-        if (await handleExecutionRoutes(req, res, url, codeMode, registry, logger, oauthConfig)) return
+      if (durableExecutionRuntime && url.startsWith(HTTP_ROUTES.EXECUTIONS)) {
+        if (await handleExecutionRoutes(req, res, url, durableExecutionRuntime, registry, logger, oauthConfig)) return
       }
 
       throw new HttpError(404, ERR.NOT_FOUND, 'Not found', undefined, { url })

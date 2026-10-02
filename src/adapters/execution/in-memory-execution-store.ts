@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { CodeModeStore } from '../../spi/execution/execution-store.js'
+import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
 import type {
   ExecutionRecord,
   ActivityRecord,
@@ -20,7 +20,7 @@ function clone<T>(value: T): T {
  * whole point), not across process restarts — use the `file` store for that.
  * Subclasses hook `persist()` to write through.
  */
-export class InMemoryCodeModeStore implements CodeModeStore {
+export class InMemoryExecutionStore implements ExecutionPersistence {
   readonly name: string = EXECUTION_STORE_TYPE.IN_MEMORY
   protected readonly executions = new Map<string, ExecutionRecord>()
   /** executionId → (sequence → activity) */
@@ -162,6 +162,6 @@ export interface ExecutionSnapshot {
   decisions: GovernanceDecisionRecord[]
 }
 
-export function inMemoryCodeModeStore(): CodeModeStore {
-  return new InMemoryCodeModeStore()
+export function inMemoryExecutionStore(): ExecutionPersistence {
+  return new InMemoryExecutionStore()
 }

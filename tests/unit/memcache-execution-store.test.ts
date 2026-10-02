@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect } from 'vitest'
-import { MemcacheCodeModeStore, DEFAULT_MEMCACHE_LOCK_TTL_SEC } from '../../src/adapters/execution/memcache-execution-store.js'
+import { MemcacheExecutionStore, DEFAULT_MEMCACHE_LOCK_TTL_SEC } from '../../src/adapters/execution/memcache-execution-store.js'
 import { buildExecutionStore } from '../../src/wiring/strategy-builders.js'
 import { FakeMemcache } from './fake-memcache.js'
 import { EXECUTION_STATUS, ACTIVITY_STATUS } from '../../src/core/constants.js'
@@ -28,8 +28,8 @@ function twoPods() {
   const memcache = new FakeMemcache(c.now)
   return {
     c, memcache,
-    podA: new MemcacheCodeModeStore(memcache, { nowMs: c.now, lockTtlSec: 60 }),
-    podB: new MemcacheCodeModeStore(memcache, { nowMs: c.now, lockTtlSec: 60 })
+    podA: new MemcacheExecutionStore(memcache, { nowMs: c.now, lockTtlSec: 60 }),
+    podB: new MemcacheExecutionStore(memcache, { nowMs: c.now, lockTtlSec: 60 })
   }
 }
 
@@ -109,17 +109,17 @@ describe('memcache execution store — shared by every pod', () => {
 
   it('keys are namespaced and refuse ids that could forge or break a key', async () => {
     const memcache = new FakeMemcache()
-    const store = new MemcacheCodeModeStore(memcache, { keyPrefix: 'staging:harbor:' })
-    await store.createExecution(execution('e-1'))
+    const persistence = new MemcacheExecutionStore(memcache, { keyPrefix: 'staging:harbor:' })
+    await persistence.createExecution(execution('e-1'))
     expect(memcache.keys()).toEqual(['staging:harbor:e-1'])
-    await expect(store.createExecution(execution('e 1'))).rejects.toThrow(/Invalid id/)
-    await expect(store.getApproval('ap-1\r\nflush_all')).rejects.toThrow(/Invalid id/)
+    await expect(persistence.createExecution(execution('e 1'))).rejects.toThrow(/Invalid id/)
+    await expect(persistence.getApproval('ap-1\r\nflush_all')).rejects.toThrow(/Invalid id/)
   })
 
   it('is built for EXECUTION_STORE_TYPE=memcache (the client connects on first use)', async () => {
-    const store = buildExecutionStore({ type: 'memcache', host: '127.0.0.1', port: 1, kvTimeoutMs: 100, lockTtlSec: 90 })
-    expect(store).toBeInstanceOf(MemcacheCodeModeStore)
-    expect(store.name).toBe('memcache')
-    await store.destroy?.()
+    const persistence = buildExecutionStore({ type: 'memcache', host: '127.0.0.1', port: 1, kvTimeoutMs: 100, lockTtlSec: 90 })
+    expect(persistence).toBeInstanceOf(MemcacheExecutionStore)
+    expect(persistence.name).toBe('memcache')
+    await persistence.destroy?.()
   })
 })

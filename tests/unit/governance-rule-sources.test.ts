@@ -15,8 +15,8 @@ import { parseRuleDocuments, GovernanceRuleLoadError } from '../../src/runtime/g
 import { GovernanceRuleStore } from '../../src/runtime/governance/rule-store.js'
 import { GovernanceRuleRefresher } from '../../src/runtime/governance/rule-refresher.js'
 import { buildGovernanceRuleSource, registerGovernanceRuleSourceBackend } from '../../src/wiring/strategy-builders.js'
-import { buildCodeModeRuntime } from '../../src/runtime/execution/code-mode-runtime.js'
-import type { CodeModeConfig } from '../../src/core/types/config.types.js'
+import { buildDurableExecutionRuntime } from '../../src/runtime/execution/durable-execution-runtime.js'
+import type { ExecutionConfig } from '../../src/core/types/config.types.js'
 import type { Logger } from '../../src/core/types/logger.types.js'
 import { GOVERNANCE_DECISION } from '../../src/core/constants.js'
 
@@ -102,10 +102,10 @@ describe('Governance Rule sources', () => {
   it('dir: boot tolerates a directory that does not exist yet — no rules, and says so', async () => {
     const warnings: string[] = []
     const logger = { ...silent, warn: (_o: unknown, msg: string) => { warnings.push(msg) }, info: () => {}, error: () => {}, debug: () => {}, child: () => logger } as unknown as Logger
-    const rt = await buildCodeModeRuntime({
+    const rt = await buildDurableExecutionRuntime({
       store: { type: 'in-memory' },
       governance: { rulesDir: join(tmpdir(), 'harbor-no-such-rules-' + Date.now()), defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600 }
-    } as CodeModeConfig, logger)
+    } as ExecutionConfig, logger)
     expect(rt.rules.getRules()).toEqual([])
     expect(warnings.some(w => w.includes('every call is ungoverned'))).toBe(true)
     await rt.shutdown()
@@ -223,7 +223,7 @@ describe('Governance Rule sources', () => {
   })
 
   describe('wiring', () => {
-    const governance = (extra: Partial<CodeModeConfig['governance']>): CodeModeConfig['governance'] =>
+    const governance = (extra: Partial<ExecutionConfig['governance']>): ExecutionConfig['governance'] =>
       ({ rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600, ...extra })
 
     it('builds dir by default, url when configured (URL required), a registered type, and refuses an unknown one', () => {
@@ -238,15 +238,15 @@ describe('Governance Rule sources', () => {
     it('boot fails closed on an unreadable or invalid first load; then the configured refresh keeps rules current', async () => {
       dir = mkdtempSync(join(tmpdir(), 'harbor-src-'))
       writeFileSync(join(dir, 'bad.yaml'), 'name: bad\nmatch: { service: s }\naction: { type: MAYBE }\n')
-      const config = (g: Partial<CodeModeConfig['governance']>): CodeModeConfig => ({ store: { type: 'in-memory' }, governance: governance(g) })
-      await expect(buildCodeModeRuntime(config({ rulesDir: dir }), silent)).rejects.toThrow(GovernanceRuleLoadError)
-      await expect(buildCodeModeRuntime(config({ rulesSource: 'url', rulesUrl: 'http://127.0.0.1:1/rules.yaml', rulesUrlTimeoutMs: 500 }), silent)).rejects.toThrow()
+      const config = (g: Partial<ExecutionConfig['governance']>): ExecutionConfig => ({ store: { type: 'in-memory' }, governance: governance(g) })
+      await expect(buildDurableExecutionRuntime(config({ rulesDir: dir }), silent)).rejects.toThrow(GovernanceRuleLoadError)
+      await expect(buildDurableExecutionRuntime(config({ rulesSource: 'url', rulesUrl: 'http://127.0.0.1:1/rules.yaml', rulesUrlTimeoutMs: 500 }), silent)).rejects.toThrow()
 
       const { source, set } = mutableSource([doc('a.yaml', ruleYaml('a'))])
       registerGovernanceRuleSourceBackend('test-mutable', () => source)
       vi.useFakeTimers()
       try {
-        const runtime = await buildCodeModeRuntime(config({ rulesSource: 'test-mutable', rulesRefreshSec: 5 }), silent)
+        const runtime = await buildDurableExecutionRuntime(config({ rulesSource: 'test-mutable', rulesRefreshSec: 5 }), silent)
         expect(runtime.rules.getRules().map(r => r.rule.name)).toEqual(['a'])
         set([doc('a.yaml', ruleYaml('a')), doc('b.yaml', ruleYaml('b'))])
         await vi.advanceTimersByTimeAsync(5_000)

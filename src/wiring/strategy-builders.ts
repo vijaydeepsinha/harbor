@@ -4,11 +4,11 @@
 import type { TokenCacheStrategy } from '../core/types/auth.types.js'
 import type { IdempotencyStrategy } from '../core/types/idempotency.types.js'
 import type { SpecLoaderStrategy } from '../core/types/spec.types.js'
-import type { IdempotencyBackendConfig, TokenCacheBackendConfig, ExecutionStoreBackendConfig, CodeModeConfig } from '../core/types/config.types.js'
-import type { CodeModeStore } from '../spi/execution/execution-store.js'
-import { inMemoryCodeModeStore } from '../adapters/execution/in-memory-execution-store.js'
-import { fileCodeModeStore } from '../adapters/execution/file-execution-store.js'
-import { memcacheCodeModeStore } from '../adapters/execution/memcache-execution-store.js'
+import type { IdempotencyBackendConfig, TokenCacheBackendConfig, ExecutionStoreBackendConfig, ExecutionConfig } from '../core/types/config.types.js'
+import type { ExecutionPersistence } from '../spi/execution/execution-store.js'
+import { inMemoryExecutionStore } from '../adapters/execution/in-memory-execution-store.js'
+import { fileExecutionStore } from '../adapters/execution/file-execution-store.js'
+import { memcacheExecutionStore } from '../adapters/execution/memcache-execution-store.js'
 import type { Logger } from '../core/types/logger.types.js'
 import { inMemoryTokenCache } from '../adapters/auth/strategies/in-memory-token-cache.strategy.js'
 import { memcacheTokenCache } from '../adapters/auth/strategies/memcache-token-cache.strategy.js'
@@ -51,10 +51,10 @@ export type IdempotencyFactory = (
 export type ExecutionStoreFactory = (
   config: ExecutionStoreBackendConfig & Record<string, unknown>,
   logger?: Logger
-) => CodeModeStore
+) => ExecutionPersistence
 
 export type GovernanceRuleSourceFactory = (
-  config: CodeModeConfig['governance'],
+  config: ExecutionConfig['governance'],
   logger?: Logger
 ) => GovernanceRuleSource
 
@@ -78,7 +78,7 @@ export function registerIdempotencyBackend(type: string, factory: IdempotencyFac
   _idempotencyRegistry.set(type, factory)
 }
 
-/** Register a custom Code Mode execution store (e.g. Postgres, Redis) keyed by the EXECUTION_STORE_TYPE value. */
+/** Register a custom execution store (e.g. Postgres, Redis) keyed by the EXECUTION_STORE_TYPE value. */
 export function registerExecutionStoreBackend(type: string, factory: ExecutionStoreFactory): void {
   _executionStoreRegistry.set(type, factory)
 }
@@ -134,16 +134,16 @@ export function buildIdempotencyStrategy(
 export function buildExecutionStore(
   config: ExecutionStoreBackendConfig | undefined,
   logger?: Logger
-): CodeModeStore {
-  if (!config) return inMemoryCodeModeStore()
+): ExecutionPersistence {
+  if (!config) return inMemoryExecutionStore()
 
   const custom = _executionStoreRegistry.get(config.type)
   if (custom) return custom(config as ExecutionStoreBackendConfig & Record<string, unknown>, logger)
 
   switch (config.type) {
-    case EXECUTION_STORE_TYPE.IN_MEMORY: return inMemoryCodeModeStore()
-    case EXECUTION_STORE_TYPE.FILE:      return fileCodeModeStore(config.dir, logger)
-    case EXECUTION_STORE_TYPE.MEMCACHE:  return memcacheCodeModeStore(config)
+    case EXECUTION_STORE_TYPE.IN_MEMORY: return inMemoryExecutionStore()
+    case EXECUTION_STORE_TYPE.FILE:      return fileExecutionStore(config.dir, logger)
+    case EXECUTION_STORE_TYPE.MEMCACHE:  return memcacheExecutionStore(config)
     default: throw new Error(`Unknown execution store type: "${(config as { type: string }).type}"`)
   }
 }
@@ -159,7 +159,7 @@ export function buildAuditSinks(types: readonly string[], deps: AuditSinkDeps): 
 }
 
 export function buildGovernanceRuleSource(
-  config: CodeModeConfig['governance'],
+  config: ExecutionConfig['governance'],
   logger?: Logger
 ): GovernanceRuleSource {
   const type = config.rulesSource ?? GOVERNANCE_RULE_SOURCE_TYPE.DIR

@@ -4,20 +4,20 @@
 /**
  * Test harness for the governed `api_execute` tool: a fake McpServer that
  * captures the handler, service resources backed by a counting connector and
- * a small OpenAPI spec, a real in-memory Code Mode runtime, and fake
+ * a small OpenAPI spec, a real in-memory durable execution runtime, and fake
  * ServerContexts for first calls and MRTR retries.
  */
 import pino from 'pino'
 import type { McpServer, ServerContext } from '@modelcontextprotocol/server'
 import { registerExecuteApiTool } from '../../src/tools/execute-api.tool.js'
-import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-execution-store.js'
 import { ExecutionManager, type ExecutionManagerOptions } from '../../src/runtime/execution/execution-manager.js'
 import { ApprovalService } from '../../src/runtime/execution/approval-service.js'
 import { createResumeStateCodec, type ResumeState } from '../../src/runtime/execution/request-state.js'
 import { GovernanceRuleStore } from '../../src/runtime/governance/rule-store.js'
 import { governanceRuleSchema } from '../../src/runtime/governance/rule-schema.js'
-import type { CodeModeRuntime } from '../../src/runtime/execution/code-mode-runtime.js'
-import type { CodeModeStore } from '../../src/spi/execution/execution-store.js'
+import type { DurableExecutionRuntime } from '../../src/runtime/execution/durable-execution-runtime.js'
+import type { ExecutionPersistence } from '../../src/spi/execution/execution-store.js'
 import type { LoadedRule } from '../../src/runtime/governance/rule-loader.js'
 import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
 import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
@@ -97,24 +97,24 @@ export const globalConfig: GlobalConfig = {
   sandbox: { memoryLimitMb: 64, executeTimeoutMs: 8000, searchTimeoutMs: 3000, maxApiCalls: 50, maxConcurrentCalls: 5 },
   observability: { logLevel: 'silent' as never, serviceName: 'harbor-gateway', agentName: 'mcp-agent', environment: ENV.DEV, enableAudit: false },
   defaultIdempotency: { type: 'noop' },
-  codeMode: { store: { type: 'in-memory' }, governance: { rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.ALLOW, approvalTtlSec: 600 } }
+  execution: { store: { type: 'in-memory' }, governance: { rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.ALLOW, approvalTtlSec: 600 } }
 }
 
 export const REQUEST_STATE_KEY = 'test-key-'.repeat(4)
 
-/** `store` lets several runtimes share one store — several gateway pods on one shared backend. */
+/** `persistence` lets several runtimes share one store — several gateway pods on one shared backend. */
 export function makeRuntime(
   rules: Array<Record<string, unknown>> = [],
   defaultDecision: GovernanceDecisionType = GOVERNANCE_DECISION.ALLOW,
-  store: CodeModeStore = new InMemoryCodeModeStore(),
+  persistence: ExecutionPersistence = new InMemoryExecutionStore(),
   managerOptions: ExecutionManagerOptions = {}
-): CodeModeRuntime {
-  const manager = new ExecutionManager(store, undefined, undefined, managerOptions)
-  const approvals = new ApprovalService(store, manager)
+): DurableExecutionRuntime {
+  const manager = new ExecutionManager(persistence, undefined, undefined, managerOptions)
+  const approvals = new ApprovalService(persistence, manager)
   const ruleStore = new GovernanceRuleStore()
   ruleStore.swap(rules.map((r, i): LoadedRule => ({ rule: governanceRuleSchema.parse(r), source: `rule-${i}.yaml`, contentHash: 'deadbeefcafe0000' })))
   return {
-    store, manager, approvals, rules: ruleStore,
+    persistence, manager, approvals, rules: ruleStore,
     requestState: createResumeStateCodec({ key: REQUEST_STATE_KEY, ttlSeconds: 600 }),
     config: { store: { type: 'in-memory' }, governance: { rulesDir: '/nonexistent', defaultDecision, approvalTtlSec: 600 } },
     async shutdown() {}
@@ -122,7 +122,7 @@ export function makeRuntime(
 }
 
 /** Registers the governed tool and returns its handler. */
-export function registerGoverned(runtime: CodeModeRuntime, resources: ServiceResources): ToolHandler {
+export function registerGoverned(runtime: DurableExecutionRuntime, resources: ServiceResources): ToolHandler {
   const { handlers, server } = makeFakeServer()
   const metrics = { increment: () => {}, stop: () => {} } as unknown as MetricsRegistry
   registerExecuteApiTool(server, makeRegistry({ [resources.name]: resources }), globalConfig, silentLogger, metrics, 'client-token', runtime)
@@ -158,7 +158,7 @@ export function makeCtx(opts: FakeCtxOptions = {}): ServerContext {
 
 /** Simulates the client's retry: verifies the wire requestState like the SDK seam and answers the approval. */
 export async function retryCtx(
-  runtime: CodeModeRuntime,
+  runtime: DurableExecutionRuntime,
   inputRequiredResult: Record<string, unknown>,
   answer: { action: 'accept' | 'decline' | 'cancel'; approve?: boolean; comment?: string } | undefined,
   requestId = '2'

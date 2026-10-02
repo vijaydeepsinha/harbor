@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { v4 as uuidv4 } from 'uuid'
-import type { CodeModeStore } from '../../spi/execution/execution-store.js'
+import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
 import {
   type ExecutionRecord,
   type ActivityRecord,
@@ -58,7 +58,7 @@ export interface ExecutionInspection {
  */
 export class ExecutionManager {
   constructor(
-    private readonly store: CodeModeStore,
+    private readonly persistence: ExecutionPersistence,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly newId: () => string = uuidv4,
     private readonly options: ExecutionManagerOptions = {}
@@ -78,12 +78,12 @@ export class ExecutionManager {
       currentActivity: 0,
       runCount: 0
     }
-    await this.store.createExecution(record)
+    await this.persistence.createExecution(record)
     return record
   }
 
   async load(executionId: string): Promise<ExecutionRecord> {
-    const record = await this.store.getExecution(executionId)
+    const record = await this.persistence.getExecution(executionId)
     if (!record) throw new ExecutionNotFoundError(executionId)
     return record
   }
@@ -102,7 +102,7 @@ export class ExecutionManager {
     // Only the persisted program may run on resume (Invariant 2): without it there is nothing to resume.
     if (record.originalCode === undefined) throw new ExecutionNotResumableError(executionId, record.status)
     if (record.pendingApprovalId) {
-      const approval = await this.store.getApproval(record.pendingApprovalId)
+      const approval = await this.persistence.getApproval(record.pendingApprovalId)
       if (approval && approval.status === APPROVAL_STATUS.PENDING) {
         throw new ApprovalPendingError(executionId, approval.activitySequence, approval.approvalId, approval.summary)
       }
@@ -111,7 +111,7 @@ export class ExecutionManager {
     // record whose lock is free is a run that died mid-flight (process crash)
     // and may be resumed from its journal; a RUNNING record whose lock is held
     // is a live concurrent run and is refused.
-    const locked = await this.store.acquireLock(executionId)
+    const locked = await this.persistence.acquireLock(executionId)
     if (!locked) throw new ExecutionLockedError(executionId)
     try {
       // Re-read under the lock: a concurrent run may have finished between load and acquire.
@@ -120,10 +120,10 @@ export class ExecutionManager {
       fresh.status = EXECUTION_STATUS.RUNNING
       fresh.runCount += 1
       fresh.updatedAt = this.now()
-      await this.store.updateExecution(fresh)
+      await this.persistence.updateExecution(fresh)
       return fresh
     } catch (err) {
-      await this.store.releaseLock(executionId)
+      await this.persistence.releaseLock(executionId)
       throw err
     }
   }
@@ -162,11 +162,11 @@ export class ExecutionManager {
           break
       }
       this.settle(record)
-      await this.store.updateExecution(record)
+      await this.persistence.updateExecution(record)
       this.options.onStateChange?.(executionId)
       return record
     } finally {
-      await this.store.releaseLock(executionId)
+      await this.persistence.releaseLock(executionId)
     }
   }
 
@@ -181,7 +181,7 @@ export class ExecutionManager {
     if (sequence > record.currentActivity) {
       record.currentActivity = sequence
       record.updatedAt = this.now()
-      await this.store.updateExecution(record)
+      await this.persistence.updateExecution(record)
     }
   }
 
@@ -192,16 +192,16 @@ export class ExecutionManager {
     record.updatedAt = this.now()
     if (reason) record.terminalReason = reason
     this.settle(record)
-    await this.store.updateExecution(record)
+    await this.persistence.updateExecution(record)
     this.options.onStateChange?.(executionId)
   }
 
   async inspect(executionId: string): Promise<ExecutionInspection> {
     const execution = await this.load(executionId)
     const [activities, approvals, decisions] = await Promise.all([
-      this.store.listActivities(executionId),
-      this.store.listApprovals(executionId),
-      this.store.listDecisions(executionId)
+      this.persistence.listActivities(executionId),
+      this.persistence.listApprovals(executionId),
+      this.persistence.listDecisions(executionId)
     ])
     return { execution, activities, approvals, decisions, history: buildHistory(execution, activities, approvals, decisions) }
   }

@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest'
 import { BridgeRequestHandler } from '../../src/runtime/sandbox/bridge-request-handler.js'
 import type { SandboxExecutionContext } from '../../src/runtime/sandbox/execute-api-in-sandbox.js'
 import { ActivityJournal, CallLog } from '../../src/runtime/execution/activity-journal.js'
-import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-execution-store.js'
 import { resolveOperation } from '../../src/runtime/governance/operation-resolver.js'
 import { AuditCollector } from '../../src/runtime/observability/audit.js'
 import { ProgressCollector } from '../../src/runtime/observability/progress.js'
@@ -78,10 +78,10 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
   })
 
   it('a governed stop refuses every later call in the run without executing it', async () => {
-    const store = new InMemoryCodeModeStore()
+    const persistence = new InMemoryExecutionStore()
     const { ctx, calls } = makeCtx({
       executionBridge: {
-        journal: new ActivityJournal(store, 'exec-1', 'trafficking', 1),
+        journal: new ActivityJournal(persistence, 'exec-1', 'trafficking', 1),
         resolve: (m, p) => resolveOperation(campaignSpec, m, p),
         decide: async () => ({ decision: 'REQUIRE_APPROVAL', approvalId: 'ap-1', summary: { service: 'trafficking', method: 'POST', specPath: '/campaigns/{id}/finalize', reason: 'r', matchedRules: [] } })
       }
@@ -91,18 +91,18 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
     const after = parse(await handler.handle(call({ method: 'GET', path: '/campaigns' })))
     expect(after.message).toContain('Execution is paused or stopped')
     expect(calls).toHaveLength(0)
-    expect((await store.getActivity('exec-1', 1))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
+    expect((await persistence.getActivity('exec-1', 1))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
     expect(() => handler.throwIfViolated()).toThrow(ApprovalRequiredError)
   })
 
   describe('one path for governance, journal and wire', () => {
     function governed(decide: (req: { specPath: string; operationId?: string; query?: Record<string, unknown> }) => 'ALLOW' | 'DENY') {
-      const store = new InMemoryCodeModeStore()
+      const persistence = new InMemoryExecutionStore()
       const seen: Array<{ specPath: string; operationId?: string; query?: Record<string, unknown> }> = []
       const { ctx, calls } = makeCtx({
         limits: { memoryLimitMb: 64, executeTimeoutMs: 1000, searchTimeoutMs: 1000, maxApiCalls: 10, maxConcurrentCalls: 2 },
         executionBridge: {
-          journal: new ActivityJournal(store, 'exec-1', 'trafficking', 1),
+          journal: new ActivityJournal(persistence, 'exec-1', 'trafficking', 1),
           resolve: (m, p) => resolveOperation(campaignSpec, m, p),
           decide: async (_seq, req) => {
             seen.push(req)
@@ -110,7 +110,7 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
           }
         }
       })
-      return { store, seen, ctx, calls, handler: new BridgeRequestHandler(ctx, new AbortController().signal) }
+      return { persistence, seen, ctx, calls, handler: new BridgeRequestHandler(ctx, new AbortController().signal) }
     }
     const denyFinalize = (req: { operationId?: string }) => req.operationId === 'finalizeCampaign' ? 'DENY' : 'ALLOW'
 
@@ -124,21 +124,21 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
 
     it.each(['/campaigns/C1/./finalize', '/campaigns/x/../C1/finalize', '/campaigns/%2e%2e/C1/finalize', 'http://elsewhere.example/campaigns/C1/finalize', '//elsewhere.example/x', '/campaigns/C1%2Ffinalize'])(
       'an aliasing spelling (%s) is refused before governance and never sent', async path => {
-        const { handler, calls, seen, store } = governed(denyFinalize)
+        const { handler, calls, seen, persistence } = governed(denyFinalize)
         const reply = parse(await handler.handle(call({ method: 'POST', path })))
         expect(reply.code).toBe(ERR.INVALID_API_REQUEST)
         expect(seen).toHaveLength(0)
         expect(calls).toHaveLength(0)
-        expect(await store.getActivity('exec-1', 1)).toBeUndefined()
+        expect(await persistence.getActivity('exec-1', 1)).toBeUndefined()
         expect(() => handler.throwIfViolated()).toThrow(SandboxInvalidApiRequestError)
       })
 
     it('sends the canonical path, and a query written into the path travels as params that rules can read', async () => {
-      const { handler, calls, seen, store } = governed(() => 'ALLOW')
+      const { handler, calls, seen, persistence } = governed(() => 'ALLOW')
       await handler.handle(call({ method: 'GET', path: '/%63ampaigns?status=active', params: { page: 2 } }))
       expect(calls[0]?.req).toMatchObject({ path: '/campaigns', params: { page: 2, status: 'active' } })
       expect(seen[0]).toMatchObject({ specPath: '/campaigns', query: { page: 2, status: 'active' } })
-      expect((await store.getActivity('exec-1', 1))?.request).toMatchObject({ rawPath: '/campaigns', query: { page: 2, status: 'active' } })
+      expect((await persistence.getActivity('exec-1', 1))?.request).toMatchObject({ rawPath: '/campaigns', query: { page: 2, status: 'active' } })
     })
 
     it('refuses params that are not an object of query parameters', async () => {
@@ -159,12 +159,12 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
 
   describe('concurrent calls of one run', () => {
     it('admits them one at a time: after a sibling is denied, a call that would need approval is refused and opens nothing', async () => {
-      const store = new InMemoryCodeModeStore()
+      const persistence = new InMemoryExecutionStore()
       const asked: string[] = []
       const { ctx, calls } = makeCtx({
         limits: { memoryLimitMb: 64, executeTimeoutMs: 1000, searchTimeoutMs: 1000, maxApiCalls: 10, maxConcurrentCalls: 5 },
         executionBridge: {
-          journal: new ActivityJournal(store, 'exec-1', 'trafficking', 1),
+          journal: new ActivityJournal(persistence, 'exec-1', 'trafficking', 1),
           resolve: (m, p) => resolveOperation(campaignSpec, m, p),
           decide: async (_seq, req) => {
             asked.push(req.specPath)
@@ -183,22 +183,22 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
       expect(parse(denied).code).toBe(ERR.GOVERNANCE_DENIED)
       expect(parse(second).code).toBe(ERR.GOVERNANCE_DENIED) // refused, naming why the run stopped
       expect(asked).toEqual(['/campaigns']) // governance never saw the sibling
-      expect(await store.getActivity('exec-1', 2)).toBeUndefined()
+      expect(await persistence.getActivity('exec-1', 2)).toBeUndefined()
       expect(calls).toHaveLength(0)
       expect(() => handler.throwIfViolated()).toThrow(GovernanceDeniedError)
     })
 
     it('drain lets an un-awaited call finish and be journaled before the run is reported', async () => {
-      const store = new InMemoryCodeModeStore()
+      const persistence = new InMemoryExecutionStore()
       const slow = makeConnector()
       const { ctx } = makeCtx({
         apiClient: { request: async (req, c) => { await new Promise(r => setTimeout(r, 50)); return slow.connector.request(req, c) } },
-        executionBridge: { journal: new ActivityJournal(store, 'exec-1', 'trafficking', 1), resolve: (m, p) => resolveOperation(campaignSpec, m, p) }
+        executionBridge: { journal: new ActivityJournal(persistence, 'exec-1', 'trafficking', 1), resolve: (m, p) => resolveOperation(campaignSpec, m, p) }
       })
       const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
       void handler.handle(call({ method: 'POST', path: '/campaigns', body: {} })) // never awaited by the "program"
       await handler.drain(1000, () => { throw new Error('should not need to abort') })
-      expect((await store.getActivity('exec-1', 1))?.status).toBe(ACTIVITY_STATUS.COMPLETED)
+      expect((await persistence.getActivity('exec-1', 1))?.status).toBe(ACTIVITY_STATUS.COMPLETED)
       expect(parse(await handler.handle(call({ method: 'GET', path: '/campaigns' }))).message).toContain('already returned')
     })
 

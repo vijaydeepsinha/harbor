@@ -3,20 +3,20 @@
 
 import { describe, it, expect } from 'vitest'
 import pino from 'pino'
-import { buildCodeModeRuntime } from '../../src/runtime/execution/code-mode-runtime.js'
-import type { CodeModeConfig } from '../../src/core/types/config.types.js'
+import { buildDurableExecutionRuntime } from '../../src/runtime/execution/durable-execution-runtime.js'
+import type { ExecutionConfig } from '../../src/core/types/config.types.js'
 import type { Logger } from '../../src/core/types/logger.types.js'
 import { GOVERNANCE_DECISION, EXECUTION_CODE_RETENTION } from '../../src/core/constants.js'
 
 const silent = pino({ level: 'silent' }) as unknown as Logger
-const config = (retention?: CodeModeConfig['retention']): CodeModeConfig => ({
+const config = (retention?: ExecutionConfig['retention']): ExecutionConfig => ({
   store: { type: 'in-memory' },
   ...(retention ? { retention } : {}),
   governance: { rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600 }
 })
 
-async function codeAfterCompletion(c: CodeModeConfig): Promise<string | undefined> {
-  const rt = await buildCodeModeRuntime(c, silent)
+async function codeAfterCompletion(c: ExecutionConfig): Promise<string | undefined> {
+  const rt = await buildDurableExecutionRuntime(c, silent)
   const rec = await rt.manager.create({ service: 'svc', code: 'async () => 1', userIdHash: 'h' })
   await rt.manager.beginRun(rec.executionId)
   await rt.manager.endRun(rec.executionId, { kind: 'completed', result: 1 })
@@ -25,7 +25,7 @@ async function codeAfterCompletion(c: CodeModeConfig): Promise<string | undefine
   return code
 }
 
-describe('buildCodeModeRuntime — retention settings reach the execution manager', () => {
+describe('buildDurableExecutionRuntime — retention settings reach the execution manager', () => {
   it('drops a completed execution\'s code by default and keeps it with KEEP', async () => {
     expect(await codeAfterCompletion(config())).toBeUndefined()
     expect(await codeAfterCompletion(config({ code: EXECUTION_CODE_RETENTION.KEEP }))).toBe('async () => 1')

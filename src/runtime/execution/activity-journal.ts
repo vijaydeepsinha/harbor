@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { CodeModeStore } from '../../spi/execution/execution-store.js'
+import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
 import {
   type ActivityRecord,
   type ActivityRequestRecord,
@@ -91,7 +91,7 @@ export class ActivityJournal extends CallLog {
   private cursor = 0
 
   constructor(
-    private readonly store: CodeModeStore,
+    private readonly persistence: ExecutionPersistence,
     readonly executionId: string,
     readonly service: string,
     /** 1-based index of the sandbox run driving this journal (execution.runCount). */
@@ -123,7 +123,7 @@ export class ActivityJournal extends CallLog {
    */
   async next(request: ActivityRequestRecord): Promise<{ sequence: number; existing?: ActivityRecord }> {
     const sequence = ++this.cursor
-    const existing = await this.store.getActivity(this.executionId, sequence)
+    const existing = await this.persistence.getActivity(this.executionId, sequence)
     if (!existing) return { sequence }
     const recorded = existing.request
     const diverged =
@@ -157,7 +157,7 @@ export class ActivityJournal extends CallLog {
       record.response = response
       delete record.failure
       record.updatedAt = this.now()
-      await this.store.putActivity(record)
+      await this.persistence.putActivity(record)
     }
     await super.recordResponse(call, response, sequence)
   }
@@ -174,7 +174,7 @@ export class ActivityJournal extends CallLog {
         record.status = ACTIVITY_STATUS.FAILED
         record.failure = { code: failure.code, message: failure.message, outcomeKnown: false }
         record.updatedAt = this.now()
-        await this.store.putActivity(record)
+        await this.persistence.putActivity(record)
       }).catch(() => {})
     }
     await super.recordFailure(call, failure, executingSequence)
@@ -194,7 +194,7 @@ export class ActivityJournal extends CallLog {
     status: ActivityRecord['status'],
     approvalId?: string
   ): Promise<ActivityRecord> {
-    const existing = await this.store.getActivity(this.executionId, sequence)
+    const existing = await this.persistence.getActivity(this.executionId, sequence)
     const at = this.now()
     const record: ActivityRecord = {
       executionId: this.executionId,
@@ -207,12 +207,12 @@ export class ActivityJournal extends CallLog {
       updatedAt: at,
       ...(approvalId ?? existing?.approvalId ? { approvalId: approvalId ?? existing?.approvalId } : {})
     }
-    await this.store.putActivity(record)
+    await this.persistence.putActivity(record)
     return record
   }
 
   private async mustGet(sequence: number): Promise<ActivityRecord> {
-    const record = await this.store.getActivity(this.executionId, sequence)
+    const record = await this.persistence.getActivity(this.executionId, sequence)
     if (!record) throw new Error(`Activity #${sequence} of ${this.executionId} is not journaled`)
     return record
   }

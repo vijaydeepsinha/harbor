@@ -10,8 +10,8 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { ConnectorAPI } from '../../src/spi/connector/connector-api.js'
-import type { CodeModeStore } from '../../src/spi/execution/execution-store.js'
-import { InMemoryCodeModeStore } from '../../src/adapters/execution/in-memory-execution-store.js'
+import type { ExecutionPersistence } from '../../src/spi/execution/execution-store.js'
+import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-execution-store.js'
 import { makeConnector, makeResources, makeRuntime, registerGoverned, makeCtx } from '../unit/code-mode-harness.js'
 import { ACTIVITY_STATUS, EXECUTION_STATUS, EXECUTION_ID_META_KEY, GOVERNANCE_DECISION } from '../../src/core/constants.js'
 
@@ -23,15 +23,15 @@ function slow(connector: ConnectorAPI, ms: number): ConnectorAPI {
 }
 
 /** Every store call takes a few ms, like a real shared store — enough for concurrent calls to interleave. */
-function laggyStore(ms = 5): CodeModeStore {
-  const inner = new InMemoryCodeModeStore()
-  return new Proxy(inner, {
+function laggyStore(ms = 5): ExecutionPersistence {
+  const innerPersistence = new InMemoryExecutionStore()
+  return new Proxy(innerPersistence, {
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver) as unknown
       if (typeof value !== 'function') return value
       return async (...args: unknown[]) => { await new Promise(r => setTimeout(r, ms)); return (value as (...a: unknown[]) => unknown).apply(target, args) }
     }
-  }) as CodeModeStore
+  }) as ExecutionPersistence
 }
 
 const executionIdOf = (res: Record<string, unknown>) => (res['_meta'] as Record<string, string>)[EXECUTION_ID_META_KEY]!

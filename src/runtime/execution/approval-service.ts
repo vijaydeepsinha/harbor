@@ -3,7 +3,7 @@
 
 import { v4 as uuidv4 } from 'uuid'
 import type { ElicitRequestFormParams } from '@modelcontextprotocol/server'
-import type { CodeModeStore } from '../../spi/execution/execution-store.js'
+import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
 import type { ExecutionManager } from './execution-manager.js'
 import {
   type ApprovalRecord,
@@ -58,7 +58,7 @@ export interface ApprovalElicitation {
  */
 export class ApprovalService {
   constructor(
-    private readonly store: CodeModeStore,
+    private readonly persistence: ExecutionPersistence,
     private readonly manager: ExecutionManager,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly newId: () => string = uuidv4
@@ -73,12 +73,12 @@ export class ApprovalService {
       summary,
       createdAt: this.now()
     }
-    await this.store.putApproval(approval)
+    await this.persistence.putApproval(approval)
     return approval
   }
 
   async get(approvalId: string): Promise<ApprovalRecord> {
-    const approval = await this.store.getApproval(approvalId)
+    const approval = await this.persistence.getApproval(approvalId)
     if (!approval) throw new ApprovalNotFoundError(approvalId)
     return approval
   }
@@ -94,7 +94,7 @@ export class ApprovalService {
     if (observed.status !== APPROVAL_STATUS.PENDING) {
       throw new ApprovalAlreadyDecidedError(approvalId, observed.status)
     }
-    if (!await this.store.acquireLock(observed.executionId)) {
+    if (!await this.persistence.acquireLock(observed.executionId)) {
       throw new ExecutionLockedError(observed.executionId)
     }
 
@@ -105,7 +105,7 @@ export class ApprovalService {
       }
       return await this.applyDecision(approval, input)
     } finally {
-      await this.store.releaseLock(observed.executionId)
+      await this.persistence.releaseLock(observed.executionId)
     }
   }
 
@@ -120,7 +120,7 @@ export class ApprovalService {
     if (TERMINAL_EXECUTION_STATUSES.has(execution.status)) {
       throw new ApprovalStaleError(approval.approvalId, `execution ${execution.executionId} is ${execution.status}`)
     }
-    const activity = await this.store.getActivity(approval.executionId, approval.activitySequence)
+    const activity = await this.persistence.getActivity(approval.executionId, approval.activitySequence)
     if (activity && (activity.status !== ACTIVITY_STATUS.WAITING_APPROVAL || activity.approvalId !== approval.approvalId)) {
       throw new ApprovalStaleError(approval.approvalId, `activity #${approval.activitySequence} is ${activity.status}${activity.approvalId && activity.approvalId !== approval.approvalId ? ` under approval ${activity.approvalId}` : ''}`)
     }
@@ -135,7 +135,7 @@ export class ApprovalService {
       decidedVia: input.via,
       ...(input.comment ? { comment: input.comment } : {})
     }
-    await this.store.putApproval(decided)
+    await this.persistence.putApproval(decided)
 
     if (activity) {
       activity.status =
@@ -143,7 +143,7 @@ export class ApprovalService {
         : outcome === 'REJECTED' ? ACTIVITY_STATUS.DENIED
         : ACTIVITY_STATUS.CANCELLED
       activity.updatedAt = decided.decidedAt as string
-      await this.store.putActivity(activity)
+      await this.persistence.putActivity(activity)
     }
 
     if (outcome === 'REJECTED') {

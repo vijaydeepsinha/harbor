@@ -37,12 +37,12 @@ src/           all gateway source (tsconfig rootDir; builds to dist/)
   index.ts     process entry — SERVICES_DIR defaults to ../services (repo root from src/ and dist/)
   core/        constants (ERR, OUTCOME, EXECUTION_STATUS, …), types, config loader (core/config/config.ts), utils
   spi/         contracts: connector (ConnectorAPI), auth, idempotency, permissions, resilience, spec,
-               execution (CodeModeStore), governance (GovernanceRuleSource), observability (AuditSink)
+               execution (ExecutionPersistence), governance (GovernanceRuleSource), observability (AuditSink)
   adapters/    pluggable implementations (auth strategies, idempotency, resilience, execution stores, console audit sink)
   wiring/      env → strategy builders and backend registries (registerExecutionStoreBackend, …)
   runtime/     gateway boot (server-factory.ts), http (http-gateway.ts, execution-routes.ts, mcp-server-factory.ts),
                sandbox (runner, bridge-request-handler, request-path), execution (manager, activity-gate, journal,
-               approvals, request-state, code-mode-runtime, retention),
+               approvals, request-state, durable-execution-runtime, retention),
                governance (operation-resolver, rule-schema, rule-loader, rule-store, rule-evaluator, rule-refresher),
                registry, spec, observability, transport (stdio)
   tools/       the five MCP tools + tool-helpers (response _meta, request _meta reader)
@@ -111,7 +111,7 @@ plus `npm run test:governance` when anything on the governance path changed
    invent MCP methods; `ctx.mcpReq.elicitInput` throws on 2026-07-28.
 5. **`requestState` is attacker-controlled input.** It is HMAC-sealed by the
    SDK codec and re-checked against the authenticated principal. Keep it so.
-6. **Transport stays stateless.** Execution state lives in `CodeModeStore`,
+6. **Transport stays stateless.** Execution state lives in `ExecutionPersistence`,
    never in an MCP session or a module-level map keyed by connection.
 7. **Skills ≠ Governance Rules.** Skills tell the agent *how*; rules decide
    *whether*. Never merge the two.
@@ -131,7 +131,7 @@ plus `npm run test:governance` when anything on the governance path changed
 - **A rule source:** implement `GovernanceRuleSource` (`src/spi/governance/rule-source.ts`;
   `load()` throws rather than return part of a set) and register it with
   `registerGovernanceRuleSourceBackend`; `GOVERNANCE_RULES_SOURCE=<type>` selects it.
-- **A store backend:** implement `CodeModeStore` (`src/spi/execution/execution-store.ts`),
+- **A store backend:** implement `ExecutionPersistence` (`src/spi/execution/execution-store.ts`),
   run the contract suite in `tests/unit/execution-store.test.ts` against it,
   register it with `registerExecutionStoreBackend`; `EXECUTION_STORE_TYPE=<name>` selects it
   (the same holds for `TOKEN_CACHE_TYPE` / `IDEMPOTENCY_TYPE` and their register functions).

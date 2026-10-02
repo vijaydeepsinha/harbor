@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { v4 as uuidv4 } from 'uuid'
-import type { CodeModeStore } from '../../spi/execution/execution-store.js'
+import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
 import type {
   ExecutionRecord,
   ActivityRecord,
@@ -63,7 +63,7 @@ const MAX_RELATIVE_TTL_SEC = 30 * 24 * 3600
  *   activities, approvals and decisions; a human decision only updates
  *   records that already exist.
  */
-export class MemcacheCodeModeStore implements CodeModeStore {
+export class MemcacheExecutionStore implements ExecutionPersistence {
   readonly name: string = EXECUTION_STORE_TYPE.MEMCACHE
   private readonly prefix: string
   private readonly lockTtlSec: number
@@ -236,8 +236,8 @@ function safeId(id: string): string {
   return id
 }
 
-export function memcacheCodeModeStore(config: MemcacheConnectionConfig & { keyPrefix?: string; lockTtlSec?: number }): CodeModeStore {
-  return new MemcacheCodeModeStore(createMemcacheClient(config), {
+export function memcacheExecutionStore(config: MemcacheConnectionConfig & { keyPrefix?: string; lockTtlSec?: number }): ExecutionPersistence {
+  return new MemcacheExecutionStore(createMemcacheClient(config), {
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.lockTtlSec !== undefined ? { lockTtlSec: config.lockTtlSec } : {})
   })

@@ -31,7 +31,7 @@ import {
   ActivityOutcomeUnknownError,
   ApprovalAlreadyDecidedError
 } from '../core/types/execution.types.js'
-import type { CodeModeRuntime } from '../runtime/execution/code-mode-runtime.js'
+import type { DurableExecutionRuntime } from '../runtime/execution/durable-execution-runtime.js'
 import type { ResumeState } from '../runtime/execution/request-state.js'
 import { ActivityJournal, CallLog, type CallLogSource } from '../runtime/execution/activity-journal.js'
 import { resolveOperation } from '../runtime/governance/operation-resolver.js'
@@ -53,17 +53,17 @@ import { ensureError, errorCode as getErrorCode, errorRetryable } from '../core/
 import { hashAuthenticatedPrincipal } from '../core/utils/user-id-hash.js'
 
 export function registerExecuteApiTool(
-  server: McpServer,
-  registry: ServiceRegistry,
-  globalConfig: GlobalConfig,
-  logger: Logger,
-  metrics: MetricsCollector,
-  clientToken?: string,
-  /** Absent ⇒ legacy behaviour: no durable execution, no governance. */
-  codeMode?: CodeModeRuntime,
-  /** Where audit records go (AUDIT_SINKS). Absent ⇒ written to the service logger, as before. */
+    server: McpServer,
+    registry: ServiceRegistry,
+    globalConfig: GlobalConfig,
+    logger: Logger,
+    metrics: MetricsCollector,
+    clientToken?: string,
+    /** Absent ⇒ legacy behaviour: no durable execution, no governance. */
+  durableExecutionRuntime?: DurableExecutionRuntime,
+    /** Where audit records go (AUDIT_SINKS). Absent ⇒ written to the service logger, as before. */
   auditPipeline?: AuditPipeline,
-  /** The caller's X-Harbor-Client-ID from the inbound request, forwarded on every backend call. */
+    /** The caller's X-Harbor-Client-ID from the inbound request, forwarded on every backend call. */
   callerClientId?: string
 ): void {
   const serviceNames = registry.serviceNames()
@@ -244,8 +244,8 @@ async () => {
         let execution: ExecutionRecord | undefined
         let bridge: ExecutionBridge | undefined
         let pendingRetry: InputRequiredResult | undefined
-        if (codeMode) {
-          const resumed = await resolveExecution(codeMode, ctx, { service, code, userIdHash }, logger, correlationId)
+        if (durableExecutionRuntime) {
+          const resumed = await resolveExecution(durableExecutionRuntime, ctx, { service, code, userIdHash }, logger, correlationId)
           if ('error' in resumed) {
             // Refused, or the answer itself ended the execution (decline, cancel): nothing ran, but the
             // decision is part of the audit trail. codeSubmitted stays what this caller sent — never
@@ -262,9 +262,9 @@ async () => {
           execution = resumed.execution
           executionId = execution.executionId
           if (pendingRetry) return pendingRetry
-          execution = await codeMode.manager.beginRun(execution.executionId)
+          execution = await durableExecutionRuntime.manager.beginRun(execution.executionId)
           runStarted = true
-          bridge = makeBridge(codeMode, execution, svcResources, userIdHash)
+          bridge = makeBridge(durableExecutionRuntime, execution, svcResources, userIdHash)
           callLog = bridge.journal
         }
         program = execution?.originalCode ?? code
@@ -293,8 +293,8 @@ async () => {
         }
         const result = await runApiInSandbox(program, sandboxCtx)
 
-        if (codeMode && execution) {
-          await codeMode.manager.endRun(execution.executionId, { kind: 'completed', result })
+        if (durableExecutionRuntime && execution) {
+          await durableExecutionRuntime.manager.endRun(execution.executionId, { kind: 'completed', result })
         }
 
         const durationMs = Date.now() - startTime
@@ -371,7 +371,7 @@ async () => {
 
         // ── Persist the run outcome and, for approvals, hand the question to the client ──
         let approvalId: string | undefined
-        if (codeMode && executionId && status) {
+        if (durableExecutionRuntime && executionId && status) {
           const outcomeForStore =
             err instanceof ApprovalRequiredError ? { kind: 'waitingApproval' as const, approvalId: err.approvalId }
             : status === EXECUTION_STATUS.DENIED ? { kind: 'denied' as const, code: errorCode, message: errObj.message }
@@ -382,13 +382,13 @@ async () => {
           // pending) — then no run started, there is no lock to release and the
           // stored execution must stay exactly as it was.
           if (runStarted) {
-            await codeMode.manager.endRun(executionId, outcomeForStore).catch(e =>
+            await durableExecutionRuntime.manager.endRun(executionId, outcomeForStore).catch(e =>
               logger.error({ correlationId, executionId, error: ensureError(e).message }, 'Failed to persist run outcome'))
           }
           if (err instanceof ApprovalRequiredError) {
             approvalId = err.approvalId
             audit({ outcome, errorType, errorCode, userIdHash: 'unknown' }, program)
-            return await approvalResult(codeMode, ctx, err, userIdHash, logger, correlationId)
+            return await approvalResult(durableExecutionRuntime, ctx, err, userIdHash, logger, correlationId)
           }
         }
 
@@ -407,9 +407,9 @@ async () => {
         // When no run started (beginRun refused: locked, finished, approval
         // still pending) nothing changed, so `_meta` reports the execution as
         // it is stored — not the status this error would have given a run.
-        const reportedStatus = runStarted || !codeMode || executionId === undefined
+        const reportedStatus = runStarted || !durableExecutionRuntime || executionId === undefined
           ? status
-          : await codeMode.manager.load(executionId).then(r => r.status, () => undefined)
+          : await durableExecutionRuntime.manager.load(executionId).then(r => r.status, () => undefined)
         return mcpError(
           errObj.message,
           errorCode,
@@ -470,7 +470,7 @@ type ResolvedExecution =
  * Incoming `code` is ignored on resume.
  */
 async function resolveExecution(
-  rt: CodeModeRuntime,
+  rt: DurableExecutionRuntime,
   ctx: ServerContext,
   input: { service: string; code: string; userIdHash: string },
   logger: Logger,
@@ -580,8 +580,8 @@ function safeRequestState(view: ResumeContextView): ResumeState | undefined {
 }
 
 /** The hooks the bridge calls: OpenAPI resolution and governance for new activities. */
-function makeBridge(rt: CodeModeRuntime, execution: ExecutionRecord, svc: ServiceResources, _userIdHash: string): ExecutionBridge {
-  const journal = new ActivityJournal(rt.store, execution.executionId, svc.name, execution.runCount)
+function makeBridge(rt: DurableExecutionRuntime, execution: ExecutionRecord, svc: ServiceResources, _userIdHash: string): ExecutionBridge {
+  const journal = new ActivityJournal(rt.persistence, execution.executionId, svc.name, execution.runCount)
   return {
     journal,
     resolve: (method, rawPath) => resolveOperation(svc.specStore.getSpec(), method, rawPath),
@@ -594,7 +594,7 @@ function makeBridge(rt: CodeModeRuntime, execution: ExecutionRecord, svc: Servic
         ...(request.query !== undefined ? { query: request.query } : {}),
         ...(request.body !== undefined ? { body: request.body } : {})
       }, rt.config.governance.defaultDecision)
-      await rt.store.putDecision({
+      await rt.persistence.putDecision({
         executionId: execution.executionId, activitySequence: sequence,
         decision: outcome.decision, reason: outcome.reason,
         matchedRules: outcome.matchedRules, ruleVersions: outcome.ruleVersions,
@@ -626,7 +626,7 @@ function makeBridge(rt: CodeModeRuntime, execution: ExecutionRecord, svc: Servic
 
 /** Either an MRTR `input_required` (client supports elicitation) or an APPROVAL_REQUIRED error with the ids in `_meta`. */
 async function approvalResult(
-  rt: CodeModeRuntime,
+  rt: DurableExecutionRuntime,
   ctx: ServerContext,
   err: ApprovalRequiredError,
   userIdHash: string,
@@ -652,7 +652,7 @@ async function approvalResult(
   )
 }
 
-async function buildInputRequired(rt: CodeModeRuntime, ctx: ServerContext, approvalId: string, state: ResumeState): Promise<InputRequiredResult> {
+async function buildInputRequired(rt: DurableExecutionRuntime, ctx: ServerContext, approvalId: string, state: ResumeState): Promise<InputRequiredResult> {
   const approval = await rt.approvals.get(approvalId)
   const elicitation = rt.approvals.buildElicitation(approval)
   const requestState = await rt.requestState.mint(state, ctx)

@@ -7,7 +7,7 @@ import { AuditPipeline, executionStateOf } from '../../src/runtime/observability
 import { ConsoleAuditSink } from '../../src/adapters/observability/console-audit-sink.js'
 import { writeAuditRecord, type AuditRecord } from '../../src/runtime/observability/audit.js'
 import { buildAuditSinks, registerAuditSinkBackend } from '../../src/wiring/strategy-builders.js'
-import { buildCodeModeRuntime, type CodeModeRuntime } from '../../src/runtime/execution/code-mode-runtime.js'
+import { buildDurableExecutionRuntime, type DurableExecutionRuntime } from '../../src/runtime/execution/durable-execution-runtime.js'
 import { registerExecuteApiTool } from '../../src/tools/execute-api.tool.js'
 import type { AuditEvent, AuditSink } from '../../src/spi/observability/audit-sink.js'
 import type { ExecutionInspection } from '../../src/runtime/execution/execution-manager.js'
@@ -117,7 +117,7 @@ describe('audit pipeline', () => {
 
   it('the runtime publishes every persisted execution state change (runs and human decisions)', async () => {
     const { sink, events } = capturingSink()
-    const rt = await buildCodeModeRuntime({
+    const rt = await buildDurableExecutionRuntime({
       store: { type: 'in-memory' },
       governance: { rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600 }
     }, silent, new AuditPipeline([sink], silent))
@@ -133,8 +133,8 @@ describe('audit pipeline', () => {
   it('api_execute end to end: an audit record per call, and the execution state at the pause and at completion', async () => {
     const { sink, events } = capturingSink()
     const pipeline = new AuditPipeline([sink], silent)
-    // the manager publishes its state changes, as buildCodeModeRuntime wires it
-    const rt: CodeModeRuntime = makeRuntime(
+    // the manager publishes its state changes, as buildDurableExecutionRuntime wires it
+    const rt: DurableExecutionRuntime = makeRuntime(
       [{ name: 'finalize-needs-approval', match: { service: 'trafficking', operation: 'finalizeCampaign' }, action: { type: 'REQUIRE_APPROVAL' } }],
       GOVERNANCE_DECISION.ALLOW, undefined,
       { onStateChange: id => { void rt.manager.inspect(id).then(i => pipeline.publish({ kind: 'execution', state: executionStateOf(i) })) } }

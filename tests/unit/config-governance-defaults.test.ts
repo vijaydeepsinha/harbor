@@ -28,24 +28,24 @@ describe('governance configuration defaults', () => {
 
   it('defaults GOVERNANCE_DEFAULT_DECISION to DENY (fail closed where governance applies)', () => {
     delete process.env['GOVERNANCE_DEFAULT_DECISION']
-    expect(validateGlobalConfig().codeMode.governance.defaultDecision).toBe(GOVERNANCE_DECISION.DENY)
+    expect(validateGlobalConfig().execution.governance.defaultDecision).toBe(GOVERNANCE_DECISION.DENY)
   })
 
   it('the default rules directory is the install root\'s governance/rules, whatever the working directory', () => {
     const cwd = process.cwd()
     try {
       process.chdir(tmpdir())
-      expect(validateGlobalConfig().codeMode.governance.rulesDir).toBe(resolve(REPO_ROOT, 'governance', 'rules'))
+      expect(validateGlobalConfig().execution.governance.rulesDir).toBe(resolve(REPO_ROOT, 'governance', 'rules'))
     } finally {
       process.chdir(cwd)
     }
     process.env['GOVERNANCE_RULES_DIR'] = './my-rules'
-    expect(validateGlobalConfig().codeMode.governance.rulesDir).toBe('./my-rules')
+    expect(validateGlobalConfig().execution.governance.rulesDir).toBe('./my-rules')
   })
 
   it('rules load once from the directory by default', () => {
-    expect(validateGlobalConfig().codeMode.governance).toMatchObject({ rulesSource: 'dir', rulesRefreshSec: 0, rulesUrlTimeoutMs: 5000 })
-    expect(validateGlobalConfig().codeMode.governance.rulesUrl).toBeUndefined()
+    expect(validateGlobalConfig().execution.governance).toMatchObject({ rulesSource: 'dir', rulesRefreshSec: 0, rulesUrlTimeoutMs: 5000 })
+    expect(validateGlobalConfig().execution.governance.rulesUrl).toBeUndefined()
   })
 
   it('reads the url source and the refresh interval', () => {
@@ -53,32 +53,32 @@ describe('governance configuration defaults', () => {
     process.env['GOVERNANCE_RULES_URL'] = 'https://rules.example/set.yaml'
     process.env['GOVERNANCE_RULES_URL_TIMEOUT_MS'] = '2500'
     process.env['GOVERNANCE_RULES_REFRESH_SEC'] = '30'
-    expect(validateGlobalConfig().codeMode.governance).toMatchObject({
+    expect(validateGlobalConfig().execution.governance).toMatchObject({
       rulesSource: 'url', rulesUrl: 'https://rules.example/set.yaml', rulesUrlTimeoutMs: 2500, rulesRefreshSec: 30
     })
   })
 
   it('drops a terminal execution\'s code by default; KEEP keeps it', () => {
-    expect(validateGlobalConfig().codeMode.retention).toMatchObject({ code: 'DROP' })
+    expect(validateGlobalConfig().execution.retention).toMatchObject({ code: 'DROP' })
     process.env['EXECUTION_CODE_RETENTION'] = 'KEEP'
-    expect(validateGlobalConfig().codeMode.retention).toMatchObject({ code: 'KEEP' })
+    expect(validateGlobalConfig().execution.retention).toMatchObject({ code: 'KEEP' })
   })
 
   it('keeps finished executions for a day by default; 0 keeps them for good', () => {
-    expect(validateGlobalConfig().codeMode.retention).toMatchObject({ executionSec: 86_400 })
+    expect(validateGlobalConfig().execution.retention).toMatchObject({ executionSec: 86_400 })
     process.env['EXECUTION_RETENTION_SEC'] = '0'
-    expect(validateGlobalConfig().codeMode.retention).toMatchObject({ executionSec: 0 })
+    expect(validateGlobalConfig().execution.retention).toMatchObject({ executionSec: 0 })
   })
 
   it('EXECUTION_STORE_TYPE=memcache reads its connection like the token cache, plus key prefix and lock TTL', () => {
     process.env['EXECUTION_STORE_TYPE'] = 'memcache'
     process.env['EXECUTION_STORE_MEMCACHE_HOST'] = 'memcache.internal'
     process.env['EXECUTION_STORE_MEMCACHE_PORT'] = '11211'
-    expect(validateGlobalConfig().codeMode.store).toEqual({ type: 'memcache', host: 'memcache.internal', port: 11211, kvTimeoutMs: 2000 })
+    expect(validateGlobalConfig().execution.store).toEqual({ type: 'memcache', host: 'memcache.internal', port: 11211, kvTimeoutMs: 2000 })
     process.env['EXECUTION_STORE_MEMCACHE_TIMEOUT_MS'] = '500'
     process.env['EXECUTION_STORE_MEMCACHE_KEY_PREFIX'] = 'prod:harbor:'
     process.env['EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC'] = '900'
-    expect(validateGlobalConfig().codeMode.store).toEqual({
+    expect(validateGlobalConfig().execution.store).toEqual({
       type: 'memcache', host: 'memcache.internal', port: 11211, kvTimeoutMs: 500, keyPrefix: 'prod:harbor:', lockTtlSec: 900
     })
   })
@@ -114,7 +114,7 @@ describe('governance configuration defaults', () => {
 
   it('honours an explicit value', () => {
     process.env['GOVERNANCE_DEFAULT_DECISION'] = GOVERNANCE_DECISION.ALLOW
-    expect(validateGlobalConfig().codeMode.governance.defaultDecision).toBe(GOVERNANCE_DECISION.ALLOW)
+    expect(validateGlobalConfig().execution.governance.defaultDecision).toBe(GOVERNANCE_DECISION.ALLOW)
   })
 
   const expectBootRefused = (needle: string) => {
@@ -159,7 +159,7 @@ describe('governance configuration defaults', () => {
     }
     process.env['EXECUTION_STORE_MEMCACHE_PORT'] = '11211'
     delete process.env['EXECUTION_STORE_MEMCACHE_TIMEOUT_MS']
-    expect(validateGlobalConfig().codeMode.store).toMatchObject({ type: 'memcache', host: 'cache', port: 11211, kvTimeoutMs: 2000 })
+    expect(validateGlobalConfig().execution.store).toMatchObject({ type: 'memcache', host: 'cache', port: 11211, kvTimeoutMs: 2000 })
   })
 
   it('a backend registered in code can be selected by name; a malformed name still stops the gateway', () => {
@@ -168,7 +168,7 @@ describe('governance configuration defaults', () => {
     process.env['EXECUTION_STORE_TYPE'] = 'dynamo-db'
     const config = validateGlobalConfig()
     expect(config.defaultIdempotency).toEqual({ type: 'postgres' })
-    expect(config.codeMode.store).toEqual({ type: 'dynamo-db' }) // resolved by buildExecutionStore, or refused there
+    expect(config.execution.store).toEqual({ type: 'dynamo-db' }) // resolved by buildExecutionStore, or refused there
     for (const [key, bad] of [['TOKEN_CACHE_TYPE', 'Redis Cluster'], ['EXECUTION_STORE_TYPE', 'my_store!']] as const) {
       process.env[key] = bad
       expectBootRefused(key)

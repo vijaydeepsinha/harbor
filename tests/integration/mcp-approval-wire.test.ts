@@ -48,7 +48,7 @@ describe('MCP wire: approval via input_required + retry', () => {
   registry.register('trafficking', makeResources('trafficking', connector))
   const metrics = { increment: () => {}, stop: () => {} } as unknown as MetricsRegistry
   const handler = createMcpHandler(
-    buildMcpServerFactory({ registry, globalConfig, logger: silentLogger, metrics, codeMode: rt }),
+    buildMcpServerFactory({ registry, globalConfig, logger: silentLogger, metrics, durableExecutionRuntime: rt }),
     { legacy: 'reject' }
   )
   let nextId = 1
