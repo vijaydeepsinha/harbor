@@ -43,7 +43,7 @@ export interface ApprovalDecisionInput {
 export interface ApprovalDecisionResult {
   approval: ApprovalRecord
   /** What the execution may do next. */
-  outcome: 'APPROVED' | 'REJECTED' | 'CANCELLED'
+  outcome: Exclude<ApprovalStatus, typeof APPROVAL_STATUS.PENDING>
 }
 
 /** Shape of the embedded form elicitation the tool returns inside `input_required` (the SDK's wire type). */
@@ -127,13 +127,9 @@ export class ApprovalService {
     if (activity && (activity.status !== ACTIVITY_STATUS.WAITING_APPROVAL || activity.approvalId !== approval.approvalId)) {
       throw new ApprovalStaleError(approval.approvalId, `activity #${approval.activitySequence} is ${activity.status}${activity.approvalId && activity.approvalId !== approval.approvalId ? ` under approval ${activity.approvalId}` : ''}`)
     }
-    const status: ApprovalStatus =
-      outcome === 'APPROVED' ? APPROVAL_STATUS.APPROVED
-      : outcome === 'REJECTED' ? APPROVAL_STATUS.REJECTED
-      : APPROVAL_STATUS.CANCELLED
     const decided: ApprovalRecord = {
       ...approval,
-      status,
+      status: outcome,
       decidedAt: this.now(),
       decidedVia: input.via,
       ...(input.comment ? { comment: input.comment } : {})
@@ -142,19 +138,19 @@ export class ApprovalService {
 
     if (activity) {
       activity.status =
-        outcome === 'APPROVED' ? ACTIVITY_STATUS.APPROVED
-        : outcome === 'REJECTED' ? ACTIVITY_STATUS.DENIED
+        outcome === APPROVAL_STATUS.APPROVED ? ACTIVITY_STATUS.APPROVED
+        : outcome === APPROVAL_STATUS.REJECTED ? ACTIVITY_STATUS.DENIED
         : ACTIVITY_STATUS.CANCELLED
       activity.updatedAt = decided.decidedAt as string
       await this.persistence.putActivity(activity)
     }
 
-    if (outcome === 'REJECTED') {
+    if (outcome === APPROVAL_STATUS.REJECTED) {
       await this.manager.markApprovalDecided(approval.executionId, EXECUTION_STATUS.DENIED, {
         code: ERR.GOVERNANCE_DENIED,
         message: `${GOVERNANCE_REASON.APPROVAL_REJECTED}: activity #${approval.activitySequence} (${approval.summary.method} ${approval.summary.specPath})`
       })
-    } else if (outcome === 'CANCELLED') {
+    } else if (outcome === APPROVAL_STATUS.CANCELLED) {
       await this.manager.markApprovalDecided(approval.executionId, EXECUTION_STATUS.CANCELLED, {
         code: ERR.EXECUTION_CANCELLED,
         message: `${GOVERNANCE_REASON.APPROVAL_CANCELLED}: activity #${approval.activitySequence}`
@@ -227,11 +223,11 @@ export function readApprovalAnswer(value: unknown): boolean | undefined {
 function mapDecision(approvalId: string, input: ApprovalDecisionInput): ApprovalDecisionResult['outcome'] {
   switch (input.action) {
     case 'accept':
-      if (input.approve === true) return 'APPROVED'
-      if (input.approve === false) return 'REJECTED'
+      if (input.approve === true) return APPROVAL_STATUS.APPROVED
+      if (input.approve === false) return APPROVAL_STATUS.REJECTED
       throw new ApprovalAnswerInvalidError(approvalId)
-    case 'decline': return 'REJECTED'
-    case 'cancel': return 'CANCELLED'
+    case 'decline': return APPROVAL_STATUS.REJECTED
+    case 'cancel': return APPROVAL_STATUS.CANCELLED
   }
 }
 

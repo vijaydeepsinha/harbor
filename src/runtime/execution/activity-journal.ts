@@ -8,7 +8,7 @@ import {
   type ActivityResponseRecord,
   ReplayDivergedError
 } from '../../core/types/execution.types.js'
-import { ACTIVITY_STATUS, type AllowedHttpMethod } from '../../core/constants.js'
+import { ACTIVITY_STATUS, CALL_OUTCOME, type AllowedHttpMethod } from '../../core/constants.js'
 
 /** Records whose request is about to be executed or is in front of a human: they bind query and body too. */
 const CONTENT_BOUND: ReadonlySet<string> = new Set([
@@ -32,11 +32,11 @@ export interface CallIdentity {
 /** What happened to one call in this run. */
 export type JournalEntry = CallIdentity & (
   /** A COMPLETED activity from an earlier run; the recorded response was handed back, nothing was called. */
-  | { outcome: 'REPLAYED'; sequence: number; response: ActivityResponseRecord }
+  | { outcome: typeof CALL_OUTCOME.REPLAYED; sequence: number; response: ActivityResponseRecord }
   /** The external call was made and returned a response (any HTTP status). */
-  | { outcome: 'EXECUTED'; sequence?: number; response: ActivityResponseRecord }
+  | { outcome: typeof CALL_OUTCOME.EXECUTED; sequence?: number; response: ActivityResponseRecord }
   /** The call threw after it was resolved (transport error, open circuit, abort, store failure). */
-  | { outcome: 'FAILED'; sequence?: number; error: string; aborted: boolean }
+  | { outcome: typeof CALL_OUTCOME.FAILED; sequence?: number; error: string; aborted: boolean }
 )
 
 /** Read side of a run's call outcomes — what the audit and progress projections consume. */
@@ -59,18 +59,18 @@ export class CallLog implements CallLogSource {
   }
 
   recordReplayed(call: CallIdentity, sequence: number, response: ActivityResponseRecord): void {
-    this.log.push({ ...call, outcome: 'REPLAYED', sequence, response })
+    this.log.push({ ...call, outcome: CALL_OUTCOME.REPLAYED, sequence, response })
   }
 
   /** The call returned. `sequence` names the journaled activity, when there is one. */
   async recordResponse(call: CallIdentity, response: ActivityResponseRecord, sequence?: number): Promise<void> {
-    this.log.push({ ...call, outcome: 'EXECUTED', response, ...(sequence !== undefined ? { sequence } : {}) })
+    this.log.push({ ...call, outcome: CALL_OUTCOME.EXECUTED, response, ...(sequence !== undefined ? { sequence } : {}) })
   }
 
   /** The call threw. `executingSequence` names the activity that was journaled as EXECUTING, when there is one. */
   async recordFailure(call: CallIdentity, failure: { code: string; message: string; aborted: boolean }, executingSequence?: number): Promise<void> {
     this.log.push({
-      ...call, outcome: 'FAILED', error: failure.message, aborted: failure.aborted,
+      ...call, outcome: CALL_OUTCOME.FAILED, error: failure.message, aborted: failure.aborted,
       ...(executingSequence !== undefined ? { sequence: executingSequence } : {})
     })
   }

@@ -332,6 +332,53 @@ export const GOVERNANCE_DECISION = {
 } as const
 export type GovernanceDecisionType = (typeof GOVERNANCE_DECISION)[keyof typeof GOVERNANCE_DECISION]
 
+/**
+ * Why the sandbox bridge refused a call or stopped the run
+ * (BridgeRequestHandler). Recorded while the isolate runs and promoted to
+ * the matching typed error once it settles, so user code cannot mask them by
+ * catching the bridge error. The last five stop the run; four of them are
+ * the ActivityGate's reasons an activity may not proceed (ActivityStop).
+ */
+export const BRIDGE_VIOLATION = {
+  CALL_LIMIT: 'call',
+  CONCURRENT_LIMIT: 'concurrent',
+  PERMISSION: 'permission',
+  INVALID_API_REQUEST: 'invalidApiRequest',
+  CIRCUIT_OPEN: 'circuitOpen',
+  REPLAY_DIVERGED: 'replayDiverged',
+  APPROVAL_REQUIRED: 'approvalRequired',
+  GOVERNANCE_DENIED: 'governanceDenied',
+  CANCELLED: 'cancelled',
+  OUTCOME_UNKNOWN: 'outcomeUnknown',
+} as const
+
+/** The ActivityGate's answer for one encountered call: hand back the recorded response, make the call, or refuse it. */
+export const ACTIVITY_ADMISSION = {
+  REPLAY: 'replay',
+  EXECUTE: 'execute',
+  STOP: 'stop',
+} as const
+
+/** What happened to one call of a run, as its CallLog records it; audit and progress are read from these. */
+export const CALL_OUTCOME = {
+  /** A COMPLETED activity from an earlier run: the recorded response was handed back, nothing was called. */
+  REPLAYED: 'REPLAYED',
+  /** The external call was made and returned a response (any HTTP status). */
+  EXECUTED: 'EXECUTED',
+  /** The call threw after it was resolved (transport error, open circuit, abort, store failure). */
+  FAILED: 'FAILED',
+} as const
+
+/** How one sandbox run of an execution ended, as `ExecutionManager.endRun` records it. */
+export const RUN_OUTCOME = {
+  COMPLETED: 'completed',
+  WAITING_APPROVAL: 'waitingApproval',
+  INTERRUPTED: 'interrupted',
+  FAILED: 'failed',
+  DENIED: 'denied',
+  CANCELLED: 'cancelled',
+} as const
+
 /** Precedence among matched rules of the deciding level (higher wins). Documented in docs/code-mode-governance.md. */
 export const GOVERNANCE_PRECEDENCE: Record<GovernanceDecisionType, number> = {
   [GOVERNANCE_DECISION.DENY]: 3,

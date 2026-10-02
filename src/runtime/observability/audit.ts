@@ -6,6 +6,7 @@ import type { GlobalConfig } from '../../core/types/config.types.js'
 import type { AuditRecord } from '../../core/types/audit.types.js'
 import type { CallLogSource, JournalEntry } from '../execution/activity-journal.js'
 import type { AuditPipeline } from './audit-pipeline.js'
+import { CALL_OUTCOME } from '../../core/constants.js'
 
 export type { AuditRecord } from '../../core/types/audit.types.js'
 
@@ -28,7 +29,7 @@ export class AuditCollector {
   }
 
   private executed(): JournalEntry[] {
-    return this.calls.entries().filter(e => e.outcome === 'EXECUTED')
+    return this.calls.entries().filter(e => e.outcome === CALL_OUTCOME.EXECUTED)
   }
 }
 

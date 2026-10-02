@@ -46,7 +46,7 @@ import {
 } from './tool-helpers.js'
 import {
   TOOL, LOG_PREFIX, METRIC, OUTCOME, ERR,
-  EXECUTION_STATUS, GOVERNANCE_DECISION, APPROVAL_STATUS,
+  EXECUTION_STATUS, GOVERNANCE_DECISION, APPROVAL_STATUS, RUN_OUTCOME,
   EXECUTION_ID_META_KEY, EXECUTION_STATUS_META_KEY, APPROVAL_ID_META_KEY, APPROVAL_INPUT_KEY
 } from '../core/constants.js'
 import type { AuditOutcome, ExecutionStatus } from '../core/constants.js'
@@ -294,7 +294,7 @@ async () => {
         const result = await runApiInSandbox(program, sandboxCtx)
 
         if (governanceRuntime && execution) {
-          await governanceRuntime.executionManager.endRun(execution.executionId, { kind: 'completed', result })
+          await governanceRuntime.executionManager.endRun(execution.executionId, { kind: RUN_OUTCOME.COMPLETED, result })
         }
 
         const durationMs = Date.now() - startTime
@@ -373,11 +373,11 @@ async () => {
         let approvalId: string | undefined
         if (governanceRuntime && executionId && status) {
           const outcomeForStore =
-            err instanceof ApprovalRequiredError ? { kind: 'waitingApproval' as const, approvalId: err.approvalId }
-            : status === EXECUTION_STATUS.DENIED ? { kind: 'denied' as const, code: errorCode, message: errObj.message }
-            : status === EXECUTION_STATUS.CANCELLED ? { kind: 'cancelled' as const, code: errorCode, message: errObj.message }
-            : status === EXECUTION_STATUS.INTERRUPTED ? { kind: 'interrupted' as const, code: errorCode, message: errObj.message }
-            : { kind: 'failed' as const, code: errorCode, message: errObj.message }
+            err instanceof ApprovalRequiredError ? { kind: RUN_OUTCOME.WAITING_APPROVAL, approvalId: err.approvalId }
+            : status === EXECUTION_STATUS.DENIED ? { kind: RUN_OUTCOME.DENIED, code: errorCode, message: errObj.message }
+            : status === EXECUTION_STATUS.CANCELLED ? { kind: RUN_OUTCOME.CANCELLED, code: errorCode, message: errObj.message }
+            : status === EXECUTION_STATUS.INTERRUPTED ? { kind: RUN_OUTCOME.INTERRUPTED, code: errorCode, message: errObj.message }
+            : { kind: RUN_OUTCOME.FAILED, code: errorCode, message: errObj.message }
           // beginRun may itself have thrown (locked, not resumable, approval still
           // pending) — then no run started, there is no lock to release and the
           // stored execution must stay exactly as it was.
@@ -521,14 +521,14 @@ async function resolveExecution(
         })
         logger.info({ correlationId, executionId: resumeId, approvalId: state.approvalId, outcome: decided.outcome }, 'Approval decided via MCP elicitation')
         // The human's answer may end the execution here and now — report that consequence, not a failed resume.
-        if (decided.outcome === 'REJECTED') {
+        if (decided.outcome === APPROVAL_STATUS.REJECTED) {
           return { executionId: resumeId, error: mcpError(
             `Approval rejected for activity #${state.activitySequence}; the execution is denied and the operation was not executed.`,
             ERR.GOVERNANCE_DENIED, false, { executionId: resumeId, approvalId: state.approvalId },
             executionMeta(resumeId, EXECUTION_STATUS.DENIED, state.approvalId)
           ) }
         }
-        if (decided.outcome === 'CANCELLED') {
+        if (decided.outcome === APPROVAL_STATUS.CANCELLED) {
           return { executionId: resumeId, error: mcpError(
             `Approval cancelled for activity #${state.activitySequence}; the execution is cancelled and the operation was not executed.`,
             ERR.EXECUTION_CANCELLED, false, { executionId: resumeId, approvalId: state.approvalId },
@@ -560,7 +560,7 @@ async function resolveExecution(
     } else if (execution.status === EXECUTION_STATUS.WAITING_APPROVAL) {
       // The client retried without answering: ask again (spec allows repeated input_required).
       const approval = await governanceRuntime.approvals.get(state.approvalId)
-      if (approval.status === 'PENDING') {
+      if (approval.status === APPROVAL_STATUS.PENDING) {
         const reprompt = await buildInputRequired(governanceRuntime, ctx, approval.approvalId, state)
         return { execution, reprompt }
       }
@@ -606,9 +606,9 @@ function makeBridge(governanceRuntime: GovernanceRuntime, execution: ExecutionRe
       await governanceRuntime.executionManager.recordProgress(execution.executionId, sequence)
       switch (outcome.decision) {
         case GOVERNANCE_DECISION.ALLOW:
-          return { decision: 'ALLOW' }
+          return { decision: GOVERNANCE_DECISION.ALLOW }
         case GOVERNANCE_DECISION.DENY:
-          return { decision: 'DENY', reason: outcome.reason, matchedRules: outcome.matchedRules }
+          return { decision: GOVERNANCE_DECISION.DENY, reason: outcome.reason, matchedRules: outcome.matchedRules }
         case GOVERNANCE_DECISION.REQUIRE_APPROVAL: {
           const summary = {
             service: svc.name, method: request.method, specPath: request.specPath,
@@ -619,7 +619,7 @@ function makeBridge(governanceRuntime: GovernanceRuntime, execution: ExecutionRe
             reason: outcome.reason, matchedRules: outcome.matchedRules
           }
           const approval = await governanceRuntime.approvals.request(execution.executionId, sequence, summary)
-          return { decision: 'REQUIRE_APPROVAL', approvalId: approval.approvalId, summary }
+          return { decision: GOVERNANCE_DECISION.REQUIRE_APPROVAL, approvalId: approval.approvalId, summary }
         }
       }
     }

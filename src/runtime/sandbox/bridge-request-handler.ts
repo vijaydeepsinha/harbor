@@ -4,7 +4,7 @@
 import { CircuitOpenError } from '../../core/types/circuit-breaker.types.js'
 import { PermissionDeniedError } from '../../core/types/permission.types.js'
 import type { ApiRequest, ApiResponse } from '../../spi/connector/connector-api.js'
-import { ERR, ALLOWED_HTTP_METHODS, type AllowedHttpMethod } from '../../core/constants.js'
+import { ERR, ALLOWED_HTTP_METHODS, BRIDGE_VIOLATION, ACTIVITY_ADMISSION, type AllowedHttpMethod } from '../../core/constants.js'
 import { errorMessage, errorCode } from '../../core/utils/errors.js'
 import { normalizeEndpointPath } from '../../core/utils/url.js'
 import {
@@ -33,17 +33,18 @@ import { canonicalizeRequestPath } from './request-path.js'
  * metrics always reflect the precise outcome.
  */
 type BridgeViolation =
-  | { kind: 'call' }
-  | { kind: 'concurrent' }
-  | { kind: 'permission'; endpoint: string; method: AllowedHttpMethod }
-  | { kind: 'invalidApiRequest'; reason: InvalidApiRequestReason; detail: string }
-  | { kind: 'circuitOpen'; endpoint: string; retryAfterMs: number }
+  | { kind: typeof BRIDGE_VIOLATION.CALL_LIMIT }
+  | { kind: typeof BRIDGE_VIOLATION.CONCURRENT_LIMIT }
+  | { kind: typeof BRIDGE_VIOLATION.PERMISSION; endpoint: string; method: AllowedHttpMethod }
+  | { kind: typeof BRIDGE_VIOLATION.INVALID_API_REQUEST; reason: InvalidApiRequestReason; detail: string }
+  | { kind: typeof BRIDGE_VIOLATION.CIRCUIT_OPEN; endpoint: string; retryAfterMs: number }
   // ── durable execution (terminal for the run: later calls are refused without executing) ──
   | ActivityStop
-  | { kind: 'replayDiverged'; error: ReplayDivergedError }
+  | { kind: typeof BRIDGE_VIOLATION.REPLAY_DIVERGED; error: ReplayDivergedError }
 
 const RUN_STOPPING_KINDS: ReadonlySet<BridgeViolation['kind']> = new Set([
-  'approvalRequired', 'governanceDenied', 'replayDiverged', 'cancelled', 'outcomeUnknown'
+  BRIDGE_VIOLATION.APPROVAL_REQUIRED, BRIDGE_VIOLATION.GOVERNANCE_DENIED, BRIDGE_VIOLATION.REPLAY_DIVERGED,
+  BRIDGE_VIOLATION.CANCELLED, BRIDGE_VIOLATION.OUTCOME_UNKNOWN
 ])
 
 /** How long aborted calls get to wind down before the run stops waiting for them. */
@@ -199,7 +200,7 @@ export class BridgeRequestHandler {
     try {
       const validation = validateApiRequest(JSON.parse(apiRequestJson))
       if (!validation.ok) {
-        this.flag({ kind: 'invalidApiRequest', reason: validation.reason, detail: validation.detail })
+        this.flag({ kind: BRIDGE_VIOLATION.INVALID_API_REQUEST, reason: validation.reason, detail: validation.detail })
         return bridgeError(ERR.INVALID_API_REQUEST, validation.detail)
       }
       const { apiRequest } = validation
@@ -210,7 +211,7 @@ export class BridgeRequestHandler {
       const call: CallIdentity = { method: apiRequest.method, endpoint }
       attempted = call
 
-      let admission: Extract<ActivityAdmission, { kind: 'execute' }> | undefined
+      let admission: Extract<ActivityAdmission, { kind: typeof ACTIVITY_ADMISSION.EXECUTE }> | undefined
       const gate = this.gate
       if (gate && resolved) {
         // Admission — journal lookup, governance, the stop check, journaling
@@ -219,12 +220,12 @@ export class BridgeRequestHandler {
         // call admitted after a sibling paused or denied the run sees that
         // stop and is refused: it can neither execute nor open an approval
         // on a run that already ended. The external calls still overlap.
-        const gated = await this.exclusive(async (): Promise<{ reply: string } | { admitted: Extract<ActivityAdmission, { kind: 'execute' }> }> => {
+        const gated = await this.exclusive(async (): Promise<{ reply: string } | { admitted: Extract<ActivityAdmission, { kind: typeof ACTIVITY_ADMISSION.EXECUTE }> }> => {
           if (this.abandoned) return { reply: bridgeError(ERR.INVALID_API_REQUEST, 'The program has already returned; no further api.request() calls are executed') }
           if (this.stopped()) return { reply: this.stopRefusal() }
           const decision = await gate.admit(apiRequest, resolved)
-          if (decision.kind === 'replay') return { reply: this.replay(call, decision.sequence, decision.response) }
-          if (decision.kind === 'stop') {
+          if (decision.kind === ACTIVITY_ADMISSION.REPLAY) return { reply: this.replay(call, decision.sequence, decision.response) }
+          if (decision.kind === ACTIVITY_ADMISSION.STOP) {
             this.flag(decision.stop)
             return { reply: bridgeError(decision.code, decision.message) }
           }
@@ -284,10 +285,10 @@ export class BridgeRequestHandler {
   /** What a call refused because the run already stopped sees — the code names why it stopped. */
   private stopRefusal(): string {
     const code =
-      this.violation?.kind === 'governanceDenied' ? ERR.GOVERNANCE_DENIED
-      : this.violation?.kind === 'replayDiverged' ? ERR.REPLAY_DIVERGED
-      : this.violation?.kind === 'cancelled' ? ERR.EXECUTION_CANCELLED
-      : this.violation?.kind === 'outcomeUnknown' ? ERR.ACTIVITY_OUTCOME_UNKNOWN
+      this.violation?.kind === BRIDGE_VIOLATION.GOVERNANCE_DENIED ? ERR.GOVERNANCE_DENIED
+      : this.violation?.kind === BRIDGE_VIOLATION.REPLAY_DIVERGED ? ERR.REPLAY_DIVERGED
+      : this.violation?.kind === BRIDGE_VIOLATION.CANCELLED ? ERR.EXECUTION_CANCELLED
+      : this.violation?.kind === BRIDGE_VIOLATION.OUTCOME_UNKNOWN ? ERR.ACTIVITY_OUTCOME_UNKNOWN
       : ERR.APPROVAL_REQUIRED
     return bridgeError(code, 'Execution is paused or stopped; no further api.request() calls are executed in this run')
   }
@@ -299,16 +300,16 @@ export class BridgeRequestHandler {
     const { limits } = this.ctx
     const id = this.gate?.executionId ?? 'unknown'
     switch (violation.kind) {
-      case 'call':           throw new SandboxCallLimitError(limits.maxApiCalls)
-      case 'concurrent':     throw new SandboxConcurrentLimitError(limits.maxConcurrentCalls)
-      case 'permission':     throw new PermissionDeniedError(violation.endpoint, violation.method)
-      case 'invalidApiRequest': throw new SandboxInvalidApiRequestError(violation.reason, violation.detail)
-      case 'circuitOpen':    throw new CircuitOpenError(violation.endpoint, violation.retryAfterMs)
-      case 'approvalRequired': throw new ApprovalRequiredError(id, violation.sequence, violation.approvalId, violation.summary)
-      case 'governanceDenied': throw new GovernanceDeniedError(id, violation.sequence, violation.reason, violation.matchedRules)
-      case 'replayDiverged': throw violation.error
-      case 'cancelled':      throw new ExecutionCancelledError(id, violation.sequence)
-      case 'outcomeUnknown': throw new ActivityOutcomeUnknownError(id, violation.sequence, violation.label)
+      case BRIDGE_VIOLATION.CALL_LIMIT:          throw new SandboxCallLimitError(limits.maxApiCalls)
+      case BRIDGE_VIOLATION.CONCURRENT_LIMIT:    throw new SandboxConcurrentLimitError(limits.maxConcurrentCalls)
+      case BRIDGE_VIOLATION.PERMISSION:          throw new PermissionDeniedError(violation.endpoint, violation.method)
+      case BRIDGE_VIOLATION.INVALID_API_REQUEST: throw new SandboxInvalidApiRequestError(violation.reason, violation.detail)
+      case BRIDGE_VIOLATION.CIRCUIT_OPEN:        throw new CircuitOpenError(violation.endpoint, violation.retryAfterMs)
+      case BRIDGE_VIOLATION.APPROVAL_REQUIRED:   throw new ApprovalRequiredError(id, violation.sequence, violation.approvalId, violation.summary)
+      case BRIDGE_VIOLATION.GOVERNANCE_DENIED:   throw new GovernanceDeniedError(id, violation.sequence, violation.reason, violation.matchedRules)
+      case BRIDGE_VIOLATION.REPLAY_DIVERGED:     throw violation.error
+      case BRIDGE_VIOLATION.CANCELLED:           throw new ExecutionCancelledError(id, violation.sequence)
+      case BRIDGE_VIOLATION.OUTCOME_UNKNOWN:     throw new ActivityOutcomeUnknownError(id, violation.sequence, violation.label)
     }
   }
 
@@ -321,14 +322,14 @@ export class BridgeRequestHandler {
     if (this.stopped()) return this.stopRefusal()
     this.totalCalls++
     if (this.totalCalls > this.ctx.limits.maxApiCalls) {
-      this.flag({ kind: 'call' })
+      this.flag({ kind: BRIDGE_VIOLATION.CALL_LIMIT })
       return bridgeError(
         ERR.CALL_LIMIT_EXCEEDED,
         `Sandbox API call limit of ${this.ctx.limits.maxApiCalls} exceeded`
       )
     }
     if (this.inFlight >= this.ctx.limits.maxConcurrentCalls) {
-      this.flag({ kind: 'concurrent' })
+      this.flag({ kind: BRIDGE_VIOLATION.CONCURRENT_LIMIT })
       return bridgeError(
         ERR.CONCURRENT_LIMIT_EXCEEDED,
         `Concurrent API call limit of ${this.ctx.limits.maxConcurrentCalls} exceeded`
@@ -341,7 +342,7 @@ export class BridgeRequestHandler {
   private authorize(method: AllowedHttpMethod, endpoint: string): string | undefined {
     if (!this.ctx.permissionGuard.canExecute(endpoint, method, this.ctx.tokenPayload)) {
       const denied = new PermissionDeniedError(endpoint, method)
-      this.flag({ kind: 'permission', endpoint, method })
+      this.flag({ kind: BRIDGE_VIOLATION.PERMISSION, endpoint, method })
       return bridgeError(denied.code, denied.message)
     }
     this.ctx.circuitBreaker.check(endpoint)
@@ -396,7 +397,7 @@ export class BridgeRequestHandler {
   private async fail(err: unknown, attempted: CallIdentity | undefined, executing: number | undefined): Promise<string> {
     // Replay divergence is terminal for the run: record it and stop.
     if (err instanceof ReplayDivergedError) {
-      this.flag({ kind: 'replayDiverged', error: err })
+      this.flag({ kind: BRIDGE_VIOLATION.REPLAY_DIVERGED, error: err })
       return bridgeError(err.code, err.message)
     }
     // CircuitOpenError is a control-plane signal that must bubble up
@@ -406,7 +407,7 @@ export class BridgeRequestHandler {
     // settles — user code still sees a bridge error and cannot mask
     // the promotion by catching it.
     if (err instanceof CircuitOpenError) {
-      this.flag({ kind: 'circuitOpen', endpoint: err.endpoint, retryAfterMs: err.retryAfterMs })
+      this.flag({ kind: BRIDGE_VIOLATION.CIRCUIT_OPEN, endpoint: err.endpoint, retryAfterMs: err.retryAfterMs })
     }
     // Record the attempt as a failure — the journal marks an EXECUTING
     // activity FAILED (outcome unknown), and the caller's progress shows the
