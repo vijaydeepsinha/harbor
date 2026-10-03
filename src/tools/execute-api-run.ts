@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto'
 import type { ServiceResources } from '../runtime/registry/service-registry.js'
 import type { TokenPayload } from '../core/types/auth.types.js'
-import type { Logger } from '../runtime/observability/logger.js'
+import type { Logger } from '../core/types/logger.types.js'
 import {
   runApiInSandbox,
   type SandboxExecutionContext,
