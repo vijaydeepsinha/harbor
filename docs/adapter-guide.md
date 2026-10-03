@@ -249,13 +249,13 @@ export interface ConnectorAPI {
 }
 ```
 
-`ExecuteRequestContext` (`src/core/types/connector.types.ts`) carries `tokenPayload`, `invalidate`, `idempotencyKey`, `idempotencyKeyTtlMs`, `correlationId` (the execution id in a governed run), `clientId?`, `endpoint?` (the OpenAPI template the bridge used for this call) and `signal?`.
+`ExecuteRequestContext` (`src/core/types/connector.types.ts`) carries `tokenPayload`, `invalidate`, `idempotencyKey`, `idempotencyKeyTtlMs`, `correlationId` (the MCP request id, shared by all API calls in that sandbox run; an approval resume has a new one), optional `executionId` (the durable ID across governed approval turns), `clientId?` (the forwarded caller ID), `endpoint?` (the OpenAPI template the bridge used for this call) and `signal?`.
 
 **There is no registration function.** `createMcpGateway` builds an `ApiClient` for every service in `src/runtime/gateway/service-resources-factory.ts`. To use another transport, change that construction, or assemble a `ServiceRegistry` yourself and hand it to `buildMcpServerFactory` / `startHttpGateway` — `tests/unit/code-mode-harness.ts` does this with a counting fake connector.
 
 Before it calls you, the bridge has canonicalised the path, run governance, checked the permission guard and the circuit breaker, and journaled the call as `EXECUTING`. After you return, it records the response and credits the breaker. Everything else `ApiClient` (`src/runtime/api-client/api-client.ts`) does is yours to do:
 - **Idempotency** — run the call through the service's `IdempotencyStrategy` with `ctx.idempotencyKey`.
-- **Headers** — drop the program's forbidden headers (`PROGRAM_FORBIDDEN_HEADERS`: `Authorization`, Harbor's own `X-MCP-*` / `X-Harbor-*` / correlation / idempotency headers, and routing or framing headers such as `Host` and `X-Forwarded-*`). Then set `Authorization` from `ctx.tokenPayload.access_token`, `X-Correlation-ID`, `X-Idempotency-Key`, `X-Harbor-Server-ID` and, when present, `X-Harbor-Client-ID`.
+- **Headers** — drop the program's forbidden headers (`PROGRAM_FORBIDDEN_HEADERS`: `Authorization`, Harbor's own `X-MCP-*` / `X-Harbor-*` / correlation / idempotency headers, and routing or framing headers such as `Host` and `X-Forwarded-*`). Then set `Authorization` from `ctx.tokenPayload.access_token`, `X-Correlation-ID`, `X-Idempotency-Key`, `X-Harbor-Server-ID`, and, when present, `X-Harbor-Client-ID` and `X-Harbor-Execution-ID`.
 - **Retries** — only GET, PUT and DELETE, on 5xx or transport errors; never re-send a POST or PATCH.
 - **Circuit breaker** — call `recordFailure(ctx.endpoint)` once per failed call. The bridge checks and credits the breaker under that key; any other key and the circuit never opens.
 - **401** — call `ctx.invalidate()` so the caller's cached token is validated again.

@@ -169,7 +169,8 @@ const server = http.createServer(async (req, res) => {
             'x-mcp-tool': req.headers['x-mcp-tool'] ?? null,
             'x-request-source': req.headers['x-request-source'] ?? null,
             'x-harbor-server-id': req.headers['x-harbor-server-id'] ?? null,
-            'x-harbor-client-id': req.headers['x-harbor-client-id'] ?? null
+            'x-harbor-client-id': req.headers['x-harbor-client-id'] ?? null,
+            'x-harbor-execution-id': req.headers['x-harbor-execution-id'] ?? null
         },
         status: null
     }

@@ -111,7 +111,7 @@ them — the suite tests the architecture as shipped.
 - **Identities** (`tests/e2e/fixtures/identities.json`): `alice`, `bob`, `admin`, `readonly-user`, `finance-user`, `untrusted-user` — fixed test-only bearers. The mock backend rejects `untrusted-user`.
 - **Rules** (`tests/e2e/fixtures/governance/default/README.md` has the decision table): allow reads, restricted `customer-002`, high-value orders (> 10 000) and payments need approval, deletes and admin-user creation are denied, deliberately conflicting update rules prove precedence. Operations no rule targets (`getOrder`, `ping`, `unstableOperation`) are ungoverned: ALLOW `NO_GOVERNANCE`.
 - **Programs** (`tests/e2e/fixtures/programs.ts`): the JavaScript workflows, including the four-step `read → order (approval) → payment (approval) → notification`.
-- **Mock API**: `GET /ping` (echoes the caller's identity), `GET /customers/{id}[/payment-details]`, `POST /orders`, `GET/PATCH/DELETE /orders/{id}`, `POST /payments|/notifications`, `POST /admin/users`, `GET /admin/users`, `POST /unstable` (body `mode` or query `status`: any status 200–599, or `timeout` to hold the request), `?delayMs=` on anything; `GET /health`; control plane `GET /__admin/requests` (filter with `?method=&path=`), `POST /__admin/reset`, `GET /__admin/state`. Every logged request records the Harbor headers it arrived with (`X-Correlation-ID`, `X-Idempotency-Key`, `X-MCP-*`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`).
+- **Mock API**: `GET /ping` (echoes the caller's identity), `GET /customers/{id}[/payment-details]`, `POST /orders`, `GET/PATCH/DELETE /orders/{id}`, `POST /payments|/notifications`, `POST /admin/users`, `GET /admin/users`, `POST /unstable` (body `mode` or query `status`: any status 200–599, or `timeout` to hold the request), `?delayMs=` on anything; `GET /health`; control plane `GET /__admin/requests` (filter with `?method=&path=`), `POST /__admin/reset`, `GET /__admin/state`. Every logged request records the Harbor headers it arrived with (`X-Correlation-ID`, `X-Idempotency-Key`, `X-MCP-*`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `X-Harbor-Execution-ID`).
 
 ## Reading a failure
 
@@ -130,7 +130,8 @@ and the diagnostics directory holds the full MCP transcript (bearer
 redacted), every touched execution's inspection (`GET /executions/{id}`:
 activities, approvals, decisions, history), the mock backend's request log and
 a `context.json` with all correlation ids (JSON-RPC ids, execution / approval
-ids, downstream `X-Correlation-ID`s — the execution id in governed runs). Container logs are in `artifacts/logs/`.
+ids, downstream request-scoped `X-Correlation-ID`s and `X-Harbor-Execution-ID`s). In governed runs,
+`X-Idempotency-Key` carries the execution/activity identity. Container logs are in `artifacts/logs/`.
 Run with `DEBUG_GOVERNANCE=true` to keep the containers up and poke at them.
 
 ## Postman

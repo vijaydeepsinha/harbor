@@ -83,13 +83,17 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
         expect(await keys()).toEqual(first)
     })
 
-    it('passes the caller\'s client id through to the connector', async () => {
-        const {ctx, calls} = makeCtx({clientId: 'agent-7', correlationId: 'exec-1'})
+    it('passes the request correlation id, execution id and caller id through to the connector', async () => {
+        const {ctx, calls} = makeCtx({clientId: 'agent-7', correlationId: 'rpc-1', executionId: 'execution-42'})
         await new BridgeRequestHandler(ctx, new AbortController().signal).handle(call({
             method: 'GET',
             path: '/campaigns'
         }))
-        expect(calls[0]?.ctx).toMatchObject({clientId: 'agent-7', correlationId: 'exec-1'})
+        expect(calls[0]?.ctx).toMatchObject({
+            clientId: 'agent-7',
+            correlationId: 'rpc-1',
+            executionId: 'execution-42'
+        })
     })
 
     it('refuses over-budget and malformed calls and promotes them afterwards', async () => {

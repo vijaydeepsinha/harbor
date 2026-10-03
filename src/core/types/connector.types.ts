@@ -22,8 +22,10 @@ export interface ExecuteRequestContext {
     invalidate: () => Promise<void>
     idempotencyKey: string
     idempotencyKeyTtlMs: number
-    /** Sent as X-Correlation-ID: the durable execution id for a governed run — the same for every call of one script, across approval resumes. */
+    /** Sent as X-Correlation-ID: the MCP request id, shared by this sandbox run's calls; approval resumes use a new request id. */
     correlationId: string
+    /** Sent as X-Harbor-Execution-ID for governed runs; stable across approval turns and absent on legacy runs. */
+    executionId?: string
     /** Sent as X-Harbor-Client-ID: the external caller's id from the inbound request, when it sent one. */
     clientId?: string
     /**

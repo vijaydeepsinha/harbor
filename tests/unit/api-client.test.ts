@@ -65,7 +65,7 @@ const ctx: ExecuteRequestContext = {
     },
     invalidate: async () => {
     },
-    idempotencyKey: 'idem-1', idempotencyKeyTtlMs: 1000, correlationId: 'exec-1'
+    idempotencyKey: 'idem-1', idempotencyKeyTtlMs: 1000, correlationId: 'rpc-1'
 }
 
 describe('ApiClient — the outbound call stays on the service', () => {
@@ -121,6 +121,7 @@ describe('ApiClient — headers the program may and may not set', () => {
             headers: {
                 Authorization: 'Bearer SOMEONE-ELSE', 'x-idempotency-key': 'forged', 'X-MCP-Session-ID': 'forged',
                 'x-mcp-service': 'forged', 'X-Request-Source': 'forged', 'x-correlation-id': 'forged',
+                'x-harbor-execution-id': 'forged',
                 Host: 'evil.example', Cookie: 'session=stolen', 'X-HTTP-Method-Override': 'DELETE',
                 'X-Original-URL': '/admin', 'X-Forwarded-Host': 'evil.example', 'Transfer-Encoding': 'chunked'
             }
@@ -132,7 +133,8 @@ describe('ApiClient — headers the program may and may not set', () => {
         expect(h['x-mcp-session-id']).toBeUndefined()
         expect(h['x-mcp-service']).toBe('svc')
         expect(h['x-request-source']).toBe('agent')
-        expect(h['x-correlation-id']).toBe('exec-1')
+        expect(h['x-correlation-id']).toBe('rpc-1')
+        expect(h['x-harbor-execution-id']).toBeUndefined()
         expect(h['host']).toBe(`127.0.0.1:${service.port}`)
         for (const dropped of ['cookie', 'x-http-method-override', 'x-original-url', 'x-forwarded-host']) expect(h[dropped], dropped).toBeUndefined()
         expect(h['transfer-encoding']).toBeUndefined()

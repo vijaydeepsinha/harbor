@@ -335,7 +335,7 @@ See [`adapter-guide.md`](adapter-guide.md) for complete walkthroughs.
 
 **Can I replace the HTTP client with gRPC?**
 
-Yes. Implement `ConnectorAPI` from `src/spi/connector/connector-api.ts` and use it as `ServiceResources.apiClient` (built in `src/runtime/gateway/service-resources-factory.ts`; `createMcpGateway` has no injection option yet). Your connector replaces `ApiClient` wholesale: retries, idempotency, circuit-breaker failure recording and the Harbor-owned outbound headers (`X-Correlation-ID`, `X-Harbor-Server-ID`, …) are `ApiClient`'s, so provide what your transport needs. A connector that throws fails the call; it is not retried.
+Yes. Implement `ConnectorAPI` from `src/spi/connector/connector-api.ts` and use it as `ServiceResources.apiClient` (built in `src/runtime/gateway/service-resources-factory.ts`; `createMcpGateway` has no injection option yet). Your connector replaces `ApiClient` wholesale: retries, idempotency, circuit-breaker failure recording and the Harbor-owned outbound headers (`X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `X-Harbor-Execution-ID`, …) are `ApiClient`'s, so provide what your transport needs. The correlation ID is request-scoped; the optional execution ID links governed approval turns. A connector that throws fails the call; it is not retried.
 
 See `adapter-guide.md → Writing a Custom Outbound Transport`.
 

@@ -53,6 +53,28 @@ describe('execution lifecycle and isolate lifecycle', () => {
         expect(await s().mock.calls()).toEqual(['GET /customers/customer-001', 'POST /orders', 'POST /payments'])
     })
 
+    it('should_scope_downstream_correlation_ids_to_each_mcp_request_across_execution_resumes', async () => {
+        const c = s().client('alice')
+        const paused = expectPaused(await c.apiExecute('commerce', programs.orderThenPayment(RESOURCES.customerAllowed, AMOUNTS.normal)))
+        s().track(paused.executionId)
+        const done = expectCompleted(await c.answerApproval(paused, {action: 'accept'}))
+        expect(done.meta.executionId).toBe(paused.executionId)
+
+        const requestIds = c.transcript.map(t => String((t.request.body as { id: string | number }).id))
+        expect(requestIds).toHaveLength(2)
+        expect(requestIds[0]).not.toBe(requestIds[1])
+        const calls = (await s().mock.requests()).filter(call =>
+            call.headers['x-idempotency-key']?.includes(paused.executionId)
+        )
+        expect(calls.map(call => call.headers['x-correlation-id'])).toEqual([
+            requestIds[0], requestIds[0], requestIds[1]
+        ])
+        expect(calls.every(call => call.headers['x-correlation-id'] !== paused.executionId)).toBe(true)
+        expect(calls.map(call => call.headers['x-harbor-execution-id'])).toEqual([
+            paused.executionId, paused.executionId, paused.executionId
+        ])
+    })
+
     it('should_refuse_every_later_call_in_a_paused_isolate_even_if_the_program_swallows_the_pause', async () => {
         const c = s().client('alice')
         const paused = expectPaused(await c.apiExecute('commerce', programs.swallowPauseAndContinue(RESOURCES.customerAllowed)))

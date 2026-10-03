@@ -88,7 +88,8 @@ Nothing is kept between requests. For each `POST /mcp` (`src/runtime/http/http-g
 
 Request-scoped state:
 - The raw bearer token (via `ctx.authInfo` in the SDK v2 factory)
-- A `correlationId` for Harbor's own logs (the MCP request id); backend calls carry the execution id as `X-Correlation-ID` instead, so every call of one script correlates across approval resumes
+- A `correlationId` for Harbor's own logs and backend calls (the MCP request id), shared by all API calls in this sandbox run; each approval resume gets a new one. The durable execution id is tracked separately across runs.
+- `X-Harbor-Execution-ID` on governed backend calls carries that durable ID across approval turns; it is absent when the legacy, non-governed execution path is used.
 - The caller's optional `X-Harbor-Client-ID` request header, forwarded to backend calls when it is a safe header value
 - The sandbox isolates of the tool calls running in that request
 
@@ -374,7 +375,7 @@ const { body } = await api.request(...)   // undefined!
 
 **Headers.** A program may add its own headers (`Accept`, `Content-Type`, custom `X-…`), but the following are dropped in any letter case, and Harbor's own headers are applied after the program's:
 
-- Harbor's own: `Authorization`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID` — and `X-MCP-Session-ID`, which Harbor no longer sends (MCP 2026-07-28 has no sessions) but keeps reserved;
+- Harbor's own: `Authorization`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `X-Harbor-Execution-ID` — and `X-MCP-Session-ID`, which Harbor no longer sends (MCP 2026-07-28 has no sessions) but keeps reserved;
 - routing and framing: `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `TE`, `Trailer`, `Proxy-Authorization`, `Proxy-Connection`, `Cookie`, `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-Port`, `X-Forwarded-Prefix`, `X-Real-IP`, `X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override`, `X-Original-URL`, `X-Rewrite-URL`, `X-Original-Method`.
 
 The list is `PROGRAM_FORBIDDEN_HEADERS` in `src/runtime/api-client/api-client.ts`.

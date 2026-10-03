@@ -64,7 +64,7 @@ describe('api_execute under the Code Mode governance layer', () => {
         const governanceRuntime = makeRuntime()
         const {connector, calls} = makeConnector()
         const handler = registerGoverned(governanceRuntime, makeResources('trafficking', connector))
-        const r = await handler({service: 'trafficking', code: PROGRAM}, makeCtx())
+        const r = await handler({service: 'trafficking', code: PROGRAM}, makeCtx({requestId: 'rpc-1'}))
         expect(r['isError']).toBeUndefined()
         expect(parseContent(r)).toEqual({id: 'C1', did: 'POST /campaigns/C1/activate'})
         const meta = r['_meta'] as Record<string, unknown>
@@ -72,6 +72,9 @@ describe('api_execute under the Code Mode governance layer', () => {
         expect(typeof executionId).toBe('string')
         expect(meta[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
         expect(calls.length).toBe(2)
+        expect(calls.map(c => c.ctx.correlationId)).toEqual(['rpc-1', 'rpc-1'])
+        expect(calls.every(c => c.ctx.correlationId !== executionId)).toBe(true)
+        expect(calls.map(c => c.ctx.executionId)).toEqual([executionId, executionId])
         const exec = await governanceRuntime.executionManager.load(executionId)
         expect(exec.originalCode).toBeUndefined() // a COMPLETED execution keeps no program text (EXECUTION_CODE_RETENTION=DROP)
         expect(exec.currentActivity).toBe(2)
@@ -385,7 +388,7 @@ describe('api_execute under the Code Mode governance layer', () => {
         expect((await podA.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.COMPLETED) // pod A sees pod B's outcome
     })
 
-    it('X-Correlation-ID is the execution id on every call of one script, across approval resumes; the client id is forwarded', async () => {
+    it('X-Correlation-ID is scoped to each MCP request across approval resumes; the client id is forwarded', async () => {
         const governanceRuntime = makeRuntime([FINALIZE_RULE])
         const {connector, calls} = makeConnector()
         const {handlers, server} = makeFakeServer()
@@ -403,7 +406,10 @@ describe('api_execute under the Code Mode governance layer', () => {
         }, await retryCtx(governanceRuntime, paused, {action: 'accept', approve: true}, 'rpc-2'))
         const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
         expect(calls.map(c => `${c.req.method} ${c.req.path}`)).toEqual(['GET /campaigns', 'POST /campaigns/C1/finalize']) // two runs, two MCP requests
-        expect(calls.map(c => c.ctx.correlationId)).toEqual([executionId, executionId])
+        expect(calls.map(c => c.ctx.correlationId)).toEqual(['rpc-1', 'rpc-2'])
+        expect(new Set(calls.map(c => c.ctx.correlationId)).size).toBe(2)
+        expect(calls.every(c => c.ctx.correlationId !== executionId)).toBe(true)
+        expect(calls.map(c => c.ctx.executionId)).toEqual([executionId, executionId])
         expect(calls.map(c => c.ctx.clientId)).toEqual(['agent-7', 'agent-7'])
     })
 

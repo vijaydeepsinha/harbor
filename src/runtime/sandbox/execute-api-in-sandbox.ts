@@ -29,8 +29,10 @@ export interface SandboxExecutionContext {
     permissionGuard: PermissionGuard
     idempotencyKey: string
     idempotencyKeyTtlMs: number
-    /** Outbound X-Correlation-ID: the execution id for a governed run (constant across its runs). */
+    /** Outbound X-Correlation-ID: the MCP request id for this sandbox run, shared by all of its calls. */
     correlationId: string
+    /** Outbound X-Harbor-Execution-ID: the durable execution id, absent on legacy runs. */
+    executionId?: string
     /** Outbound X-Harbor-Client-ID: the caller's own id from the inbound request, when it sent one. */
     clientId?: string
     /**

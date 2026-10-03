@@ -355,15 +355,17 @@ still waiting on an undecided approval) changes nothing, and
 error would have given a run.
 
 **Outbound headers.** Harbor sets its own headers on every backend call
-*after* the program's, so a program's copy never wins. The ones that tie a
-call to its execution:
+*after* the program's, so a program's copy never wins. Correlation is scoped
+to the MCP request; the durable execution id is kept separately in governed
+execution state and activity idempotency keys:
 
 | Header | Value | Purpose |
 |---|---|---|
-| `X-Correlation-ID` | the `executionId` | ties together every call of one script — across the fresh isolate and the new MCP request of each approval resume |
+| `X-Correlation-ID` | the MCP request id for this sandbox run | ties together the run's backend calls; a later approval resume is a new MCP request and therefore has a new correlation id |
 | `X-Idempotency-Key` | `mcp-{service}-{executionId}-{sequence}` | one key per activity: two executions of one program never share a key, and a resume keeps its keys. Ungoverned (legacy) runs use `mcp-{service}-{userIdHash12}-{codeHash16}-c{n}`, n = the call's arrival index |
 | `X-Harbor-Server-ID` | `HARBOR_SERVER_ID` (default `HARBOR_GATEWAY`) | Harbor's stamp: this gateway made the call |
 | `X-Harbor-Client-ID` | the caller's `X-Harbor-Client-ID` request header | optional: lets the caller identify itself to the backend; omitted when not sent (and on stdio) |
+| `X-Harbor-Execution-ID` | the governed `executionId` | links backend calls from separate MCP requests and sandbox runs in the same approval workflow; absent for legacy runs |
 
 A program may set `Accept`, `Content-Type` and its own `X-…` headers. It may
 not set the following, in any letter case — its copies are dropped
@@ -372,7 +374,7 @@ not set the following, in any letter case — its copies are dropped
 - **Harbor's own**: `Authorization`, `X-Request-Source`, `X-MCP-Tool`,
   `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID` (no longer sent, still
   reserved), `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`,
-  `X-Harbor-Client-ID`. A program
+  `X-Harbor-Client-ID`, `X-Harbor-Execution-ID`. A program
   that could set these could act as another principal or defeat
   deduplication.
 - **Routing, framing and ambient credentials**: `Host`, `Content-Length`,

@@ -442,14 +442,18 @@ circuitBreaker.recordSuccess(template)    any returned status (a 5xx has thrown 
   - `X-Request-Source` (`MCP_AGENT_NAME`, default `mcp-agent`), `X-MCP-Tool: api_execute`,
     `X-MCP-Service`, `X-MCP-Version` (no session header: MCP 2026-07-28 is stateless)
   - `X-Idempotency-Key`
-  - `X-Correlation-ID` — the execution id (the same on every call of one script, across approval
-    resumes); the MCP request id on the legacy path
+  - `X-Correlation-ID` — the MCP request id, shared by calls in this sandbox run on both legacy
+    and governed paths; each approval resume gets a new request id. The durable execution id is
+    tracked separately by governance and in the execution-specific idempotency key
+  - `X-Harbor-Execution-ID` — the durable execution id on governed calls, stable across approval
+    resumes; absent on legacy calls
   - `X-Harbor-Server-ID` — the gateway's stamp (`HARBOR_SERVER_ID`, default `HARBOR_GATEWAY`)
   - `X-Harbor-Client-ID` — the caller's own id, forwarded when the `/mcp` request carried a
     safe one
 - **What a program may not set**, in any letter case (its copies are dropped): `Authorization`,
   `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID` (no longer sent, still reserved),
-  `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `Host`,
+  `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`,
+  `X-Harbor-Execution-ID`, `Host`,
   `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `TE`, `Trailer`,
   `Proxy-Authorization`, `Proxy-Connection`, `Cookie`, `Forwarded`, `X-Forwarded-For`/`-Host`/
   `-Proto`/`-Port`/`-Prefix`, `X-Real-IP`, `X-HTTP-Method-Override`, `X-HTTP-Method`,

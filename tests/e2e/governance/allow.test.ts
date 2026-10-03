@@ -55,6 +55,8 @@ describe('allowed operations', () => {
         const calls = await s().mock.requests({method: 'GET', path: '/customers/customer-001'})
         expect(calls).toHaveLength(1)
         expect(calls[0]!.identity).toBe('alice')
+        expect(calls[0]!.headers['x-harbor-execution-id']).toBe(out.meta.executionId)
+        expect(calls[0]!.headers['x-harbor-server-id']).toBe('HARBOR_GATEWAY')
         expect(calls[0]!.headers['x-mcp-service']).toBe('commerce')
         expect(calls[0]!.headers['x-mcp-tool']).toBe('api_execute')
         expect(calls[0]!.headers['x-correlation-id']).toBeTruthy()

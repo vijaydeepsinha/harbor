@@ -141,14 +141,21 @@ describe('execute integration', () => {
             expect(await sentHeaders()).not.toHaveProperty('X-Harbor-Client-ID')
         })
 
+        it('forwards X-Harbor-Execution-ID only for governed executions', async () => {
+            expect((await sentHeaders({executionId: 'execution-42'}))['X-Harbor-Execution-ID']).toBe('execution-42')
+            expect(await sentHeaders()).not.toHaveProperty('X-Harbor-Execution-ID')
+        })
+
         it('the sandboxed program cannot set or forge them (any letter case); its other headers pass through', async () => {
-            const headers = await sentHeaders({correlationId: 'exec-1', clientId: 'agent-7'}, {
+            const headers = await sentHeaders({correlationId: 'rpc-1', executionId: 'execution-42', clientId: 'agent-7'}, {
                 'x-correlation-id': 'forged',
                 'X-HARBOR-SERVER-ID': 'forged',
                 'x-harbor-client-id': 'forged',
+                'x-harbor-execution-id': 'forged',
                 'X-Custom': 'kept'
             })
-            expect(headers['X-Correlation-ID']).toBe('exec-1')
+            expect(headers['X-Correlation-ID']).toBe('rpc-1')
+            expect(headers['X-Harbor-Execution-ID']).toBe('execution-42')
             expect(headers['X-Harbor-Server-ID']).toBe('HARBOR_GATEWAY')
             expect(headers['X-Harbor-Client-ID']).toBe('agent-7')
             expect(headers['X-Custom']).toBe('kept')
