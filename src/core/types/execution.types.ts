@@ -12,6 +12,7 @@
 
 import {
   ERR,
+  APPROVAL_ANSWER_WORDS,
   type ExecutionStatus,
   type ActivityStatus,
   type ApprovalStatus,
@@ -90,6 +91,14 @@ export interface ActivityRecord {
   updatedAt: string
   /** Approval bound to this activity, if governance required one. */
   approvalId?: string
+  /**
+   * Another call of the same run was in flight when this one was admitted, so
+   * its place in the sequence depended on timing (`Promise.all` siblings, or
+   * chains racing on their responses). Replay then binds its query and body
+   * even once it is COMPLETED: on resume a sibling may reach this sequence
+   * first, and must not be handed this call's response.
+   */
+  admittedConcurrently?: boolean
 }
 
 export interface GovernanceDecisionRecord {
@@ -274,10 +283,36 @@ export class ApprovalNotFoundError extends ExecutionError {
   }
 }
 
-/** An `accept` must say `approve: true` or `approve: false`; anything else is not a decision (fail closed). */
+/**
+ * The program completed, but recording that failed (the store was
+ * unavailable). Completion could not be confirmed by reading it back.
+ * Never mark finished work FAILED: a resumable execution replays journaled
+ * calls rather than reissuing them. Store errors stay in server logs.
+ */
+export class RunOutcomeNotRecordedError extends ExecutionError {
+  constructor(readonly executionId: string) {
+    super(
+      `The program completed, but Harbor could not confirm its recorded result. Inspect execution "${executionId}" ` +
+      `and restore persistence before retrying. If it is resumable, call api_execute with ` +
+      `_meta["harbor/execution-id"] = "${executionId}" to replay journaled calls and record the result. ` +
+      `Do not submit a new execution to repeat the program.`,
+      ERR.RUN_OUTCOME_NOT_RECORDED, true
+    )
+    this.name = 'RunOutcomeNotRecordedError'
+  }
+}
+
+/**
+ * An `accept` must say yes or no — `approve: true` / `false`, or one of the
+ * words in `APPROVAL_ANSWER_WORDS`; anything else is not a decision (fail closed).
+ */
 export class ApprovalAnswerInvalidError extends ExecutionError {
   constructor(readonly approvalId: string) {
-    super(`Approval ${approvalId}: an accept must carry approve: true or approve: false`, ERR.INVALID_API_REQUEST, false)
+    super(
+      `Approval ${approvalId}: an accept must carry approve: true or approve: false ` +
+      `(also accepted: ${APPROVAL_ANSWER_WORDS.APPROVE.join(', ')} / ${APPROVAL_ANSWER_WORDS.REJECT.join(', ')})`,
+      ERR.INVALID_API_REQUEST, false
+    )
     this.name = 'ApprovalAnswerInvalidError'
   }
 }

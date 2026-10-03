@@ -6,8 +6,8 @@ import { Agent as HttpsAgent } from 'node:https'
 import { setTimeout as sleep } from 'node:timers/promises'
 import axios from 'axios'
 import type { AxiosInstance } from 'axios'
-import type { CircuitBreakerStrategy } from '../../core/types/circuit-breaker.types.js'
-import type { IdempotencyStrategy } from '../../core/types/idempotency.types.js'
+import type { CircuitBreakerStrategy } from '../../spi/resilience/circuit-breaker.js'
+import type { IdempotencyStrategy } from '../../spi/idempotency/idempotency-strategy.js'
 import type { ServiceDefinition } from '../registry/filesystem-scanner.js'
 import type { Logger } from '../observability/logger.js'
 import type { ConnectorAPI } from '../../spi/connector/connector-api.js'
@@ -115,7 +115,7 @@ export class ApiClient implements ConnectorAPI {
   }
 
   async executeRequest(apiRequest: ApiRequest, ctx: ExecuteRequestContext): Promise<ApiResponse> {
-    const { tokenPayload, invalidate, idempotencyKey, correlationId, sessionId, clientId, signal } = ctx
+    const { tokenPayload, invalidate, idempotencyKey, correlationId, clientId, signal } = ctx
     const { path: apiPath, method, params, body } = apiRequest
     const breakerKey = ctx.endpoint ?? normalizeEndpointPath(apiPath)
 
@@ -134,7 +134,6 @@ export class ApiClient implements ConnectorAPI {
       [HTTP_HEADER.MCP_TOOL]: TOOL.API_EXECUTE,
       [HTTP_HEADER.MCP_SERVICE]: this.context.serviceName,
       [HTTP_HEADER.MCP_VERSION]: MCP_FRAMEWORK_VERSION,
-      [HTTP_HEADER.SESSION_ID]: sessionId,
       [HTTP_HEADER.IDEMPOTENCY_KEY]: idempotencyKey,
       [HTTP_HEADER.CORRELATION_ID]: correlationId,
       [HTTP_HEADER.HARBOR_SERVER_ID]: this.context.serverId ?? DEFAULT_HARBOR_SERVER_ID,

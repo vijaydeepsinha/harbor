@@ -99,6 +99,8 @@ export const ERR = {
   EXECUTION_NOT_RESUMABLE: 'EXECUTION_NOT_RESUMABLE',
   EXECUTION_CANCELLED: 'EXECUTION_CANCELLED',
   ACTIVITY_OUTCOME_UNKNOWN: 'ACTIVITY_OUTCOME_UNKNOWN',
+  /** The program completed but the store could not record it; retryable — a resume replays it and records the result. */
+  RUN_OUTCOME_NOT_RECORDED: 'RUN_OUTCOME_NOT_RECORDED',
   APPROVAL_NOT_FOUND: 'APPROVAL_NOT_FOUND',
   APPROVAL_ALREADY_DECIDED: 'APPROVAL_ALREADY_DECIDED',
 } as const
@@ -122,6 +124,12 @@ export const HTTP_HEADER = {
   AUTHORIZATION: 'Authorization',
   CORRELATION_ID: 'X-Correlation-ID',
   REQUEST_SOURCE: 'X-Request-Source',
+  /**
+   * No longer sent: MCP 2026-07-28 is stateless, so there is no session to
+   * name (it carried a fresh random id per tool call). Still reserved — a
+   * program cannot set it — so a backend that once read it never starts
+   * trusting a value the program chose.
+   */
   SESSION_ID: 'X-MCP-Session-ID',
   MCP_TOOL: 'X-MCP-Tool',
   MCP_SERVICE: 'X-MCP-Service',
@@ -142,8 +150,7 @@ export const CONTENT_TYPE_JSON = 'application/json'
 export const AUTH_SCHEME = 'Bearer'
 
 // ── HTTP gateway surface ─────────────────────────────────────────────────────
-// These describe the gateway's own HTTP endpoints and the header the MCP
-// Streamable HTTP SDK uses to carry the session id. Kept in one place so the
+// These describe the gateway's own HTTP endpoints. Kept in one place so the
 // gateway, tests, and documentation share a single source of truth.
 
 export const HTTP_ROUTES = {
@@ -196,6 +203,8 @@ export const METRIC = {
   AUTH_REFRESH_FAILED: 'auth_refresh_failed_total',
   AUTH_REFRESH_SKIPPED: 'auth_refresh_skipped_total',
   AUTH_CACHE_UPDATE_FAILED: 'auth_cache_update_failed_total',
+  /** A store write that failed after the outcome it records was decided (label `operation`, see PERSISTENCE_OPERATION). */
+  PERSISTENCE_FAILURES: 'execution_persistence_failures_total',
 } as const
 
 // ── Structured log prefixes ──────────────────────────────────────────────────
@@ -327,6 +336,67 @@ export const GOVERNANCE_DECISION = {
 } as const
 export type GovernanceDecisionType = (typeof GOVERNANCE_DECISION)[keyof typeof GOVERNANCE_DECISION]
 
+/**
+ * Why the sandbox bridge refused a call or stopped the run
+ * (BridgeRequestHandler). Recorded while the isolate runs and promoted to
+ * the matching typed error once it settles, so user code cannot mask them by
+ * catching the bridge error. The last five stop the run; four of them are
+ * the ActivityGate's reasons an activity may not proceed (ActivityStop).
+ */
+export const BRIDGE_VIOLATION = {
+  CALL_LIMIT: 'call',
+  CONCURRENT_LIMIT: 'concurrent',
+  PERMISSION: 'permission',
+  INVALID_API_REQUEST: 'invalidApiRequest',
+  CIRCUIT_OPEN: 'circuitOpen',
+  REPLAY_DIVERGED: 'replayDiverged',
+  APPROVAL_REQUIRED: 'approvalRequired',
+  GOVERNANCE_DENIED: 'governanceDenied',
+  CANCELLED: 'cancelled',
+  OUTCOME_UNKNOWN: 'outcomeUnknown',
+} as const
+
+/** The ActivityGate's answer for one encountered call: hand back the recorded response, make the call, or refuse it. */
+export const ACTIVITY_ADMISSION = {
+  REPLAY: 'replay',
+  EXECUTE: 'execute',
+  STOP: 'stop',
+} as const
+
+/** What happened to one call of a run, as its CallLog records it; audit and progress are read from these. */
+export const CALL_OUTCOME = {
+  /** A COMPLETED activity from an earlier run: the recorded response was handed back, nothing was called. */
+  REPLAYED: 'REPLAYED',
+  /** The external call was made and returned a response (any HTTP status). */
+  EXECUTED: 'EXECUTED',
+  /** The call threw after it was resolved (transport error, open circuit, abort, store failure). */
+  FAILED: 'FAILED',
+} as const
+
+/**
+ * Store writes whose failure is reported as a secondary persistence failure:
+ * the outcome they record was already decided and stands; the write's
+ * failure is logged (`event: persistence_failure`) and counted, with what the
+ * store holds instead and how a later run recovers (docs/code-mode-governance.md §14).
+ */
+export const PERSISTENCE_OPERATION = {
+  /** Marking an activity FAILED (outcome unknown) after its call threw. */
+  ACTIVITY_FAILED: 'activity.recordFailure',
+  /** Recording how a run ended (ExecutionManager.endRun). */
+  RUN_END: 'execution.endRun',
+} as const
+export type PersistenceOperation = (typeof PERSISTENCE_OPERATION)[keyof typeof PERSISTENCE_OPERATION]
+
+/** How one sandbox run of an execution ended, as `ExecutionManager.endRun` records it. */
+export const RUN_OUTCOME = {
+  COMPLETED: 'completed',
+  WAITING_APPROVAL: 'waitingApproval',
+  INTERRUPTED: 'interrupted',
+  FAILED: 'failed',
+  DENIED: 'denied',
+  CANCELLED: 'cancelled',
+} as const
+
 /** Precedence among matched rules of the deciding level (higher wins). Documented in docs/code-mode-governance.md. */
 export const GOVERNANCE_PRECEDENCE: Record<GovernanceDecisionType, number> = {
   [GOVERNANCE_DECISION.DENY]: 3,
@@ -361,6 +431,17 @@ export const APPROVAL_STATUS = {
   CANCELLED: 'CANCELLED',
 } as const
 export type ApprovalStatus = (typeof APPROVAL_STATUS)[keyof typeof APPROVAL_STATUS]
+
+/**
+ * Words an approver may send as the `approve` answer in place of a boolean —
+ * a person answering in a chat client says "yes", not `true`. A closed list,
+ * matched whole (trimmed, case-insensitive): anything outside it is still not
+ * a decision, so a stray truthy value never approves.
+ */
+export const APPROVAL_ANSWER_WORDS = {
+  APPROVE: ['yes', 'sure', 'proceed', 'approve', 'approved'],
+  REJECT: ['no', 'reject', 'rejected', 'deny', 'denied', 'decline', 'declined'],
+} as const
 
 export const EXECUTION_STORE_TYPE = {
   IN_MEMORY: 'in-memory',

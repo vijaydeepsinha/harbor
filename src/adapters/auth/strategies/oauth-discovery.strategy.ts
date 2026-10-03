@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { AuthStrategy, TokenPayload } from '../../../core/types/auth.types.js'
+import type { TokenPayload } from '../../../core/types/auth.types.js'
+import type { AuthStrategy } from '../../../spi/auth/auth-strategy.js'
 import { TokenIntrospectionError } from '../../../core/types/auth.types.js'
 import type { Logger } from '../../../core/types/logger.types.js'
 import { AUTH_TYPE } from '../../../core/constants.js'

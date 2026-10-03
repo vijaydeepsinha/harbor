@@ -24,7 +24,6 @@ export interface ExecuteRequestContext {
   idempotencyKeyTtlMs: number
   /** Sent as X-Correlation-ID: the durable execution id for a governed run — the same for every call of one script, across approval resumes. */
   correlationId: string
-  sessionId: string
   /** Sent as X-Harbor-Client-ID: the external caller's id from the inbound request, when it sent one. */
   clientId?: string
   /**

@@ -2,7 +2,8 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import axios from 'axios'
-import type { AuthStrategy, TokenPayload } from '../../../core/types/auth.types.js'
+import type { TokenPayload } from '../../../core/types/auth.types.js'
+import type { AuthStrategy } from '../../../spi/auth/auth-strategy.js'
 import {
   AuthError,
   TokenExpiredError,

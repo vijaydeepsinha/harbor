@@ -4,11 +4,11 @@
 import {
   type TokenPayload,
   type AuthResult,
-  type AuthStrategy,
-  type TokenCacheStrategy,
   TokenExpiredError,
   SessionExpiredError
 } from '../../core/types/auth.types.js'
+import type { AuthStrategy } from '../../spi/auth/auth-strategy.js'
+import type { TokenCacheStrategy } from '../../spi/auth/token-cache.js'
 import { extractBearerFromHeader } from './bearer-authorization.js'
 import type { Logger } from '../../core/types/logger.types.js'
 import type { MetricsCollector } from '../../core/types/metrics.types.js'

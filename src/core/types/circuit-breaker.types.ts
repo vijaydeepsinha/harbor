@@ -5,14 +5,6 @@ import { ERR } from '../constants.js'
 
 export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN'
 
-export interface CircuitBreakerStrategy {
-  readonly name: string
-  check(endpoint: string): void
-  recordSuccess(endpoint: string): void
-  recordFailure(endpoint: string): void
-  getState(endpoint: string): CircuitState
-}
-
 export class CircuitOpenError extends Error {
   readonly code = ERR.CIRCUIT_OPEN
   readonly retryable = true

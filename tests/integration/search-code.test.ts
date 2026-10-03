@@ -4,7 +4,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { runSpecSearchInSandbox } from '../../src/runtime/sandbox/spec-search-in-sandbox.js'
 import { SpecStore } from '../../src/runtime/spec/spec-store.js'
-import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import { forwardTokenPermissionGuard } from '../../src/adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
 import type { SandboxLimits } from '../../src/core/types/config.types.js'
 import type { TokenPayload } from '../../src/core/types/auth.types.js'
 import sampleSpec from '../fixtures/sample-spec.json' assert { type: 'json' }

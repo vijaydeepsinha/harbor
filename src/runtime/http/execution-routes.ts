@@ -5,9 +5,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { v4 as uuidv4 } from 'uuid'
 import type { Logger } from '../observability/logger.js'
 import type { GovernanceRuntime } from '../execution/governance-runtime.js'
+import { readApprovalAnswer } from '../execution/approval-service.js'
 import type { ServiceRegistry } from '../registry/service-registry.js'
 import type { OAuthResourceConfig } from '../../core/types/oauth.types.js'
-import { extractBearerFromRequest, bearerFailureToHttpResponse } from '../../spi/auth/bearer-authorization.js'
+import { extractBearerFromRequest, bearerFailureToHttpResponse } from '../auth/bearer-authorization.js'
 import { AuthError, type AuthResult } from '../../core/types/auth.types.js'
 import { HttpError } from './http-error.js'
 import { readBoundedBody } from './read-body.js'
@@ -25,6 +26,7 @@ const MAX_BODY_BYTES = 64 * 1024
  *
  *   GET  /executions/{id}                          → execution, activities, approvals, decisions, history
  *   POST /executions/{id}/approvals/{approvalId}   → { action: accept|decline|cancel, approve?, comment? }
+ *                                                    (`approve`: a boolean, or a word from APPROVAL_ANSWER_WORDS)
  *
  * Validates the bearer against the execution's service and binds it to the
  * execution owner. Returns `true` when this router handled the URL.
@@ -75,10 +77,11 @@ export async function handleExecutionRoutes(
     if (approval.executionId !== executionId) {
       throw new HttpError(404, ERR.APPROVAL_NOT_FOUND, `Unknown approval ${approvalId}`, undefined, { url, approvalExecutionId: approval.executionId })
     }
+    const approve = readApprovalAnswer(body['approve'])
     const result = await governanceRuntime.approvals.decide(approvalId, {
       action,
       executionId,
-      ...(typeof body['approve'] === 'boolean' ? { approve: body['approve'] } : {}),
+      ...(approve !== undefined ? { approve } : {}),
       ...(typeof body['comment'] === 'string' && body['comment'] ? { comment: body['comment'] } : {}),
       via: 'http'
     })

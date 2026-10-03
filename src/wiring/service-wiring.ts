@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { AuthStrategy } from '../core/types/auth.types.js'
-import type { CircuitBreakerStrategy } from '../core/types/circuit-breaker.types.js'
+import type { AuthStrategy } from '../spi/auth/auth-strategy.js'
+import type { CircuitBreakerStrategy } from '../spi/resilience/circuit-breaker.js'
+import type { PermissionGuard } from '../spi/permissions/permission-guard.js'
 import type { ServiceAuthConfig, ServiceCircuitBreakerConfig } from '../core/types/config.types.js'
 import type { Logger } from '../core/types/logger.types.js'
 import { AUTH_TYPE, CB_TYPE } from '../core/constants.js'
@@ -11,8 +12,13 @@ import { oauthIntrospection } from '../adapters/auth/strategies/oauth-introspect
 import { jwtValidation } from '../adapters/auth/strategies/jwt-validation.strategy.js'
 import { oauthDiscovery } from '../adapters/auth/strategies/oauth-discovery.strategy.js'
 import { requireResourceBindingAudience } from '../adapters/auth/strategies/resource-binding.js'
-import { noopCircuitBreaker } from '../spi/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { noopCircuitBreaker } from '../adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
 import { countBasedCircuitBreaker } from '../adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
+import { forwardTokenPermissionGuard } from '../adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
+
+export function resolvePermissionGuard(): PermissionGuard {
+  return forwardTokenPermissionGuard()
+}
 
 export function resolveAuth(auth: ServiceAuthConfig | undefined, logger?: Logger): AuthStrategy {
   if (!auth) {

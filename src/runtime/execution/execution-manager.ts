@@ -14,16 +14,16 @@ import {
   ExecutionNotResumableError,
   ApprovalPendingError
 } from '../../core/types/execution.types.js'
-import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_CODE_RETENTION, type ExecutionCodeRetention } from '../../core/constants.js'
+import { EXECUTION_STATUS, APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_CODE_RETENTION, RUN_OUTCOME, type ExecutionCodeRetention } from '../../core/constants.js'
 
 /** How a sandbox run of an execution ended. */
 export type RunOutcome =
-  | { kind: 'completed'; result: unknown }
-  | { kind: 'waitingApproval'; approvalId: string }
-  | { kind: 'interrupted'; code: string; message: string }
-  | { kind: 'failed'; code: string; message: string }
-  | { kind: 'denied'; code: string; message: string }
-  | { kind: 'cancelled'; code: string; message: string }
+  | { kind: typeof RUN_OUTCOME.COMPLETED; result: unknown }
+  | { kind: typeof RUN_OUTCOME.WAITING_APPROVAL; approvalId: string }
+  | { kind: typeof RUN_OUTCOME.INTERRUPTED; code: string; message: string }
+  | { kind: typeof RUN_OUTCOME.FAILED; code: string; message: string }
+  | { kind: typeof RUN_OUTCOME.DENIED; code: string; message: string }
+  | { kind: typeof RUN_OUTCOME.CANCELLED; code: string; message: string }
 
 export interface ExecutionManagerOptions {
   /** `DROP` (default): remove the program text once the execution is terminal. */
@@ -135,28 +135,28 @@ export class ExecutionManager {
       record.updatedAt = this.now()
       delete record.terminalReason
       switch (outcome.kind) {
-        case 'completed':
+        case RUN_OUTCOME.COMPLETED:
           record.status = EXECUTION_STATUS.COMPLETED
           record.result = outcome.result
           delete record.pendingApprovalId
           break
-        case 'waitingApproval':
+        case RUN_OUTCOME.WAITING_APPROVAL:
           record.status = EXECUTION_STATUS.WAITING_APPROVAL
           record.pendingApprovalId = outcome.approvalId
           break
-        case 'interrupted':
+        case RUN_OUTCOME.INTERRUPTED:
           record.status = EXECUTION_STATUS.INTERRUPTED
           record.terminalReason = { code: outcome.code, message: outcome.message }
           break
-        case 'failed':
+        case RUN_OUTCOME.FAILED:
           record.status = EXECUTION_STATUS.FAILED
           record.terminalReason = { code: outcome.code, message: outcome.message }
           break
-        case 'denied':
+        case RUN_OUTCOME.DENIED:
           record.status = EXECUTION_STATUS.DENIED
           record.terminalReason = { code: outcome.code, message: outcome.message }
           break
-        case 'cancelled':
+        case RUN_OUTCOME.CANCELLED:
           record.status = EXECUTION_STATUS.CANCELLED
           record.terminalReason = { code: outcome.code, message: outcome.message }
           break

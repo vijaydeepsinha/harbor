@@ -28,28 +28,6 @@ export interface AuthResult {
   invalidate: () => Promise<void>
 }
 
-export interface AuthStrategy {
-  readonly name: string
-  validate(token: string): Promise<TokenPayload>
-  refresh?(refreshToken: string, currentAccessToken?: string): Promise<TokenPayload>
-  readonly tokenRefreshBufferSec?: number
-}
-
-export interface TokenCacheStrategy {
-  readonly name: string
-  hashToken(service: string, rawToken: string): string
-  getOrValidate(
-    service: string,
-    rawToken: string,
-    validatorFn: (token: string) => Promise<TokenPayload>
-  ): Promise<TokenPayload>
-  /** `tokenExpiresAt`: when the payload's access token expires (drives proactive refresh); `expiresAt`: when the entry does. */
-  get(service: string, rawToken: string): Promise<{ payload: TokenPayload; expiresAt: number; tokenExpiresAt?: number } | undefined>
-  update(service: string, rawToken: string, payload: TokenPayload): Promise<void>
-  invalidate(tokenHash: string): Promise<void>
-  destroy(): void
-}
-
 export class AuthError extends Error {
   constructor(
     message: string,

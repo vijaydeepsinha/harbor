@@ -2,10 +2,10 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import type memjs from 'memjs'
-import type { TokenCacheStrategy } from '../../../core/types/auth.types.js'
+import type { TokenCacheStrategy } from '../../../spi/auth/token-cache.js'
 import type { MemcacheConnectionConfig } from '../../../core/types/config.types.js'
 import type { Logger } from '../../../core/types/logger.types.js'
-import { AbstractTokenCache, type CacheEntry } from '../../../spi/auth/abstract-token-cache.js'
+import { AbstractTokenCache, type CacheEntry } from '../abstract-token-cache.js'
 import { createMemcacheClient } from '../../infra/memcache-client.js'
 import { STORE_TYPE } from '../../../core/constants.js'
 import { errorMessage } from '../../../core/utils/errors.js'

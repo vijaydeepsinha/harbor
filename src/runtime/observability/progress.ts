@@ -2,6 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import type { CallLogSource, JournalEntry } from '../execution/activity-journal.js'
+import { CALL_OUTCOME } from '../../core/constants.js'
 
 /**
  * Per-tool-invocation progress for `api_execute`: a read-only projection of
@@ -81,7 +82,7 @@ export class ProgressCollector {
  * matches the v1 scope.
  */
 function toProgressEntry(e: JournalEntry, i: number): ProgressCallEntry {
-  if (e.outcome === 'FAILED') {
+  if (e.outcome === CALL_OUTCOME.FAILED) {
     return { i, method: e.method, endpoint: e.endpoint, error: truncate(e.error, MAX_ERROR_MESSAGE_LENGTH), aborted: e.aborted }
   }
   const entry: ProgressCallEntry = { i, method: e.method, endpoint: e.endpoint, status: e.response.status, ok: e.response.ok }

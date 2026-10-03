@@ -15,7 +15,7 @@ documents it links to are the source of truth for details.
 - **Five tools, frozen:** `discover_services`, `discover_skills`,
   `get_skill_details`, `search_code`, `api_execute` (`src/tools/`). Do not add
   tools or change their input schemas.
-- **Execution path:** `src/tools/execute-api.tool.ts` → `src/runtime/sandbox/execute-api-in-sandbox.ts`
+- **Execution path:** `src/tools/execute-api.tool.ts` → `src/tools/execute-api-run.ts` (the run orchestrator) → `src/runtime/sandbox/execute-api-in-sandbox.ts`
   (runs the program) → `src/runtime/sandbox/bridge-request-handler.ts` (the *host
   bridge*, the only door out of the isolate; it asks
   `src/runtime/execution/activity-gate.ts` whether to replay, execute, pause or
@@ -38,14 +38,17 @@ src/           all gateway source (tsconfig rootDir; builds to dist/)
   core/        constants (ERR, OUTCOME, EXECUTION_STATUS, …), types, config loader (core/config/config.ts), utils
   spi/         contracts: connector (ConnectorAPI), auth, idempotency, permissions, resilience, spec,
                execution (ExecutionPersistence), governance (GovernanceRuleSource), observability (AuditSink)
-  adapters/    pluggable implementations (auth strategies, idempotency, resilience, execution stores, console audit sink)
+  adapters/    all concrete strategies (auth/cache, idempotency, permissions, resilience, spec loaders, rule sources),
+               execution stores, console audit sink; shared token-cache base
   wiring/      env → strategy builders and backend registries (registerExecutionStoreBackend, …)
   runtime/     gateway boot (server-factory.ts), http (http-gateway.ts, execution-routes.ts, mcp-server-factory.ts),
                sandbox (runner, bridge-request-handler, request-path), execution (manager, activity-gate, journal,
                approvals, request-state, governance-runtime, retention),
                governance (operation-resolver, rule-schema, rule-loader, rule-store, rule-evaluator, rule-refresher),
-               registry, spec, observability, transport (stdio)
-  tools/       the five MCP tools + tool-helpers (response _meta, request _meta reader)
+               auth (middleware + bearer parsing), registry, spec, observability, transport (stdio)
+  tools/       the five MCP tools + tool-helpers (response _meta, request _meta reader); api_execute is split into
+               the tool (boundary → auth → responder), mcp-request-view (the SDK boundary), execute-api-run
+               (the run orchestrator) and execute-api-outcome (failure → audit outcome / status / metrics)
 governance/    Governance Rule directory: rules/ ships no rule files (every call is NO_GOVERNANCE until you add
                one); rules/examples/ is documentation
 services/      demo services (product, order, tasks, irctc enabled; billing, billing-jwt, billing-introspection disabled)
@@ -78,6 +81,10 @@ plus `npm run test:governance` when anything on the governance path changed
 
 ## 4. Conventions (match them exactly)
 
+- SPI contains all provider contracts, not concrete strategies or middleware.
+  Core holds shared data types, errors and configuration; adapters hold implementations;
+  runtime holds orchestration; wiring selects providers. There are no legacy path
+  re-exports. `tests/unit/layer-boundaries.test.ts` guards this separation.
 - Every `.ts` file starts with the two SPDX/copyright lines.
 - Gateway code goes under `src/`, tests under `tests/`. Docs cite repository
   paths from the repo root (`src/runtime/…`, not `runtime/…`);

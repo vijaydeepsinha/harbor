@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { IdempotencyStrategy } from '../../../core/types/idempotency.types.js'
+import type { IdempotencyStrategy } from '../../../spi/idempotency/idempotency-strategy.js'
 import type { CouchbaseConnectionConfig } from '../../../core/types/config.types.js'
 import type { Logger } from '../../../core/types/logger.types.js'
 import { CouchbaseRestClient } from '../../infra/couchbase-client.js'

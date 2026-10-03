@@ -6,7 +6,7 @@ import axios from 'axios'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { UrlSpecLoaderStrategy, urlSpec } from '../../src/spi/spec/strategies/url-spec-loader.strategy.js'
+import { UrlSpecLoaderStrategy, urlSpec } from '../../src/adapters/spec/strategies/url-spec-loader.strategy.js'
 import { SpecLoadError } from '../../src/core/types/spec.types.js'
 import type { Logger } from '../../src/runtime/observability/logger.js'
 
@@ -108,11 +108,12 @@ describe('UrlSpecLoaderStrategy — a fetched spec cannot reach beyond itself', 
     }
   })
 
-  it('keeps credentials and query strings out of logs and errors', async () => {
+  it('keeps credentials out of logs and errors — the userinfo and a token parameter\'s value — while the query string stays', async () => {
     vi.mocked(axios.get).mockRejectedValueOnce(new Error('boom'))
     const logger = fakeLogger()
     const err = await new UrlSpecLoaderStrategy('https://user:pw@specs.example.com/openapi.yaml?token=abc', 5_000, logger as unknown as Logger).load().catch((e: unknown) => e) as Error
     expect(err.message).not.toMatch(/pw|token=abc/)
     expect(JSON.stringify(logger.warn.mock.calls)).not.toMatch(/pw|token=abc/)
+    expect(err.message).toContain('https://specs.example.com/openapi.yaml?token=REDACTED')
   })
 })

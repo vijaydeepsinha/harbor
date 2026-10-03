@@ -4,8 +4,8 @@
 import ivm from 'isolated-vm'
 import { runInSandbox } from './sandbox-core.js'
 import type { TokenPayload } from '../../core/types/auth.types.js'
-import type { CircuitBreakerStrategy } from '../../core/types/circuit-breaker.types.js'
-import type { PermissionGuard } from '../../core/types/permission.types.js'
+import type { CircuitBreakerStrategy } from '../../spi/resilience/circuit-breaker.js'
+import type { PermissionGuard } from '../../spi/permissions/permission-guard.js'
 import type { ConnectorAPI } from '../../spi/connector/connector-api.js'
 import type { SandboxLimits } from '../../core/types/config.types.js'
 import { SandboxError, SandboxExecutionError } from '../../core/types/sandbox-error.types.js'
@@ -31,7 +31,6 @@ export interface SandboxExecutionContext {
   idempotencyKeyTtlMs: number
   /** Outbound X-Correlation-ID: the execution id for a governed run (constant across its runs). */
   correlationId: string
-  sessionId: string
   /** Outbound X-Harbor-Client-ID: the caller's own id from the inbound request, when it sent one. */
   clientId?: string
   /**

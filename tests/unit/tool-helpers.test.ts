@@ -5,7 +5,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import pino from 'pino'
 import {
   extractCorrelationId,
-  extractSessionId,
   readRequestMeta,
   resolveService,
   isToolError,
@@ -63,14 +62,6 @@ describe('tool-helpers extractors', () => {
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
   })
 
-  it('extractSessionId returns the transport session id', () => {
-    expect(extractSessionId({ sessionId: 'sess-1' })).toBe('sess-1')
-  })
-
-  it('extractSessionId falls back to a uuid when absent', () => {
-    const id = extractSessionId(undefined)
-    expect(id).toMatch(/^[0-9a-f-]{36}$/)
-  })
 })
 
 describe('readRequestMeta (spec §9)', () => {

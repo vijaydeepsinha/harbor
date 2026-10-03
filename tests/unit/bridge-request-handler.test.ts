@@ -9,8 +9,8 @@ import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-e
 import { resolveOperation } from '../../src/runtime/governance/operation-resolver.js'
 import { AuditCollector } from '../../src/runtime/observability/audit.js'
 import { ProgressCollector } from '../../src/runtime/observability/progress.js'
-import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
-import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import { noopCircuitBreaker } from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { forwardTokenPermissionGuard } from '../../src/adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
 import { ERR, ACTIVITY_STATUS } from '../../src/core/constants.js'
 import { SandboxCallLimitError, SandboxInvalidApiRequestError } from '../../src/core/types/sandbox-error.types.js'
 import { ApprovalRequiredError, GovernanceDeniedError } from '../../src/core/types/execution.types.js'
@@ -24,7 +24,7 @@ function makeCtx(overrides: Partial<SandboxExecutionContext> = {}) {
     apiClient: connector,
     circuitBreaker: noopCircuitBreaker(),
     permissionGuard: forwardTokenPermissionGuard(),
-    idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c', sessionId: 's',
+    idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c',
     callLog: new CallLog(),
     limits: { memoryLimitMb: 64, executeTimeoutMs: 1000, searchTimeoutMs: 1000, maxApiCalls: 2, maxConcurrentCalls: 2 },
     ...overrides

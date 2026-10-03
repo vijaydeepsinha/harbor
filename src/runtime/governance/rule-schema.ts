@@ -187,23 +187,27 @@ const conditionsSchema = z.unknown().transform((raw, ctx): ConditionNode | undef
     return z.NEVER
   }
 
+  let normalised: ConditionNode
   if (isFlatForm(raw)) {
     const flat = z.record(fieldPath, conditionSchema).safeParse(raw)
     if (!flat.success) return forward(flat.error.issues)
     const leaves = Object.entries(flat.data).map(([field, c]): ConditionNode => ({ kind: 'leaf', field, ...c }))
-    return leaves.length === 0 ? undefined : { kind: 'allOf', allOf: leaves }
+    if (leaves.length === 0) return undefined
+    normalised = { kind: 'allOf', allOf: leaves }
+  } else {
+    const tree = conditionNodeSchema.safeParse(raw)
+    if (!tree.success) return forward(tree.error.issues)
+    normalised = tree.data
   }
-
-  const tree = conditionNodeSchema.safeParse(raw)
-  if (!tree.success) return forward(tree.error.issues)
-  const size = treeSize(tree.data)
+  // The limits apply to what is evaluated, so the flat shorthand cannot carry more than the tree it stands for.
+  const size = treeSize(normalised)
   if (size.depth > MAX_CONDITION_DEPTH) {
     return forward([{ message: `conditions nest ${size.depth} levels deep; the limit is ${MAX_CONDITION_DEPTH}`, path: [] }])
   }
   if (size.nodes > MAX_CONDITION_NODES) {
     return forward([{ message: `conditions have ${size.nodes} nodes; the limit is ${MAX_CONDITION_NODES}`, path: [] }])
   }
-  return tree.data
+  return normalised
 })
 
 /** `*` matches anything; otherwise exact, case-sensitive. */

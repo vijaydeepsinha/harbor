@@ -23,10 +23,10 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 | `registerGetSkillDetailsTool` | `src/tools/get-skill-details.tool.ts` | Defines what happens when `get_skill_details()` is called |
 | `registerSearchCodeTool` | `src/tools/search-code.tool.ts` | Defines what happens when `search_code()` is called |
 | `registerExecuteApiTool` | `src/tools/execute-api.tool.ts` | Defines what happens when `api_execute()` is called |
-| `toolHelpers` | `src/tools/tool-helpers.ts` | Shared utilities — `mcpError`, `mcpSuccess`, `resolveService`, `validateAuth`, `extractCorrelationId`, `extractSessionId`, `runSandboxTool` |
-| `AuthMiddleware` | `src/spi/auth/auth-middleware.ts` | Parses the bearer, cache-first validation via the service's auth strategy, proactive refresh, session expiry detection |
-| `extractBearerFromHeader` | `src/spi/auth/bearer-authorization.ts` | One `Authorization` header, `Bearer` scheme, a JWT or ≥ 32 base64url characters |
-| `AbstractTokenCache` | `src/spi/auth/abstract-token-cache.ts` | Base class for all token cache backends — hash, entry expiry, get/validate/update orchestration |
+| `toolHelpers` | `src/tools/tool-helpers.ts` | Shared utilities — `mcpError`, `mcpSuccess`, `resolveService`, `validateAuth`, `extractCorrelationId`, `runSandboxTool` |
+| `AuthMiddleware` | `src/runtime/auth/auth-middleware.ts` | Parses the bearer, cache-first validation via the service's auth strategy, proactive refresh, session expiry detection |
+| `extractBearerFromHeader` | `src/runtime/auth/bearer-authorization.ts` | One `Authorization` header, `Bearer` scheme, a JWT or ≥ 32 base64url characters |
+| `AbstractTokenCache` | `src/adapters/auth/abstract-token-cache.ts` | Base class for all token cache backends — hash, entry expiry, get/validate/update orchestration |
 | `InMemoryTokenCache` | `src/adapters/auth/strategies/in-memory-token-cache.strategy.ts` | Default in-memory implementation of `AbstractTokenCache` |
 | `MemcacheTokenCache` | `src/adapters/auth/strategies/memcache-token-cache.strategy.ts` | Memcache-backed implementation of `AbstractTokenCache` |
 | `CouchbaseTokenCache` | `src/adapters/auth/strategies/couchbase-token-cache.strategy.ts` | Couchbase-backed implementation of `AbstractTokenCache` |
@@ -46,8 +46,8 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 | `evaluateGovernance` | `src/runtime/governance/rule-evaluator.ts` | Pure function: Governance Rules → ALLOW / DENY / REQUIRE_APPROVAL |
 | `CallLog` / `ActivityJournal` | `src/runtime/execution/activity-journal.ts` | The single record of each call's outcome (the durable activity record when governed) |
 | `ApiClient` | `src/runtime/api-client/api-client.ts` | Implements `ConnectorAPI`: headers, idempotency, the HTTP call, retries, breaker failures |
-| `CircuitBreakerStrategy` | `src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.ts`, `src/spi/resilience/strategies/noop-circuit-breaker.strategy.ts` | Tracks failures per endpoint and opens/closes the circuit |
-| `IdempotencyStrategy` | `src/adapters/idempotency/strategies/`, `src/spi/idempotency/strategies/noop-idempotency.strategy.ts` | Returns the stored result for a repeated idempotency key |
+| `CircuitBreakerStrategy` | `src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.ts`, `src/adapters/resilience/strategies/noop-circuit-breaker.strategy.ts` | Tracks failures per endpoint and opens/closes the circuit |
+| `IdempotencyStrategy` | `src/adapters/idempotency/strategies/`, `src/adapters/idempotency/strategies/noop-idempotency.strategy.ts` | Returns the stored result for a repeated idempotency key |
 | `AuditCollector` | `src/runtime/observability/audit.ts` | Projection of the run's call log: which endpoints were called during a request |
 | `ProgressCollector` | `src/runtime/observability/progress.ts` | Projection of the run's call log: per-call status and created ids, returned on failure |
 | `writeAuditRecord` / `AuditPipeline` | `src/runtime/observability/audit.ts`, `audit-pipeline.ts` | Delivers the audit record (and execution-state events) to every `AUDIT_SINKS` sink |
@@ -269,7 +269,7 @@ the registry is fixed at boot, so the same name fails every time.
 
 #### Step 2 — Auth validation
 
-**File: `src/spi/auth/auth-middleware.ts`**
+**File: `src/runtime/auth/auth-middleware.ts`**
 
 ```typescript
 const { payload: tokenPayload, invalidate } =
@@ -334,7 +334,7 @@ execution is created and no sandbox runs.
 
 #### Step 3 — Create or resume the execution
 
-**Files: `src/tools/execute-api.tool.ts` (`resolveExecution`), `src/runtime/execution/execution-manager.ts`**
+**Files: `src/tools/execute-api-run.ts` (`openExecution`), `src/tools/mcp-request-view.ts` (what the request says), `src/runtime/execution/execution-manager.ts`**
 
 - **A new call** (no `requestState`, no `_meta["harbor/execution-id"]`) creates an execution. Its
   `code` is persisted as the authoritative original.
@@ -440,7 +440,7 @@ circuitBreaker.recordSuccess(template)    any returned status (a 5xx has thrown 
   own headers, then Harbor's, which always win:
   - `Authorization: Bearer <access_token>` — the validated payload's token
   - `X-Request-Source` (`MCP_AGENT_NAME`, default `mcp-agent`), `X-MCP-Tool: api_execute`,
-    `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID` (a per-request id)
+    `X-MCP-Service`, `X-MCP-Version` (no session header: MCP 2026-07-28 is stateless)
   - `X-Idempotency-Key`
   - `X-Correlation-ID` — the execution id (the same on every call of one script, across approval
     resumes); the MCP request id on the legacy path
@@ -448,7 +448,7 @@ circuitBreaker.recordSuccess(template)    any returned status (a 5xx has thrown 
   - `X-Harbor-Client-ID` — the caller's own id, forwarded when the `/mcp` request carried a
     safe one
 - **What a program may not set**, in any letter case (its copies are dropped): `Authorization`,
-  `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID`,
+  `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID` (no longer sent, still reserved),
   `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `Host`,
   `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `TE`, `Trailer`,
   `Proxy-Authorization`, `Proxy-Connection`, `Cookie`, `Forwarded`, `X-Forwarded-For`/`-Host`/
@@ -496,7 +496,10 @@ and the execution ends `INTERRUPTED` (resumable).
 #### Step 7 — Multiple API calls
 
 Steps 5–6 repeat for every `api.request()` call inside the user's function. Concurrent calls
-(`Promise.all`) are admitted one at a time but run in parallel, up to `maxConcurrentCalls`. Once a
+(`Promise.all`) are admitted one at a time — each takes the next activity sequence in arrival order —
+but run in parallel, up to `maxConcurrentCalls`. A call admitted while another was in flight is
+journaled `admittedConcurrently`, and replay binds its query and body as well as its path
+(`docs/code-mode-governance.md` §4). Once a
 call pauses or stops the run, every later call is refused with the code that says why
 (`APPROVAL_REQUIRED`, `GOVERNANCE_DENIED`, `REPLAY_DIVERGED`, `EXECUTION_CANCELLED`,
 `ACTIVITY_OUTCOME_UNKNOWN`), and the first run-stopping outcome stands.
@@ -511,7 +514,7 @@ request) still decides the outcome.
 
 #### Step 8 — End of run, audit and metrics
 
-**File: `src/tools/execute-api.tool.ts`**
+**Files: `src/tools/execute-api-run.ts` (the run's outcome in the store), `src/tools/execute-api.tool.ts` (the responder: metrics, audit, the MCP result), `src/tools/execute-api-outcome.ts` (the mapping both read)**
 
 `ExecutionManager.endRun()` records how the run ended and releases the lock:
 
@@ -529,7 +532,7 @@ The new state is published to the audit sinks as an `execution` event. Then the 
 ```typescript
 writeAuditRecord({
   auditId: uuidv4(),
-  timestamp, service: 'tasks', environment, userIdHash, sessionId, correlationId,
+  timestamp, service: 'tasks', environment, userIdHash, correlationId,
   tool: 'api_execute',
   authStrategy: 'static-token', idempotencyStrategy: 'noop', circuitBreakerStrategy: 'noop',
   codeSubmitted: program,               // the program that ran — the persisted original on a resume
@@ -543,8 +546,9 @@ writeAuditRecord({
 
 It is delivered to every `AUDIT_SINKS` sink — by default `console`, which logs it as structured
 JSON (`"msg":"audit"`) at `info` level on the service's logger. Nothing is written when
-`ENABLE_AUDIT=false`. On the error and approval-pause paths the record's `userIdHash` is
-`"unknown"` (a known limitation; the execution record carries the real one).
+`ENABLE_AUDIT=false`. The record's `userIdHash` is the authenticated principal on every
+path — success, error, approval pause, refused resume; it is `"unknown"` only when the call
+failed before authentication finished.
 `tool_calls_total` is incremented with the outcome.
 
 ---
@@ -601,7 +605,7 @@ Transport-level failures are HTTP responses; everything after the transport is a
 | Execution already running | `EXECUTION_LOCKED` | yes | Another run holds the lock |
 | Resume of an unknown / finished / someone else's execution | `EXECUTION_NOT_FOUND` / `EXECUTION_NOT_RESUMABLE` | no | Nothing runs; when `beginRun` refuses, `harbor/execution-status` reports the stored status |
 | Conflicting answer to an already decided approval | `APPROVAL_ALREADY_DECIDED` | no | Nothing runs; repeating the recorded answer resumes. On a finished execution: `EXECUTION_NOT_RESUMABLE` |
-| `accept` without a boolean `approve` | `INVALID_API_REQUEST` | no | The approval stays pending |
+| `accept` whose `approve` is missing or not a recognised answer (a boolean, or a word such as `yes` / `no`) | `INVALID_API_REQUEST` | no | The approval stays pending |
 | Bad `api.request` argument or path | `INVALID_API_REQUEST` | no | Nothing sent or journaled; still reported if the program swallowed it |
 | More than `maxApiCalls` / `maxConcurrentCalls` | `CALL_LIMIT_EXCEEDED` / `CONCURRENT_LIMIT_EXCEEDED` | no | Execution `FAILED` |
 | Permission guard refuses | `PERMISSION_DENIED` | no | Execution `FAILED` |

@@ -98,11 +98,6 @@ export function extractCorrelationId(ctx: ServerContext | undefined): string {
   return crypto.randomUUID()
 }
 
-/** Reads session id from the MCP handler context, falling back to a fresh UUID. */
-export function extractSessionId(ctx: ServerContext | undefined): string {
-  return ctx?.sessionId ?? crypto.randomUUID()
-}
-
 /**
  * Advisory-only view of per-request MCP metadata (spec §9): the negotiated
  * protocol version, client implementation info, and client capabilities. The

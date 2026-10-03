@@ -115,8 +115,10 @@ amount or filter (a clock-dependent branch, `Promise.all` siblings arriving in
 another order) must not inherit it. A mismatch stops the run with
 `REPLAY_DIVERGED` and the execution is `FAILED`; nothing is executed under
 the old history and the recorded activity is left as it was. A `COMPLETED`
-record still replays when only its query or body drifted — nothing executes
-(§14).
+record still replays when only its query or body drifted — nothing executes,
+and a timestamp in a body does not make a sequential program unresumable
+(§14) — **unless it was admitted concurrently** (below): then its query and
+body are bound too.
 
 **Deterministic replay contract.** Given the same persisted program and the
 same recorded responses, replay reproduces the same external-call sequence.
@@ -139,6 +141,24 @@ journaling `EXECUTING` form one critical section per run, taken in arrival
 order. A call admitted after a sibling paused or denied the run therefore
 sees that stop and can neither execute nor open a second approval. The
 external calls themselves still overlap.
+
+**How concurrent calls are numbered.** Each call takes the next sequence
+when it reaches the bridge — arrival order, not completion order. Five
+creates started by one `Promise.all` are #1–#5 in array order, however their
+responses come back, and on a resume each is handed its own recorded
+response. Five approval-gated calls started together take five approval
+rounds: the first pauses the run, the others are refused in that run and
+reach governance one per resume. Arrival order can depend on timing, though:
+two chains that each read and then create (`await get(); await create()`)
+reach their creates in the order their reads returned. On a resume the
+reads replay at once, in sequence order, so the creates may now arrive the
+other way round. A call admitted while another call of the run was in flight
+is therefore journaled with `admittedConcurrently: true`, and replay binds
+its query and body even once it is `COMPLETED`: a sibling that reaches its
+sequence first is a divergence (`REPLAY_DIVERGED`, *calls started together
+arrived in another order*), never a sibling handed another call's response —
+which is what happened before, silently, with the run completing on the
+wrong resource's id.
 
 **The run ends when its calls end.** When the program's function settles,
 calls it started without awaiting (`ids.forEach(async …)`, a floating
@@ -275,9 +295,17 @@ elicitation**. No custom MCP methods.
    program in a fresh isolate.
 4. Mapping: `accept` with `approve: true` → `APPROVED` (the activity executes
    on resume); `accept` with `approve: false` or `decline` → `REJECTED`
-   (execution `DENIED`); `cancel` → `CANCELLED`. An `accept` whose `approve`
-   is missing or not a boolean is refused (`INVALID_API_REQUEST`) and the
-   approval stays pending — a malformed answer is never read as a yes.
+   (execution `DENIED`); `cancel` → `CANCELLED`. `approve` may also be a word,
+   for approvers who answer in a chat rather than tick a box: `yes`, `sure`,
+   `proceed`, `approve`, `approved` approve; `no`, `reject`, `rejected`,
+   `deny`, `denied`, `decline`, `declined` reject (`APPROVAL_ANSWER_WORDS` in
+   `src/core/constants.ts`; the whole value, trimmed, any case). Both channels
+   read the field with the same function (`readApprovalAnswer` in
+   `src/runtime/execution/approval-service.ts`). An `accept` whose `approve`
+   is missing or is anything else — a number, `null`, the strings `"true"` /
+   `"false"`, a sentence such as `"yes please"` — is refused
+   (`INVALID_API_REQUEST`) and the approval stays pending: an answer Harbor
+   does not recognise is never read as a yes.
 
 An approval is bound to **one activity**. If a later activity needs approval,
 the run pauses again with a new elicitation and a new `requestState` —
@@ -342,8 +370,9 @@ not set the following, in any letter case — its copies are dropped
 (`src/runtime/api-client/api-client.ts`):
 
 - **Harbor's own**: `Authorization`, `X-Request-Source`, `X-MCP-Tool`,
-  `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID`, `X-Idempotency-Key`,
-  `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`. A program
+  `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID` (no longer sent, still
+  reserved), `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`,
+  `X-Harbor-Client-ID`. A program
   that could set these could act as another principal or defeat
   deduplication.
 - **Routing, framing and ambient credentials**: `Host`, `Content-Length`,
@@ -390,12 +419,15 @@ Agent                Harbor (api_execute)          V8 #1              Backend   
 | Calls still in flight when the program returned | finished within the run's time budget, else aborted and journaled `FAILED` (outcome unknown), before the run's outcome is recorded (§4) |
 | Circuit open / other retryable error | execution `INTERRUPTED` (resumable via `_meta["harbor/execution-id"]`); no activity recorded for the unmade call |
 | Governance evaluation error | `DENY` with `GOVERNANCE_EVALUATION_FAILED` |
-| Malformed answer (`accept` without a boolean `approve`) | `INVALID_API_REQUEST` (HTTP 400); the approval stays pending |
+| Malformed answer (`accept` whose `approve` is missing or neither a boolean nor a listed word, §7) | `INVALID_API_REQUEST` (HTTP 400); the approval stays pending |
 | Approval decided twice | second decision refused (`APPROVAL_ALREADY_DECIDED`); an MRTR retry repeating the recorded decision resumes, a conflicting one runs nothing (§7) |
 | Answer for an approval the execution no longer waits on | `EXECUTION_NOT_RESUMABLE`; nothing is written (§7) |
 | Concurrent approval decisions | decisions serialize on the execution lock; a contender gets `EXECUTION_LOCKED` (HTTP 409) without changing state, then can retry and observe `APPROVAL_ALREADY_DECIDED` |
 | Resume before the approval is decided | the pause is returned again with the same approval id and `_meta["harbor/execution-status"] = WAITING_APPROVAL`; nothing runs, the execution is untouched |
-| Store write failure | the tool call fails; nothing is executed without its journal entry |
+| Store write failure before a call | the call is refused to the program and never sent: nothing is executed without its journal entry |
+| Store write failure after the outcome was decided (an activity's `FAILED`, a run's end) | the outcome stands and reaches the client unchanged; the failed write is reported (`event: persistence_failure`, `execution_persistence_failures_total`) and recovered by the next run (§12 *Persistence guarantees*) |
+| The program completed but settlement threw | Read back the execution: confirmed `COMPLETED` returns its recorded result, even if only the acknowledgement or lock release failed. Otherwise `RUN_OUTCOME_NOT_RECORDED` (retryable) reports the observed status, or omits it if unreadable. Inspect persistence and the lock before resuming with `_meta["harbor/execution-id"]`; completed calls replay without being sent again. Never mark completed work `FAILED` or submit a fresh execution to repeat it |
+| A decision cut short between its writes | completed by the next decide or resume (§12 *Persistence guarantees*) |
 | Replay mismatch | `REPLAY_DIVERGED`, execution `FAILED` (§4) |
 | Two resumes at once | second gets `EXECUTION_LOCKED` (retryable) |
 
@@ -409,8 +441,8 @@ lets one probe through at a time.
 
 `GET /executions/{id}` returns `{ execution, activities, approvals,
 decisions, history }`. `POST /executions/{id}/approvals/{approvalId}` with
-`{ "action": "accept" | "decline" | "cancel", "approve"?: boolean,
-"comment"?: string }` decides an approval — the fallback for clients without
+`{ "action": "accept" | "decline" | "cancel", "approve"?: boolean | word,
+"comment"?: string }` (the words are listed in §7) decides an approval — the fallback for clients without
 elicitation (§7) — and returns `{ approval, outcome, executionStatus }`
 (`src/runtime/http/execution-routes.ts`).
 
@@ -429,7 +461,7 @@ the HTTP and the MCP door.
 | Status | When |
 |---|---|
 | `200` | the inspection, or the decision applied |
-| `400 INVALID_API_REQUEST` | body not a JSON object, `action` not one of the three, or `accept` without a boolean `approve` (the approval stays pending) |
+| `400 INVALID_API_REQUEST` | body not a JSON object, `action` not one of the three, or `accept` whose `approve` is missing or not a recognised answer (the approval stays pending) |
 | `400 EXECUTION_NOT_RESUMABLE` | the execution has finished, or its activity no longer waits on this approval (§7) |
 | `401` | bearer missing or malformed (with `WWW-Authenticate` when `HARBOR_RESOURCE_URI` is set), or rejected by the service's auth strategy |
 | `403 AUTH_FAILED` | the bearer belongs to a different principal than the execution's owner |
@@ -501,6 +533,53 @@ after it finished (default one day; `0` keeps it for good). The sweep
 uses the SPI's `listExpiredExecutions` / `deleteExecution`. Paused and
 interrupted executions are never deleted. Independently, the program text of
 a terminal execution is dropped at once unless `EXECUTION_CODE_RETENTION=KEEP`.
+
+### Persistence guarantees
+
+The run lock serialises runs and decisions on one execution; it does not make
+a sequence of writes atomic. No store here offers a transaction across
+records, so the guarantee Harbor gives is narrower and holds on every
+backend: **each single write is atomic, every multi-write operation has a
+commit point, and whatever a crash or a store outage leaves after the commit
+point is completed by the next run or decision — or, before it, leaves
+nothing that decides anything.**
+
+What a single write means per adapter:
+
+| Store | One write | A crash or an outage | Locks |
+|---|---|---|---|
+| `in-memory` | a map update; cannot fail on its own | the process takes the whole store with it: nothing partial survives because nothing survives | in-process; die with the process |
+| `file` | the execution's whole document, rewritten through a temp file + rename — atomic, never torn | the document keeps the last completed write. No `fsync`: a power loss can lose the most recent writes. A write that fails on disk (full, unwritable) has already changed the copy in memory, so the process keeps running on state that a restart would not see | in-process |
+| `memcache` | one item per record (`set` is atomic per key); index keys are separate writes | an outage or a crash between two writes leaves the earlier ones; items without a TTL can still be evicted under memory pressure — size memcache for what you keep, and treat the audit trail as the durable record | `add` with a TTL; a crashed pod's lock expires after `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC` |
+| registered backend | must make each record write atomic — the recovery below assumes nothing more | | must be held across processes, with an expiry |
+
+What a cut leaves, per operation, and how it recovers (tests:
+`tests/integration/decision-crash-consistency.test.ts`,
+`tests/integration/persistence-failures.test.ts`):
+
+| Operation | Writes, in order (commit point **bold**) | Cut after | Left | Recovery |
+|---|---|---|---|---|
+| A human decision (`ApprovalService.decide`) | **approval decided** → activity → execution (reject / cancel only) | nothing | nothing changed | decide again |
+| | | the approval | approval decided, activity still `WAITING_APPROVAL` | the next decide (refused as already decided) or the next resume completes it first (`completeDecisions`): the approved call runs once, a rejection or cancellation ends the execution. Before this, every resume paused on the old question and every answer was refused — the execution was stuck |
+| | | the activity | execution still `WAITING_APPROVAL` | as above; a resume would also stop at the `DENIED` / `CANCELLED` activity |
+| A call (bridge) | **activity `EXECUTING`** → the call → `COMPLETED` or `FAILED` | `EXECUTING` | the call may or may not have reached the backend | the next run sends a `GET` again and stops on anything else (`ACTIVITY_OUTCOME_UNKNOWN`) — never a silent repeat. A failed `FAILED` write is reported (below) and leaves exactly this |
+| Ending a run (`endRun`) | **execution status** → lock release attempted in `finally` | before or after the status write, or at lock release | the previous status or the new status; the lock may remain held if release fails | read back the status, never infer it from a rejected write. Confirmed `COMPLETED` returns the persisted result. Otherwise a completed program gets `RUN_OUTCOME_NOT_RECORDED` with the observed status (omitted if unreadable); stopped runs preserve their primary error but also report the observed status. Restore persistence and inspect any retained lock before resuming; the journal replays completed calls without sending them again |
+| Starting a run (`beginRun`) | lock → **execution `RUNNING`** | the lock | lock held, record unchanged | the lock is released when the write fails; after a crash it dies with the process (or expires, memcache) |
+| A new activity's decision (gate) | decision record → approval → **activity `WAITING_APPROVAL` / `DENIED`** | before the activity | a decision record, perhaps a `PENDING` approval nothing waits on | the call is refused to the program and never sent; an orphan approval cannot be decided once its execution is finished (`ApprovalStaleError`) |
+
+**Secondary failures are reported, not swallowed.** When a write that records
+an outcome already decided fails — an activity's `FAILED`, a run's end — the
+outcome stands (the client gets it unchanged) and the failed write is
+reported once: an error log line with `event: "persistence_failure"`,
+`operation` (`activity.recordFailure`, `execution.endRun`), the execution and
+activity, what the write `intended`, what the store was `left` holding and
+the `recovery` above; and `execution_persistence_failures_total{operation}`
+(`src/runtime/execution/persistence-failure.ts`). Alert on the metric: every
+count needs investigation, not necessarily a resume: the result may already
+be recorded. A failed read-back emits a separate diagnostic with `left:
+"unknown"`; Harbor does not claim that the write was unapplied or the lock
+was released. A file store read-back reflects its current in-memory state,
+not a new guarantee that a failed disk write survived a restart.
 
 ## 13. Configuration
 
@@ -579,23 +658,33 @@ call rather than a fix.
   rotates behind the caller. Without a mapped `userId`, two bearers for the
   same human are two principals, so an execution paused under one bearer is
   not resumable under the other.
-- Audit lines written on the error, approval-pause and refused-resume paths
-  carry `userIdHash: "unknown"`.
+- Every audit line names the principal that authenticated for that tool
+  call — on the success, error, approval-pause and refused-resume paths
+  alike. For a resume refused because the execution belongs to someone else
+  that is the caller who tried, not the owner. It reads `"unknown"` only when
+  the call failed before authentication finished.
 
 **Execution and replay**
 
 - Approval, activity, and execution updates are separate store writes, not a
-  cross-record transaction. The execution lock prevents concurrent decisions
-  from overwriting each other, but a store failure midway through one decision
-  can still leave partially updated records.
+  cross-record transaction (§12 *Persistence guarantees*). A decision cut
+  short is completed by the next decide or resume; an execution nobody
+  touches again keeps the partial records until then (retention does not
+  sweep a `WAITING_APPROVAL` execution).
+- The `file` store does not `fsync`, and a write that fails on disk has
+  already changed the in-memory copy the process keeps running on.
 - A `COMPLETED` activity replays even when the program now sends another
   query or body at that sequence (§4): nothing executes, but the program sees
   the response to the request originally sent.
-- Approval-gated calls started together (`Promise.all`) are admitted in
-  arrival order. If siblings with the same template arrive in a different
-  order on resume, the content check stops the run with `REPLAY_DIVERGED`
-  (fail closed) rather than executing the wrong one; the program has to be
-  submitted again as a new execution.
+- Calls started together are numbered in arrival order (§4). If siblings
+  with the same template arrive in a different order on resume — chains
+  racing on their responses, or approval-gated siblings — the content check
+  stops the run with `REPLAY_DIVERGED` (fail closed) rather than executing the
+  wrong one or handing one sibling another's response; the program has to be
+  submitted again as a new execution. The same check stops a concurrently
+  admitted call whose body carries the time (`Date.now()`), since its body
+  differs on every run — the case the open deterministic-replay decision
+  (seeded `Math.random()`, a clock anchored to recorded times) would remove.
 - Programs that depend on time or randomness before an external call are not
   made deterministic.
 - There is no API to cancel an execution: `CANCELLED` comes only from a

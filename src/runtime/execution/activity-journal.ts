@@ -8,7 +8,9 @@ import {
   type ActivityResponseRecord,
   ReplayDivergedError
 } from '../../core/types/execution.types.js'
-import { ACTIVITY_STATUS, type AllowedHttpMethod } from '../../core/constants.js'
+import { ACTIVITY_STATUS, CALL_OUTCOME, PERSISTENCE_OPERATION, type AllowedHttpMethod } from '../../core/constants.js'
+import { ensureError } from '../../core/utils/errors.js'
+import type { PersistenceFailureReporter } from './persistence-failure.js'
 
 /** Records whose request is about to be executed or is in front of a human: they bind query and body too. */
 const CONTENT_BOUND: ReadonlySet<string> = new Set([
@@ -32,11 +34,11 @@ export interface CallIdentity {
 /** What happened to one call in this run. */
 export type JournalEntry = CallIdentity & (
   /** A COMPLETED activity from an earlier run; the recorded response was handed back, nothing was called. */
-  | { outcome: 'REPLAYED'; sequence: number; response: ActivityResponseRecord }
+  | { outcome: typeof CALL_OUTCOME.REPLAYED; sequence: number; response: ActivityResponseRecord }
   /** The external call was made and returned a response (any HTTP status). */
-  | { outcome: 'EXECUTED'; sequence?: number; response: ActivityResponseRecord }
+  | { outcome: typeof CALL_OUTCOME.EXECUTED; sequence?: number; response: ActivityResponseRecord }
   /** The call threw after it was resolved (transport error, open circuit, abort, store failure). */
-  | { outcome: 'FAILED'; sequence?: number; error: string; aborted: boolean }
+  | { outcome: typeof CALL_OUTCOME.FAILED; sequence?: number; error: string; aborted: boolean }
 )
 
 /** Read side of a run's call outcomes — what the audit and progress projections consume. */
@@ -59,18 +61,18 @@ export class CallLog implements CallLogSource {
   }
 
   recordReplayed(call: CallIdentity, sequence: number, response: ActivityResponseRecord): void {
-    this.log.push({ ...call, outcome: 'REPLAYED', sequence, response })
+    this.log.push({ ...call, outcome: CALL_OUTCOME.REPLAYED, sequence, response })
   }
 
   /** The call returned. `sequence` names the journaled activity, when there is one. */
   async recordResponse(call: CallIdentity, response: ActivityResponseRecord, sequence?: number): Promise<void> {
-    this.log.push({ ...call, outcome: 'EXECUTED', response, ...(sequence !== undefined ? { sequence } : {}) })
+    this.log.push({ ...call, outcome: CALL_OUTCOME.EXECUTED, response, ...(sequence !== undefined ? { sequence } : {}) })
   }
 
   /** The call threw. `executingSequence` names the activity that was journaled as EXECUTING, when there is one. */
   async recordFailure(call: CallIdentity, failure: { code: string; message: string; aborted: boolean }, executingSequence?: number): Promise<void> {
     this.log.push({
-      ...call, outcome: 'FAILED', error: failure.message, aborted: failure.aborted,
+      ...call, outcome: CALL_OUTCOME.FAILED, error: failure.message, aborted: failure.aborted,
       ...(executingSequence !== undefined ? { sequence: executingSequence } : {})
     })
   }
@@ -89,6 +91,8 @@ export class CallLog implements CallLogSource {
  */
 export class ActivityJournal extends CallLog {
   private cursor = 0
+  private readonly now: () => string
+  private readonly reportPersistenceFailure: PersistenceFailureReporter
 
   constructor(
     private readonly persistence: ExecutionPersistence,
@@ -96,9 +100,15 @@ export class ActivityJournal extends CallLog {
     readonly service: string,
     /** 1-based index of the sandbox run driving this journal (execution.runCount). */
     readonly runIndex: number,
-    private readonly now: () => string = () => new Date().toISOString()
+    options: {
+      now?: () => string
+      /** Where a secondary store failure goes (see {@link recordFailure}); absent ⇒ it is dropped. */
+      onPersistenceFailure?: PersistenceFailureReporter
+    } = {}
   ) {
     super()
+    this.now = options.now ?? (() => new Date().toISOString())
+    this.reportPersistenceFailure = options.onPersistenceFailure ?? (() => {})
   }
 
   /** Highest sequence handed out by this run so far. */
@@ -120,21 +130,32 @@ export class ActivityJournal extends CallLog {
    * a program that reaches the same sequence with another resource, amount
    * or filter (a clock-dependent branch, or `Promise.all` siblings arriving
    * in a different order) must not inherit it.
+   *
+   * A COMPLETED record replays when only its query or body drifted (a
+   * timestamp in a body must not make a sequential program unresumable) —
+   * unless it was admitted concurrently. Then a different query or body at
+   * its sequence is a sibling that arrived first this time: handing it this
+   * record's response would give it another call's result (another
+   * resource's id) and the run would carry on with it. That stops the run.
    */
   async next(request: ActivityRequestRecord): Promise<{ sequence: number; existing?: ActivityRecord }> {
     const sequence = ++this.cursor
     const existing = await this.persistence.getActivity(this.executionId, sequence)
     if (!existing) return { sequence }
     const existingRequest = existing.request
+    const contentBound = CONTENT_BOUND.has(existing.status) || existing.admittedConcurrently === true
     const diverged =
       existingRequest.method !== request.method || existingRequest.specPath !== request.specPath || existingRequest.rawPath !== request.rawPath
         ? 'path'
-        : CONTENT_BOUND.has(existing.status) &&
+        : contentBound &&
           (canonicalJson(existingRequest.query) !== canonicalJson(request.query) || canonicalJson(existingRequest.body) !== canonicalJson(request.body))
           ? 'content'
           : undefined
     if (diverged) {
-      const suffix = diverged === 'content' ? ' (query/body differ from the recorded request)' : ''
+      const suffix = diverged !== 'content' ? ''
+        : existing.admittedConcurrently === true && existing.status === ACTIVITY_STATUS.COMPLETED
+          ? ' (query/body differ from the recorded request: calls started together arrived in another order)'
+          : ' (query/body differ from the recorded request)'
       throw new ReplayDivergedError(
         this.executionId, sequence,
         `${existingRequest.method} ${existingRequest.rawPath}`,
@@ -144,9 +165,13 @@ export class ActivityJournal extends CallLog {
     return { sequence, existing }
   }
 
-  /** Journals a call the bridge is about to make. Present on resume ⇒ the previous run died mid-call. */
-  async markExecuting(sequence: number, request: ActivityRequestRecord, approvalId?: string): Promise<ActivityRecord> {
-    return this.put(sequence, request, ACTIVITY_STATUS.EXECUTING, approvalId)
+  /**
+   * Journals a call the bridge is about to make. Present on resume ⇒ the
+   * previous run died mid-call. `admittedConcurrently`: another call of this
+   * run was in flight — see {@link ActivityRecord.admittedConcurrently}.
+   */
+  async markExecuting(sequence: number, request: ActivityRequestRecord, approvalId?: string, admittedConcurrently = false): Promise<ActivityRecord> {
+    return this.put(sequence, request, ACTIVITY_STATUS.EXECUTING, approvalId, admittedConcurrently)
   }
 
   /** Journaled activity ⇒ EXECUTING → COMPLETED with the response (replayable from now on); then the run's log. */
@@ -165,17 +190,33 @@ export class ActivityJournal extends CallLog {
   /**
    * An activity journaled as EXECUTING whose call threw ⇒ FAILED with
    * `outcomeKnown: false`: Harbor does not know whether the API executed, and
-   * a later run must not silently repeat it (§32). A store failure while
-   * recording that is swallowed — the run is already failing. Then the run's log.
+   * a later run must not silently repeat it (§32). Then the run's log.
+   *
+   * If the store cannot take that write, the call's own error still stands —
+   * it is what the program sees — and the failed write is reported, not
+   * thrown. The record stays EXECUTING, which every later run already treats
+   * as a call that died mid-flight: a GET is sent again, anything else stops
+   * with ACTIVITY_OUTCOME_UNKNOWN. So nothing is repeated silently either way.
    */
   override async recordFailure(call: CallIdentity, failure: { code: string; message: string; aborted: boolean }, executingSequence?: number): Promise<void> {
     if (executingSequence !== undefined) {
-      await this.mustGet(executingSequence).then(async record => {
+      try {
+        const record = await this.mustGet(executingSequence)
         record.status = ACTIVITY_STATUS.FAILED
         record.failure = { code: failure.code, message: failure.message, outcomeKnown: false }
         record.updatedAt = this.now()
         await this.persistence.putActivity(record)
-      }).catch(() => {})
+      } catch (err) {
+        this.reportPersistenceFailure({
+          operation: PERSISTENCE_OPERATION.ACTIVITY_FAILED,
+          executionId: this.executionId,
+          sequence: executingSequence,
+          intended: `${ACTIVITY_STATUS.FAILED} (outcome unknown)`,
+          left: ACTIVITY_STATUS.EXECUTING,
+          recovery: 'the next run treats the activity as in flight when a run died: a GET is sent again, any other method stops with ACTIVITY_OUTCOME_UNKNOWN',
+          error: ensureError(err)
+        })
+      }
     }
     await super.recordFailure(call, failure, executingSequence)
   }
@@ -192,7 +233,8 @@ export class ActivityJournal extends CallLog {
     sequence: number,
     request: ActivityRequestRecord,
     status: ActivityRecord['status'],
-    approvalId?: string
+    approvalId?: string,
+    admittedConcurrently = false
   ): Promise<ActivityRecord> {
     const existing = await this.persistence.getActivity(this.executionId, sequence)
     const at = this.now()
@@ -205,7 +247,8 @@ export class ActivityJournal extends CallLog {
       runIndex: existing?.runIndex ?? this.runIndex,
       createdAt: existing?.createdAt ?? at,
       updatedAt: at,
-      ...(approvalId ?? existing?.approvalId ? { approvalId: approvalId ?? existing?.approvalId } : {})
+      ...(approvalId ?? existing?.approvalId ? { approvalId: approvalId ?? existing?.approvalId } : {}),
+      ...(admittedConcurrently ? { admittedConcurrently: true } : {})
     }
     await this.persistence.putActivity(record)
     return record

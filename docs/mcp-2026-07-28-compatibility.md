@@ -162,8 +162,10 @@ involved; the approval rides the 2026-07-28 multi-round-trip pattern:
    `src/runtime/http/mcp-server-factory.ts`); a tampered or expired state is a
    JSON-RPC `-32602` error. The handler then re-checks the principal against
    the bearer it just authenticated, records the decision once (`accept` with
-   `approve: true` approves; `approve: false` or `decline` rejects; `cancel`
-   cancels), and resumes the persisted program in a fresh isolate — completed
+   `approve: true` — or one of the words `yes`, `sure`, `proceed`, `approve`,
+   `approved` — approves; `approve: false`, a word such as `no` or
+   `rejected`, or `decline` rejects; `cancel` cancels; any other `approve`
+   value is refused and the approval stays pending), and resumes the persisted program in a fresh isolate — completed
    calls are replayed, never repeated. A retry without an answer is asked
    again.
 4. **Fallback.** A client without `elicitation` gets an `APPROVAL_REQUIRED`
@@ -221,7 +223,7 @@ Application-facing changes owned by Harbor:
   request-identity logging, the bounded body read; `/health` advertises the
   supported protocol version.
 - `src/runtime/transport/stdio-gateway.ts` — SDK v2 `serveStdio`, `legacy: 'reject'`.
-- `src/spi/auth/bearer-authorization.ts`, `src/runtime/http/oauth-metadata-handler.ts`,
+- `src/runtime/auth/bearer-authorization.ts`, `src/runtime/http/oauth-metadata-handler.ts`,
   `src/core/types/oauth.types.ts` — `WWW-Authenticate` + RFC 9728 PRM.
 - `src/adapters/auth/strategies/oauth-discovery.strategy.ts`,
   `src/adapters/auth/strategies/jwt-validation.strategy.ts`,

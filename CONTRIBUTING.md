@@ -153,7 +153,7 @@ Connectors are concrete implementations of SPI interfaces. The common extension 
 
 ### 4a. Token Cache Backend
 
-**Base class:** `src/spi/auth/abstract-token-cache.ts` → `AbstractTokenCache`
+**Base class:** `src/adapters/auth/abstract-token-cache.ts` → `AbstractTokenCache`
 
 Extend `AbstractTokenCache` — do not implement `TokenCacheStrategy` directly. The base class handles hashing, TTL, and all protocol methods; subclasses implement three storage primitives.
 
@@ -163,7 +163,7 @@ Extend `AbstractTokenCache` — do not implement `TokenCacheStrategy` directly. 
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { AbstractTokenCache, type CacheEntry } from '../../../spi/auth/abstract-token-cache.js'
+import { AbstractTokenCache, type CacheEntry } from '../abstract-token-cache.js'
 import type { Logger } from '../../../core/types/logger.types.js'
 
 export class RedisTokenCache extends AbstractTokenCache {
@@ -208,7 +208,7 @@ registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCach
 
 ### 4b. Idempotency Backend
 
-**Interface:** `src/core/types/idempotency.types.ts` → `IdempotencyStrategy`
+**Interface:** `src/spi/idempotency/idempotency-strategy.ts` → `IdempotencyStrategy`
 
 Same pattern — create under `src/adapters/idempotency/strategies/`, register with `registerIdempotencyBackend('postgres', ...)`. Select it gateway-wide with `IDEMPOTENCY_TYPE=postgres`, or per service with `"idempotency": { "type": "postgres", … }` in `config.json` (the factory receives that whole block). An unregistered type skips the service.
 
@@ -457,13 +457,13 @@ These are isolated, well-scoped tasks with clear acceptance criteria. Each links
 ### Connectors
 
 **Redis token-cache connector** (`good-first-issue`, `connector`)
-Implement `src/adapters/auth/strategies/redis-token-cache.strategy.ts` by extending `AbstractTokenCache` (`src/spi/auth/abstract-token-cache.ts`).
+Implement `src/adapters/auth/strategies/redis-token-cache.strategy.ts` by extending `AbstractTokenCache` (`src/adapters/auth/abstract-token-cache.ts`).
 `ioredis` would be a new production dependency — ask in the issue before adding it.
 Register via `registerTokenCacheBackend('redis', ...)`.
 Include tests under `tests/unit/adapters/`.
 
 **Redis idempotency connector** (`good-first-issue`, `connector`)
-Same pattern as above but for `IdempotencyStrategy` (`src/core/types/idempotency.types.ts`).
+Same pattern as above but for `IdempotencyStrategy` (`src/spi/idempotency/idempotency-strategy.ts`).
 File: `src/adapters/idempotency/strategies/redis-idempotency.strategy.ts`.
 Register via `registerIdempotencyBackend('redis', ...)`.
 

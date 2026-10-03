@@ -30,16 +30,24 @@ export function normalizeEndpointPath(path: string): string {
     .join('/')
 }
 
+/** What stands in for a credential's value in a redacted URL. */
+export const REDACTED_VALUE = 'REDACTED'
+
 /**
- * A URL as it may appear in logs and error messages: credentials and the
- * query string (where tokens and signatures usually ride) removed.
+ * A URL as it may appear in logs and error messages. The query string is
+ * kept as parameter names, but every value is replaced: credentials can
+ * travel under arbitrary names, not just `token` or `api_key`. Userinfo and
+ * fragments are removed too. The origin and path remain diagnostic context.
  */
 export function redactUrl(url: string): string {
   try {
     const u = new URL(url)
     u.username = ''
     u.password = ''
-    u.search = ''
+    u.hash = ''
+    const redacted = new URLSearchParams()
+    for (const name of u.searchParams.keys()) redacted.append(name, REDACTED_VALUE)
+    u.search = redacted.toString()
     return u.toString()
   } catch {
     return '(invalid URL)'

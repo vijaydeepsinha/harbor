@@ -8,8 +8,8 @@ import {
   SandboxTimeoutError, SandboxMemoryError, SandboxRuntimeError
 } from '../../src/core/types/sandbox-error.types.js'
 import { CallLog } from '../../src/runtime/execution/activity-journal.js'
-import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
-import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import { noopCircuitBreaker } from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { forwardTokenPermissionGuard } from '../../src/adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
 
 const run = (code: string, opts: { memoryLimitMb?: number; timeoutMs?: number } = {}) =>
   runInSandbox(code, { memoryLimitMb: opts.memoryLimitMb ?? 32, timeoutMs: opts.timeoutMs ?? 2000 }, async () => {})
@@ -45,7 +45,7 @@ describe('runInSandbox — errors are classified by what happened, not by what a
       apiClient: { request: async () => { throw Object.assign(new Error('timeout of 100ms exceeded'), { code: 'ECONNABORTED' }) } },
       circuitBreaker: noopCircuitBreaker(),
       permissionGuard: forwardTokenPermissionGuard(),
-      idempotencyKey: 'k', idempotencyKeyTtlMs: 1000, correlationId: 'c', sessionId: 's',
+      idempotencyKey: 'k', idempotencyKeyTtlMs: 1000, correlationId: 'c',
       callLog: new CallLog(),
       limits: { memoryLimitMb: 32, executeTimeoutMs: 2000, searchTimeoutMs: 1000, maxApiCalls: 5, maxConcurrentCalls: 2 }
     }

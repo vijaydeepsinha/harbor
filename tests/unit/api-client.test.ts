@@ -6,8 +6,8 @@ import { createServer, type Server, type IncomingHttpHeaders } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import pino from 'pino'
 import { ApiClient } from '../../src/runtime/api-client/api-client.js'
-import { noopIdempotency } from '../../src/spi/idempotency/strategies/noop-idempotency.strategy.js'
-import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { noopIdempotency } from '../../src/adapters/idempotency/strategies/noop-idempotency.strategy.js'
+import { noopCircuitBreaker } from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
 import type { ExecuteRequestContext } from '../../src/spi/connector/connector-api.js'
 
 interface Seen { method: string; url: string; headers: IncomingHttpHeaders }
@@ -42,7 +42,7 @@ function client(port: number, overrides: { maxRetries?: number; requestTimeoutMs
 const ctx: ExecuteRequestContext = {
   tokenPayload: { access_token: 'USER-SECRET-TOKEN', token_type: 'bearer', expires_in: 60, refresh_token: '', scope: '' },
   invalidate: async () => {},
-  idempotencyKey: 'idem-1', idempotencyKeyTtlMs: 1000, correlationId: 'exec-1', sessionId: 'sess-1'
+  idempotencyKey: 'idem-1', idempotencyKeyTtlMs: 1000, correlationId: 'exec-1'
 }
 
 describe('ApiClient — the outbound call stays on the service', () => {
@@ -87,7 +87,8 @@ describe('ApiClient — headers the program may and may not set', () => {
     const h = service.seen[0]!.headers
     expect(h['authorization']).toBe('Bearer USER-SECRET-TOKEN')
     expect(h['x-idempotency-key']).toBe('idem-1')
-    expect(h['x-mcp-session-id']).toBe('sess-1')
+    // MCP 2026-07-28 has no sessions: Harbor sends no session header, and the name stays reserved — the program's copy is dropped.
+    expect(h['x-mcp-session-id']).toBeUndefined()
     expect(h['x-mcp-service']).toBe('svc')
     expect(h['x-request-source']).toBe('agent')
     expect(h['x-correlation-id']).toBe('exec-1')

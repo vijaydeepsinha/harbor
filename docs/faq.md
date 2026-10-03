@@ -219,7 +219,7 @@ A rule denied the call (or the default did, for a targeted call), or a human rej
 
 If the client declares the `elicitation` capability, `api_execute` returns `input_required` with an approval form (`approve: boolean`, `comment`) and a sealed `requestState`. The client shows it to a human and retries the **same** `tools/call` with the answer and the echoed `requestState`. Harbor records the decision once and resumes the persisted program in a fresh isolate: completed calls are replayed from the journal, not re-sent. `accept` approves only with `approve: true`.
 
-Without elicitation the tool returns `APPROVAL_REQUIRED` with `harbor/execution-id` and `harbor/approval-id` in `_meta`. Decide with `POST /executions/{id}/approvals/{approvalId}` and a body such as `{"action":"accept","approve":true}` (or `decline` / `cancel`), then call `api_execute` again with `_meta["harbor/execution-id"]` set. Both steps need a bearer of the principal that started the execution — there is no separate approver role. The `requestState` expires after `GOVERNANCE_APPROVAL_TTL_SEC` (600 s).
+Without elicitation the tool returns `APPROVAL_REQUIRED` with `harbor/execution-id` and `harbor/approval-id` in `_meta`. Decide with `POST /executions/{id}/approvals/{approvalId}` and a body such as `{"action":"accept","approve":true}` (or `decline` / `cancel`; `approve` also takes the words `yes`, `sure`, `proceed`, `approved`, and `no` / `rejected` to reject), then call `api_execute` again with `_meta["harbor/execution-id"]` set. Both steps need a bearer of the principal that started the execution — there is no separate approver role. The `requestState` expires after `GOVERNANCE_APPROVAL_TTL_SEC` (600 s).
 
 ---
 

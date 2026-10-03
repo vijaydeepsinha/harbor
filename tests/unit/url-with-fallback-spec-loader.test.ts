@@ -2,22 +2,23 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { SpecLoaderStrategy, OpenAPISpec } from '../../src/core/types/spec.types.js'
+import type { OpenAPISpec } from '../../src/core/types/spec.types.js'
+import type { SpecLoaderStrategy } from '../../src/spi/spec/spec-loader.js'
 import { SpecLoadError } from '../../src/core/types/spec.types.js'
 
 const urlLoadMock = vi.fn<[], Promise<OpenAPISpec>>()
 const fileLoadMock = vi.fn<[], Promise<OpenAPISpec>>()
 
-vi.mock('../../src/spi/spec/strategies/url-spec-loader.strategy.js', () => ({
+vi.mock('../../src/adapters/spec/strategies/url-spec-loader.strategy.js', () => ({
   urlSpec: (): SpecLoaderStrategy => ({ name: 'url-spec-loader', load: urlLoadMock })
 }))
 
-vi.mock('../../src/spi/spec/strategies/file-spec-loader.strategy.js', () => ({
+vi.mock('../../src/adapters/spec/strategies/file-spec-loader.strategy.js', () => ({
   fileSpec: (): SpecLoaderStrategy => ({ name: 'file-spec-loader', load: fileLoadMock })
 }))
 
 const { UrlWithFallbackSpecLoaderStrategy, urlWithFallback } =
-  await import('../../src/spi/spec/strategies/url-with-fallback-spec-loader.strategy.js')
+  await import('../../src/adapters/spec/strategies/url-with-fallback-spec-loader.strategy.js')
 
 function spec(): OpenAPISpec {
   return {
@@ -96,7 +97,7 @@ describe('UrlWithFallbackSpecLoaderStrategy', () => {
 describe('UrlWithFallbackSpecLoaderStrategy — the URL is redacted wherever it is shown', () => {
   beforeEach(() => { urlLoadMock.mockReset(); fileLoadMock.mockReset() })
 
-  it('keeps credentials and the query string out of the fallback log and the combined error', async () => {
+  it('keeps credentials out of the fallback log and the combined error; the query string stays, its token value replaced', async () => {
     const url = 'https://user:pw@specs.example.com/openapi.yaml?token=abc'
     urlLoadMock.mockRejectedValue(new Error('network down'))
     fileLoadMock.mockResolvedValueOnce(spec())
@@ -108,6 +109,6 @@ describe('UrlWithFallbackSpecLoaderStrategy — the URL is redacted wherever it 
     const err = await new UrlWithFallbackSpecLoaderStrategy(url, '/tmp/fallback.yaml').load().catch((e: unknown) => e) as Error
     expect(err).toBeInstanceOf(SpecLoadError)
     expect(err.message).not.toMatch(/pw|token=abc/)
-    expect(err.message).toContain('specs.example.com/openapi.yaml')
+    expect(err.message).toContain('specs.example.com/openapi.yaml?token=REDACTED')
   })
 })

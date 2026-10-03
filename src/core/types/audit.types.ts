@@ -10,7 +10,6 @@ export interface AuditRecord {
   service: string
   environment: string
   userIdHash: string
-  sessionId: string
   correlationId: string
   tool: typeof TOOL.API_EXECUTE
   authStrategy: string

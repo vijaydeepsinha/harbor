@@ -116,6 +116,13 @@ describe('governance rule schema — condition tree (allOf / anyOf / not) and co
     expect(errorsOf({ anyOf: Array.from({ length: MAX_CONDITION_NODES }, () => leaf) })).toEqual([`conditions: conditions have ${MAX_CONDITION_NODES + 1} nodes; the limit is ${MAX_CONDITION_NODES}`])
   })
 
+  it('bounds the flat shorthand by the tree it stands for: no more than MAX_CONDITION_NODES - 1 fields', () => {
+    const flat = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`body.f${i}`, { equals: i }]))
+    expect(errorsOf(flat(MAX_CONDITION_NODES - 1))).toEqual([]) // allOf + 63 leaves = 64 nodes
+    expect(errorsOf(flat(MAX_CONDITION_NODES))).toEqual([`conditions: conditions have ${MAX_CONDITION_NODES + 1} nodes; the limit is ${MAX_CONDITION_NODES}`])
+    expect(errorsOf(flat(1000))).toHaveLength(1)
+  })
+
   it('keeps the action advisory: only ALLOW | DENY | REQUIRE_APPROVAL plus a reason — no mutation, no side effect', () => {
     for (const action of [
       { type: 'ALLOW', set: { 'body.budget': 0 } },
@@ -206,6 +213,30 @@ describe('governance rule loader', () => {
     expect(loaded.find(l => l.rule.name === 'never-delete-campaigns')?.rule.match.path).toBe('/campaigns/{id}')
   })
 
+  it('the example bid rules review missing or unusable current bids, not just computable increases', () => {
+    // The owner's PR #4 question: a request carries the new bid, so how is the previous one known? It is not —
+    // the rule compares two fields of the same request, and must not be skippable by leaving one out.
+    const examples = loadGovernanceRules(join(process.cwd(), 'governance/rules/examples'))
+    const update = (body: Record<string, unknown>): GovernanceRequest => ({
+      executionId: 'e', activitySequence: 1, service: 'trafficking', method: 'POST',
+      specPath: '/campaigns/{id}', operationId: 'updateCampaign', pathParams: { id: 'C1' }, body: { owner: 'growth', ...body }
+    })
+    const decide = (body: Record<string, unknown>) => evaluateGovernance(examples, update(body), GOVERNANCE_DECISION.DENY)
+    expect(decide({ bid: 13.1, currentBid: 10 })).toMatchObject({ decision: 'REQUIRE_APPROVAL', matchedRules: ['bid-jump', 'trafficking-baseline'] })
+    expect(decide({ bid: 12, currentBid: 10 }).decision).toBe('ALLOW') // +20%: the service baseline allows it
+    // Not stating the bid it replaces used to make the ratio uncomputable — the rule did not fire and the baseline allowed it.
+    expect(decide({ bid: 40 })).toMatchObject({ decision: 'REQUIRE_APPROVAL', matchedRules: expect.arrayContaining(['bid-jump']) })
+    for (const currentBid of [null, 0, -10, 'not-a-number', '10', true, [], {}, Infinity, NaN]) {
+      expect(decide({ bid: 20, currentBid }), `currentBid=${JSON.stringify(currentBid)}`)
+        .toMatchObject({ decision: 'REQUIRE_APPROVAL', matchedRules: expect.arrayContaining(['bid-jump']) })
+    }
+    expect(decide({ bid: 13, currentBid: 10 }).decision).toBe('ALLOW') // exactly +30%
+    // A claimed current bid cannot lift a bid past the absolute ceiling.
+    expect(decide({ bid: 60, currentBid: 59 })).toMatchObject({ decision: 'REQUIRE_APPROVAL', matchedRules: expect.arrayContaining(['bid-ceiling']) })
+    // An update that does not touch the bid is not a bid change.
+    expect(decide({ name: 'Q4 renamed' }).decision).toBe('ALLOW')
+  })
+
   it('rule store swaps atomically and describes itself', () => {
     const store = new GovernanceRuleStore()
     expect(store.describe()).toEqual({ count: 0, rules: [] })
@@ -292,6 +323,20 @@ describe('governance evaluator', () => {
     expect(readField({ ...req, pathParams: { id: 'C1' } }, 'path.id')).toBe('C1')
     expect(readField(req, 'body.tags.1')).toBe('b')
     expect(readField(req, 'missing.deep')).toBeUndefined()
+  })
+
+  it('path parameters compare as they travel, like query values: a numeric rule value matches the URL segment', () => {
+    const onCampaign = (id: string): GovernanceRequest => ({ ...req, specPath: '/campaigns/{id}', operationId: 'updateCampaign', pathParams: { id } })
+    const denies = (conditions: Record<string, unknown>, id: string) =>
+      evaluateGovernance([rule({ conditions, action: { type: 'DENY' } })], onCampaign(id), GOVERNANCE_DECISION.ALLOW).decision === 'DENY'
+    expect(denies({ 'path.id': { equals: 42 } }, '42')).toBe(true) // YAML `equals: 42` is a number; the segment is text
+    expect(denies({ 'path.id': { in: [7, 42] } }, '42')).toBe(true)
+    expect(denies({ 'path.id': { greater_than: 100 } }, '150')).toBe(true)
+    expect(denies({ 'path.id': { greater_than: 100 } }, '99')).toBe(false)
+    expect(denies({ 'path.id': { greater_than: 100 } }, 'C150')).toBe(false) // not a number: no ordering
+    expect(denies({ 'path.id': { equals: 'C1' } }, 'C1')).toBe(true)
+    // Body values keep their JSON types.
+    expect(evaluateGovernance([rule({ conditions: { 'body.n': { equals: 42 } }, action: { type: 'DENY' } })], { ...req, body: { n: '42' } }, GOVERNANCE_DECISION.ALLOW).decision).toBe('ALLOW')
   })
 
   it('evaluates every operator; missing fields only satisfy exists:false; type mismatches are false', () => {

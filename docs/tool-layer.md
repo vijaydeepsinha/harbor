@@ -81,7 +81,7 @@ All structured logs go to **stderr**. Stdout is reserved for the MCP protocol st
 
 Nothing is kept between requests. For each `POST /mcp` (`src/runtime/http/http-gateway.ts`):
 
-1. **Bearer format.** The `Authorization` header is parsed (`src/spi/auth/bearer-authorization.ts`): missing, duplicated, malformed, too long, or too weak ⇒ HTTP 401 (`MISSING_TOKEN` or `TOKEN_INVALID`, with a machine-readable `reason`, plus `WWW-Authenticate: Bearer resource_metadata="…"` when `HARBOR_RESOURCE_URI` is set). This checks the format only — it does not ask the auth server whether the token is valid.
+1. **Bearer format.** The `Authorization` header is parsed (`src/runtime/auth/bearer-authorization.ts`): missing, duplicated, malformed, too long, or too weak ⇒ HTTP 401 (`MISSING_TOKEN` or `TOKEN_INVALID`, with a machine-readable `reason`, plus `WWW-Authenticate: Bearer resource_metadata="…"` when `HARBOR_RESOURCE_URI` is set). This checks the format only — it does not ask the auth server whether the token is valid.
 2. **Bounded body.** Harbor reads the body itself, up to `MCP_MAX_BODY_BYTES` (default 4 MiB). A larger declared or streamed body ⇒ HTTP 413 `PAYLOAD_TOO_LARGE` with `Connection: close`; a body that is not JSON ⇒ HTTP 400 with JSON-RPC error `-32700`.
 3. **Fresh server.** The SDK calls the factory in `src/runtime/http/mcp-server-factory.ts`, which builds a new `McpServer` with the five tools registered and the request's bearer (`ctx.authInfo.token`) bound into their handlers.
 4. **Token validation per tool.** Every tool except `discover_services` validates the bearer against the named service's auth strategy (token cache, then introspection / JWT verification). An invalid or expired token is a tool error (`isError`, `TOKEN_INVALID` / `TOKEN_EXPIRED`) inside an HTTP 200 response, not a 401 — see [`mcp-2026-07-28-compatibility.md`](mcp-2026-07-28-compatibility.md).
@@ -263,7 +263,7 @@ Runs AI-written code in a V8 sandbox with `api.request()` injected. `api.request
 }
 ```
 
-**Per tool call** (`src/tools/execute-api.tool.ts`): resolve the service → validate the bearer → create a durable execution, or resume one (an MCP retry carrying `requestState`, or `_meta["harbor/execution-id"]`) → take the execution's run lock → run the program — the persisted original on a resume — in a fresh isolate → wait for the calls it started to finish → record the run's outcome → return the result, an `input_required` approval request, or an error. Once the execution exists, every result carries `harbor/execution-id` and `harbor/execution-status` in `_meta`.
+**Per tool call** (`src/tools/execute-api.tool.ts` → `src/tools/execute-api-run.ts`): read the request at the SDK boundary (`src/tools/mcp-request-view.ts`) → resolve the service → validate the bearer → create a durable execution, or resume one (an MCP retry carrying `requestState`, or `_meta["harbor/execution-id"]`) → take the execution's run lock → run the program — the persisted original on a resume — in a fresh isolate → wait for the calls it started to finish → record the run's outcome → return the result, an `input_required` approval request, or an error. Once the execution exists, every result carries `harbor/execution-id` and `harbor/execution-status` in `_meta`.
 
 **Per `api.request()` call** (`src/runtime/sandbox/bridge-request-handler.ts`), in this order:
 
@@ -374,7 +374,7 @@ const { body } = await api.request(...)   // undefined!
 
 **Headers.** A program may add its own headers (`Accept`, `Content-Type`, custom `X-…`), but the following are dropped in any letter case, and Harbor's own headers are applied after the program's:
 
-- Harbor's own: `Authorization`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID`, `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`;
+- Harbor's own: `Authorization`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID` — and `X-MCP-Session-ID`, which Harbor no longer sends (MCP 2026-07-28 has no sessions) but keeps reserved;
 - routing and framing: `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `TE`, `Trailer`, `Proxy-Authorization`, `Proxy-Connection`, `Cookie`, `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-Port`, `X-Forwarded-Prefix`, `X-Real-IP`, `X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override`, `X-Original-URL`, `X-Rewrite-URL`, `X-Original-Method`.
 
 The list is `PROGRAM_FORBIDDEN_HEADERS` in `src/runtime/api-client/api-client.ts`.
@@ -481,7 +481,6 @@ Every `api_execute` call produces one audit record (`AuditRecord`, `src/core/typ
   "auditId": "a1b2c3d4-...",
   "timestamp": "2026-09-27T10:15:02.114Z",
   "userIdHash": "3f9a...",
-  "sessionId": "5d1e...",
   "correlationId": "7",
   "tool": "api_execute",
   "authStrategy": "oauth-introspection",
@@ -499,7 +498,7 @@ Every `api_execute` call produces one audit record (`AuditRecord`, `src/core/typ
 
 - `endpointsAccessed` / `apiCallCount` count the calls that went out in this run; replayed activities are not counted.
 - `codeSubmitted` is the program that ran — the persisted original on a resume.
-- Failed calls add `errorType` and `errorCode`; `outcome` is one of `success`, `error`, `circuit_open`, `permission_denied`, `call_limit_exceeded`, `concurrent_limit_exceeded`, `approval_required`, `governance_denied`, `replay_diverged`, `execution_cancelled`. Error-path records carry `userIdHash: "unknown"` (a known limitation).
+- Failed calls add `errorType` and `errorCode`; `outcome` is one of `success`, `error`, `circuit_open`, `permission_denied`, `call_limit_exceeded`, `concurrent_limit_exceeded`, `approval_required`, `governance_denied`, `replay_diverged`, `execution_cancelled`. Every record — error, approval-pause and refused-resume paths included — carries the authenticated principal's `userIdHash`; `"unknown"` only when the call failed before authentication finished.
 
 `ENABLE_AUDIT` accepts `true`, `false`, `1` or `0` (default `true`; any other value stops boot). `false` or `0` turns off every audit record and execution-state event.
 
@@ -524,6 +523,7 @@ Records go to every sink listed in `AUDIT_SINKS` (default `console`: the line ab
 - Tool call counts by tool and outcome (`tool_calls_total`; a `service` argument naming no registered service is counted as `service="unknown"`, never under the caller's string)
 - Sandbox error counts by error type (`sandbox_errors_total`)
 - Circuit breaker open events (`circuit_breaker_opens_total`)
+- Store writes that failed after their outcome was decided (`execution_persistence_failures_total{operation}` — `activity.recordFailure`, `execution.endRun`; each is also an error log line with `event: "persistence_failure"`, see `docs/code-mode-governance.md` §12)
 - Token cache hits/misses and refresh attempts (`auth_cache_total`, `auth_refresh_*`)
 
 Counters are flushed as one `metrics_flush` log line every 60 s and on shutdown. They are not pluggable: the gateway constructs `MetricsRegistry` directly and there is no hook to substitute an exporter (Prometheus, StatsD) without changing the code.
@@ -570,19 +570,20 @@ Additional error codes:
 | `EXECUTION_NOT_RESUMABLE` | No | Finished, owned by another principal, or bound to another service |
 | `EXECUTION_CANCELLED` | No | The human cancelled the approval |
 | `ACTIVITY_OUTCOME_UNKNOWN` | No | A previous run's call to this activity failed or was cut off; Harbor will not repeat it |
+| `RUN_OUTCOME_NOT_RECORDED` | Yes | The program completed but read-back could not confirm completion. Inspect persistence and any retained lock; if resumable, resume with `_meta["harbor/execution-id"]` to replay journaled calls, not a fresh execution. Metadata reports observed status or omits it if unreadable. Confirmed `COMPLETED` instead returns the recorded result |
 | `APPROVAL_NOT_FOUND` | No | Unknown approval, or one of another execution |
 | `APPROVAL_ALREADY_DECIDED` | No | A different answer was already recorded |
 
 ### `/executions` (HTTP)
 
-`GET /executions/{id}` returns the execution, its activities, approvals, decisions and history; `POST /executions/{id}/approvals/{approvalId}` takes `{ "action": "accept" | "decline" | "cancel", "approve"?: boolean, "comment"?: string }` (`accept` needs `approve: true` to approve, `approve: false` rejects) and returns `{ approval, outcome, executionStatus }`. Both validate the bearer against the execution's service and require the execution's owner (`src/runtime/http/execution-routes.ts`):
+`GET /executions/{id}` returns the execution, its activities, approvals, decisions and history; `POST /executions/{id}/approvals/{approvalId}` takes `{ "action": "accept" | "decline" | "cancel", "approve"?: boolean | word, "comment"?: string }` (`accept` needs `approve: true` — or `yes`, `sure`, `proceed`, `approve`, `approved` — to approve; `approve: false`, or `no`, `reject`, `rejected`, `deny`, `denied`, `decline`, `declined`, rejects) and returns `{ approval, outcome, executionStatus }`. Both validate the bearer against the execution's service and require the execution's owner (`src/runtime/http/execution-routes.ts`):
 
 | Status | Code | When |
 |--------|------|------|
 | 401 | `MISSING_TOKEN` / `TOKEN_INVALID` / `TOKEN_EXPIRED` | Missing, malformed or rejected bearer |
 | 403 | `AUTH_FAILED` | A valid bearer of another principal |
 | 503 | `INTROSPECTION_FAILED` | The auth service is unreachable |
-| 400 | `INVALID_API_REQUEST` / `EXECUTION_NOT_RESUMABLE` | Body not a JSON object, bad `action`, `accept` without a boolean `approve`; an approval that can no longer be decided |
+| 400 | `INVALID_API_REQUEST` / `EXECUTION_NOT_RESUMABLE` | Body not a JSON object, bad `action`, `accept` whose `approve` is missing or not a recognised answer; an approval that can no longer be decided |
 | 404 | `EXECUTION_NOT_FOUND` / `APPROVAL_NOT_FOUND` | Unknown execution; unknown approval, or one belonging to another execution |
 | 409 | `EXECUTION_LOCKED` / `APPROVAL_ALREADY_DECIDED` | The execution is running or another decision holds its lock; already decided |
 | 413 | `PAYLOAD_TOO_LARGE` | Body over 64 KiB |

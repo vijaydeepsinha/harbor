@@ -9,7 +9,7 @@ import { InMemoryIdempotencyStrategy } from '../../src/adapters/idempotency/stra
 import { runApiInSandbox, type SandboxExecutionContext } from '../../src/runtime/sandbox/execute-api-in-sandbox.js'
 import { AuditCollector } from '../../src/runtime/observability/audit.js'
 import { CallLog } from '../../src/runtime/execution/activity-journal.js'
-import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import { forwardTokenPermissionGuard } from '../../src/adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
 import type { TokenPayload } from '../../src/core/types/auth.types.js'
 import pino from 'pino'
 
@@ -33,7 +33,6 @@ const baseCtx: ExecuteRequestContext = {
   idempotencyKey: 'idem-key',
   idempotencyKeyTtlMs: 60_000,
   correlationId: 'corr-id',
-  sessionId: 'sess-id'
 }
 
 const apiConfig = {
@@ -218,7 +217,6 @@ describe('execute integration', () => {
       idempotencyKey: 'idem-key',
       idempotencyKeyTtlMs: 600_000,
       correlationId: 'corr-id',
-      sessionId: 'sess-id',
       callLog,
       limits: {
         memoryLimitMb: 64,
@@ -258,7 +256,7 @@ describe('execute integration', () => {
     const client = makeApiClient(cb)
     const result = await client.executeRequest(
       { method: 'GET', path: '/campaigns/999' },
-      { ...baseCtx, idempotencyKey: 'k', correlationId: 'c', sessionId: 's' }
+      { ...baseCtx, idempotencyKey: 'k', correlationId: 'c' }
     )
 
     expect(result.ok).toBe(false)
@@ -278,7 +276,7 @@ describe('execute integration', () => {
     const invalidate = vi.fn().mockResolvedValue(undefined)
     const result = await client.executeRequest(
       { method: 'GET', path: '/campaigns' },
-      { ...baseCtx, invalidate, idempotencyKey: 'k', correlationId: 'c', sessionId: 's' }
+      { ...baseCtx, invalidate, idempotencyKey: 'k', correlationId: 'c' }
     )
 
     expect(result.status).toBe(401)
@@ -298,7 +296,7 @@ describe('execute integration', () => {
     const invalidate = vi.fn().mockResolvedValue(undefined)
     const result = await client.executeRequest(
       { method: 'GET', path: '/campaigns' },
-      { ...baseCtx, invalidate, idempotencyKey: 'k', correlationId: 'c', sessionId: 's' }
+      { ...baseCtx, invalidate, idempotencyKey: 'k', correlationId: 'c' }
     )
 
     expect(result.status).toBe(403)
@@ -314,7 +312,7 @@ describe('execute integration', () => {
     const invalidate = vi.fn().mockResolvedValue(undefined)
     await client.executeRequest(
       { method: 'GET', path: '/campaigns' },
-      { ...baseCtx, invalidate, idempotencyKey: 'k', correlationId: 'c', sessionId: 's' }
+      { ...baseCtx, invalidate, idempotencyKey: 'k', correlationId: 'c' }
     )
 
     expect(invalidate).not.toHaveBeenCalled()

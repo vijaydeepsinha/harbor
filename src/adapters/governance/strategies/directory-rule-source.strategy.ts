@@ -4,7 +4,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, extname } from 'node:path'
 import type { Logger } from '../../../core/types/logger.types.js'
-import type { GovernanceRuleDocument, GovernanceRuleSource } from '../rule-source.js'
+import type { GovernanceRuleDocument, GovernanceRuleSource } from '../../../spi/governance/rule-source.js'
 
 const RULE_FILE_EXTENSIONS: ReadonlyArray<string> = ['.yaml', '.yml', '.json']
 

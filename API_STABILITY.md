@@ -43,20 +43,27 @@ What an `api_execute` program sees is stable: `api.request({ method, path, param
 
 ---
 
-### `src/spi/` and `src/core/types/` — Extension Contracts
+### `src/spi/` — Extension Contracts
 
 Adding a required member to any of these is a breaking change for every downstream implementor.
+
+Before the first 1.0.0 release, the greenfield source layout was cleaned up:
+provider interfaces moved from core to SPI, concrete strategies to adapters,
+auth orchestration/parsing to `src/runtime/auth/`, and the shared cache base
+to `src/adapters/auth/abstract-token-cache.ts`. Former source/deep-import paths
+were removed, not re-exported. Consumers of development builds must update
+imports; interface members and runtime behaviour did not change.
 
 | Interface | File | Members | Status |
 |-----------|------|---------|--------|
 | `ConnectorAPI` | `src/spi/connector/connector-api.ts` | `request(apiRequest, ctx): Promise<ApiResponse>` | ✅ |
-| `AuthStrategy` | `src/core/types/auth.types.ts` | `name`, `validate(token)`, `refresh?(refreshToken, currentAccessToken?)`, `tokenRefreshBufferSec?` | ✅ |
-| `TokenCacheStrategy` | `src/core/types/auth.types.ts` | `name`, `hashToken`, `getOrValidate`, `get`, `update`, `invalidate`, `destroy` | ✅ |
-| `AbstractTokenCache` | `src/spi/auth/abstract-token-cache.ts` | Base class — implement `name`, `readEntry`, `writeEntry`, `deleteEntry`, `destroy` | ✅ |
-| `IdempotencyStrategy` | `src/core/types/idempotency.types.ts` | `name`, `checkAndExecute(key, fn, ttlMs)`, `generateKey(userIdHash)` | ✅ |
-| `CircuitBreakerStrategy` | `src/core/types/circuit-breaker.types.ts` | `name`, `check(endpoint)`, `recordSuccess`, `recordFailure`, `getState` | ✅ |
-| `PermissionGuard` | `src/core/types/permission.types.ts` | `filterSpec(spec, token)`, `canExecute(endpoint, method, token)` | ✅ |
-| `SpecLoaderStrategy` | `src/core/types/spec.types.ts` | `name`, `load(): Promise<OpenAPISpec>` | ✅ |
+| `AuthStrategy` | `src/spi/auth/auth-strategy.ts` | `name`, `validate(token)`, `refresh?(refreshToken, currentAccessToken?)`, `tokenRefreshBufferSec?` | ✅ |
+| `TokenCacheStrategy` | `src/spi/auth/token-cache.ts` | `name`, `hashToken`, `getOrValidate`, `get`, `update`, `invalidate`, `destroy` | ✅ |
+| `AbstractTokenCache` | `src/adapters/auth/abstract-token-cache.ts` | Base class — implement `name`, `readEntry`, `writeEntry`, `deleteEntry`, `destroy` | ✅ |
+| `IdempotencyStrategy` | `src/spi/idempotency/idempotency-strategy.ts` | `name`, `checkAndExecute(key, fn, ttlMs)`, `generateKey(userIdHash)` | ✅ |
+| `CircuitBreakerStrategy` | `src/spi/resilience/circuit-breaker.ts` | `name`, `check(endpoint)`, `recordSuccess`, `recordFailure`, `getState` | ✅ |
+| `PermissionGuard` | `src/spi/permissions/permission-guard.ts` | `filterSpec(spec, token)`, `canExecute(endpoint, method, token)` | ✅ |
+| `SpecLoaderStrategy` | `src/spi/spec/spec-loader.ts` | `name`, `load(): Promise<OpenAPISpec>` | ✅ |
 | `AuditSink` | `src/spi/observability/audit-sink.ts` | `name`, `write(event)`, `close?()` | ✅ |
 | `ExecutionPersistence` | `src/spi/execution/execution-store.ts` | `name`, `destroy?` plus the execution, activity, approval, decision and lock stores it extends | 🟡 |
 | `GovernanceRuleSource` | `src/spi/governance/rule-source.ts` | `name`, `load(): Promise<GovernanceRuleDocument[]>` (throws rather than return part of a set) | 🟡 |
@@ -71,7 +78,7 @@ Adding a required member to any of these is a breaking change for every downstre
 |--------|------|-------|
 | `GlobalConfig` | `src/core/types/config.types.ts` | The validated shape every env var maps to |
 | `ApiRequest` / `ApiResponse` | `src/core/types/connector.types.ts` | Shared between the sandbox bridge and `ConnectorAPI` |
-| `ExecuteRequestContext` | `src/core/types/connector.types.ts` | Passed from the bridge to `ConnectorAPI`: token payload, `invalidate`, idempotency key and TTL, correlation, session and client ids, `endpoint` (the breaker key), `signal` |
+| `ExecuteRequestContext` | `src/core/types/connector.types.ts` | Passed from the bridge to `ConnectorAPI`: token payload, `invalidate`, idempotency key and TTL, correlation and client ids, `endpoint` (the breaker key), `signal` |
 | `TOOL` | `src/core/constants.ts` | Tool names used in MCP tool registration |
 | `ERR` | `src/core/constants.ts` | Error codes clients receive — see [Error codes](#error-codes) |
 | `HTTP_ROUTES`, `HTTP_HEADER` | `src/core/constants.ts` | The gateway's routes and the headers it sends and reads |
@@ -83,7 +90,7 @@ Env var names are not constants: they are the keys of the Zod schema in `src/cor
 ### External Registration API
 
 ```typescript
-// src/wiring/strategy-builders.ts (re-exported by src/runtime/gateway/strategy-builders.ts)
+// src/wiring/strategy-builders.ts
 registerTokenCacheBackend(type: string, factory: TokenCacheFactory): void            // ✅
 registerIdempotencyBackend(type: string, factory: IdempotencyFactory): void          // ✅
 registerAuditSinkBackend(type: string, factory: AuditSinkFactory): void              // ✅
@@ -143,7 +150,7 @@ All fields documented in `docs/service-onboarding.md` are stable. Additions are 
 | `GET /health` | ✅ | `{ status, protocolVersion, services }` |
 | `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp`, `/mcp/.well-known/oauth-protected-resource` | ✅ | RFC 9728 metadata; served only when `HARBOR_RESOURCE_URI` is set, else `404` |
 | `GET /executions/{id}` | 🟡 | Inspection; owner-bound (`401`/`503` on bearer failure, `403 AUTH_FAILED` for another principal, `404 EXECUTION_NOT_FOUND`) |
-| `POST /executions/{id}/approvals/{approvalId}` | 🟡 | Fallback approval: `{ action: accept \| decline \| cancel, approve?, comment? }`; `400` bad body or a decision that no longer applies, `404` unknown approval, `409` already decided or locked, `413` over 64 KiB |
+| `POST /executions/{id}/approvals/{approvalId}` | 🟡 | Fallback approval: `{ action: accept \| decline \| cancel, approve?, comment? }` (`approve`: a boolean or a word from `APPROVAL_ANSWER_WORDS`); `400` bad body or a decision that no longer applies, `404` unknown approval, `409` already decided or locked, `413` over 64 KiB |
 
 Error bodies from these routes are `{ error, code, … }` with `code` from `ERR`.
 
@@ -153,8 +160,8 @@ Error bodies from these routes are `{ error, code, … }` with `code` from `ERR`
 |---------|--------|-------|
 | `io.modelcontextprotocol/serverInfo` in response `_meta` | ✅ | Protocol-defined; `{ name: "harbor", version }` |
 | `harbor/execution-id`, `harbor/execution-status`, `harbor/approval-id` (`_meta`) | 🟡 | `META_PREFIX` (`src/core/constants.ts`) is a placeholder until the project's public name is settled; `harbor/execution-id` in a request `_meta` resumes an execution |
-| `input_required` approval form (input key `approval`; `approve` boolean, `comment`) | 🟡 | The MRTR pattern is the protocol's; the form content is Harbor's |
-| Outbound `Authorization`, `Content-Type`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID`, `X-Idempotency-Key`, `X-Correlation-ID` | ✅ | Header names. Values are not frozen: `X-Correlation-ID` is the execution id in a governed run, and the idempotency key format (`mcp-{service}-{executionId}-{sequence}`) changed in 1.0.0 |
+| `input_required` approval form (input key `approval`; `approve` boolean — the listed answer words are accepted too — and `comment`) | 🟡 | The MRTR pattern is the protocol's; the form content is Harbor's |
+| Outbound `Authorization`, `Content-Type`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-Idempotency-Key`, `X-Correlation-ID` | ✅ | Header names. Values are not frozen: `X-Correlation-ID` is the execution id in a governed run, and the idempotency key format (`mcp-{service}-{executionId}-{sequence}`) changed in 1.0.0 |
 | Outbound `X-Harbor-Server-ID` (`HARBOR_SERVER_ID`), `X-Harbor-Client-ID` (forwarded from the caller) | 🟡 | New in 1.0.0 |
 
 ### Error Codes
@@ -164,7 +171,7 @@ Error bodies from these routes are `{ error, code, … }` with `code` from `ERR`
 | Codes | Status |
 |-------|--------|
 | `UNKNOWN`, `UNKNOWN_SERVICE`, `UNKNOWN_SKILL`, `AUTH_FAILED`, `MISSING_TOKEN`, `TOKEN_EXPIRED`, `TOKEN_INVALID`, `SESSION_EXPIRED`, `INTROSPECTION_FAILED`, `API_ERROR`, `CIRCUIT_OPEN`, `PERMISSION_DENIED`, `CALL_LIMIT_EXCEEDED`, `CONCURRENT_LIMIT_EXCEEDED`, `SANDBOX_INTERNAL_ERROR`, `SANDBOX_TIMEOUT`, `SANDBOX_MEMORY`, `SANDBOX_SYNTAX`, `SANDBOX_RUNTIME`, `INVALID_API_REQUEST`, `NOT_FOUND`, `PAYLOAD_TOO_LARGE`, `INTERNAL` | ✅ |
-| `APPROVAL_REQUIRED`, `GOVERNANCE_DENIED`, `REPLAY_DIVERGED`, `EXECUTION_LOCKED`, `EXECUTION_NOT_FOUND`, `EXECUTION_NOT_RESUMABLE`, `EXECUTION_CANCELLED`, `ACTIVITY_OUTCOME_UNKNOWN`, `APPROVAL_NOT_FOUND`, `APPROVAL_ALREADY_DECIDED` | 🟡 |
+| `APPROVAL_REQUIRED`, `GOVERNANCE_DENIED`, `REPLAY_DIVERGED`, `EXECUTION_LOCKED`, `EXECUTION_NOT_FOUND`, `EXECUTION_NOT_RESUMABLE`, `EXECUTION_CANCELLED`, `ACTIVITY_OUTCOME_UNKNOWN`, `RUN_OUTCOME_NOT_RECORDED`, `APPROVAL_NOT_FOUND`, `APPROVAL_ALREADY_DECIDED` | 🟡 |
 
 The domain errors carrying them all expose `code` and `retryable`: `SandboxError` (`src/core/types/sandbox-error.types.ts`), `AuthError` (`src/core/types/auth.types.ts`), `ExecutionError` (`src/core/types/execution.types.ts`), plus `PermissionDeniedError`, `CircuitOpenError` and `ApiError` (`src/runtime/api-client/api-client.ts`). Class names are ⚠️ Internal; the codes are the contract.
 

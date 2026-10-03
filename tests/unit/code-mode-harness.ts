@@ -19,8 +19,8 @@ import { governanceRuleSchema } from '../../src/runtime/governance/rule-schema.j
 import type { GovernanceRuntime } from '../../src/runtime/execution/governance-runtime.js'
 import type { ExecutionPersistence } from '../../src/spi/execution/execution-store.js'
 import type { LoadedRule } from '../../src/runtime/governance/rule-loader.js'
-import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
-import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import { noopCircuitBreaker } from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { forwardTokenPermissionGuard } from '../../src/adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
 import type { ConnectorAPI, ApiRequest, ExecuteRequestContext } from '../../src/spi/connector/connector-api.js'
 import type { ServiceRegistry, ServiceResources } from '../../src/runtime/registry/service-registry.js'
 import type { MetricsRegistry } from '../../src/runtime/observability/metrics.js'
@@ -160,7 +160,8 @@ export function makeCtx(opts: FakeCtxOptions = {}): ServerContext {
 export async function retryCtx(
   governanceRuntime: GovernanceRuntime,
   inputRequiredResult: Record<string, unknown>,
-  answer: { action: 'accept' | 'decline' | 'cancel'; approve?: boolean; comment?: string } | undefined,
+  /** `approve` may be a word ("yes") as well as a boolean — see readApprovalAnswer. */
+  answer: { action: 'accept' | 'decline' | 'cancel'; approve?: boolean | string; comment?: string } | undefined,
   requestId = '2'
 ): Promise<ServerContext> {
   const wire = inputRequiredResult['requestState'] as string

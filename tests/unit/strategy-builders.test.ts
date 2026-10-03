@@ -15,7 +15,7 @@ import type { ExecutionPersistence } from '../../src/spi/execution/execution-sto
 import { STORE_TYPE } from '../../src/core/constants.js'
 import { InMemoryTokenCache } from '../../src/adapters/auth/strategies/in-memory-token-cache.strategy.js'
 import { InMemoryIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
-import { NoopIdempotencyStrategy } from '../../src/spi/idempotency/strategies/noop-idempotency.strategy.js'
+import { NoopIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/noop-idempotency.strategy.js'
 
 vi.mock('memjs', () => ({
   default: { Client: { create: vi.fn(() => ({ get: vi.fn(), set: vi.fn() })) } }

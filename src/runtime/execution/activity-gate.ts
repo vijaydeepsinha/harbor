@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import type { ApiRequest } from '../../spi/connector/connector-api.js'
-import { ERR, ACTIVITY_STATUS, type AllowedHttpMethod } from '../../core/constants.js'
+import { ERR, ACTIVITY_STATUS, ACTIVITY_ADMISSION, BRIDGE_VIOLATION, GOVERNANCE_DECISION, type AllowedHttpMethod } from '../../core/constants.js'
 import type {
   ActivityRequestRecord,
   ActivityResponseRecord,
@@ -18,9 +18,9 @@ import type { ResolvedOperation } from '../governance/operation-resolver.js'
  * acts on the verdict.
  */
 export type GovernanceVerdict =
-  | { decision: 'ALLOW' }
-  | { decision: 'DENY'; reason: string; matchedRules: string[] }
-  | { decision: 'REQUIRE_APPROVAL'; approvalId: string; summary: ApprovalSummary }
+  | { decision: typeof GOVERNANCE_DECISION.ALLOW }
+  | { decision: typeof GOVERNANCE_DECISION.DENY; reason: string; matchedRules: string[] }
+  | { decision: typeof GOVERNANCE_DECISION.REQUIRE_APPROVAL; approvalId: string; summary: ApprovalSummary }
 
 /**
  * Durable-execution hooks the tool layer supplies for governed runs. Absent
@@ -37,19 +37,19 @@ export interface ExecutionBridge {
 
 /** Why an activity may not proceed. Each one stops the run (see the bridge's run-stopping violations). */
 export type ActivityStop =
-  | { kind: 'approvalRequired'; sequence: number; approvalId: string; summary: ApprovalSummary }
-  | { kind: 'governanceDenied'; sequence: number; reason: string; matchedRules: string[] }
-  | { kind: 'cancelled'; sequence: number }
-  | { kind: 'outcomeUnknown'; sequence: number; label: string }
+  | { kind: typeof BRIDGE_VIOLATION.APPROVAL_REQUIRED; sequence: number; approvalId: string; summary: ApprovalSummary }
+  | { kind: typeof BRIDGE_VIOLATION.GOVERNANCE_DENIED; sequence: number; reason: string; matchedRules: string[] }
+  | { kind: typeof BRIDGE_VIOLATION.CANCELLED; sequence: number }
+  | { kind: typeof BRIDGE_VIOLATION.OUTCOME_UNKNOWN; sequence: number; label: string }
 
 /** The gate's answer for one encountered call. */
 export type ActivityAdmission =
   /** Already COMPLETED in an earlier run: hand back the recorded response, make no external call. */
-  | { kind: 'replay'; sequence: number; response: ActivityResponseRecord }
+  | { kind: typeof ACTIVITY_ADMISSION.REPLAY; sequence: number; response: ActivityResponseRecord }
   /** Make the call. `approvalId` is set when a human approved it. */
-  | { kind: 'execute'; sequence: number; request: ActivityRequestRecord; approvalId?: string }
+  | { kind: typeof ACTIVITY_ADMISSION.EXECUTE; sequence: number; request: ActivityRequestRecord; approvalId?: string }
   /** Do not make the call; `code`/`message` are what the program sees. */
-  | { kind: 'stop'; stop: ActivityStop; code: string; message: string }
+  | { kind: typeof ACTIVITY_ADMISSION.STOP; stop: ActivityStop; code: string; message: string }
 
 /** HTTP-safe methods may be re-issued after a crash mid-call; everything else fails closed. */
 const SAFE_METHODS: ReadonlySet<string> = new Set(['GET'])
@@ -85,68 +85,69 @@ export class ActivityGate {
       switch (existing.status) {
         case ACTIVITY_STATUS.COMPLETED:
           // Replay: the recorded response stands in for the external call (Invariant 4/10).
-          return { kind: 'replay', sequence, response: existing.response as ActivityResponseRecord }
+          return { kind: ACTIVITY_ADMISSION.REPLAY, sequence, response: existing.response as ActivityResponseRecord }
         case ACTIVITY_STATUS.APPROVED:
-          return { kind: 'execute', sequence, request, ...(existing.approvalId !== undefined ? { approvalId: existing.approvalId } : {}) }
+          return { kind: ACTIVITY_ADMISSION.EXECUTE, sequence, request, ...(existing.approvalId !== undefined ? { approvalId: existing.approvalId } : {}) }
         case ACTIVITY_STATUS.WAITING_APPROVAL:
           return {
-            kind: 'stop',
-            stop: { kind: 'approvalRequired', sequence, approvalId: existing.approvalId ?? '', summary: summaryOf(request, journal.service) },
+            kind: ACTIVITY_ADMISSION.STOP,
+            stop: { kind: BRIDGE_VIOLATION.APPROVAL_REQUIRED, sequence, approvalId: existing.approvalId ?? '', summary: summaryOf(request, journal.service) },
             code: ERR.APPROVAL_REQUIRED, message: `Activity #${sequence} is waiting for approval`
           }
         case ACTIVITY_STATUS.DENIED:
           return {
-            kind: 'stop', stop: { kind: 'governanceDenied', sequence, reason: 'Activity was denied', matchedRules: [] },
+            kind: ACTIVITY_ADMISSION.STOP, stop: { kind: BRIDGE_VIOLATION.GOVERNANCE_DENIED, sequence, reason: 'Activity was denied', matchedRules: [] },
             code: ERR.GOVERNANCE_DENIED, message: `Activity #${sequence} was denied`
           }
         case ACTIVITY_STATUS.CANCELLED:
           return {
-            kind: 'stop', stop: { kind: 'cancelled', sequence },
+            kind: ACTIVITY_ADMISSION.STOP, stop: { kind: BRIDGE_VIOLATION.CANCELLED, sequence },
             code: ERR.EXECUTION_CANCELLED, message: `Activity #${sequence} was cancelled`
           }
         case ACTIVITY_STATUS.FAILED:
           return {
-            kind: 'stop', stop: { kind: 'outcomeUnknown', sequence, label },
+            kind: ACTIVITY_ADMISSION.STOP, stop: { kind: BRIDGE_VIOLATION.OUTCOME_UNKNOWN, sequence, label },
             code: ERR.ACTIVITY_OUTCOME_UNKNOWN, message: `Activity #${sequence} failed in a previous run`
           }
         case ACTIVITY_STATUS.EXECUTING:
           if (!SAFE_METHODS.has(existing.request.method)) {
             return {
-              kind: 'stop', stop: { kind: 'outcomeUnknown', sequence, label },
+              kind: ACTIVITY_ADMISSION.STOP, stop: { kind: BRIDGE_VIOLATION.OUTCOME_UNKNOWN, sequence, label },
               code: ERR.ACTIVITY_OUTCOME_UNKNOWN, message: `Activity #${sequence} was in flight when a previous run ended`
             }
           }
-          return { kind: 'execute', sequence, request } // safe method: re-execute
+          return { kind: ACTIVITY_ADMISSION.EXECUTE, sequence, request } // safe method: re-execute
       }
     }
 
     if (this.bridge.decide) {
       const verdict = await this.bridge.decide(sequence, request)
-      if (verdict.decision === 'DENY') {
+      if (verdict.decision === GOVERNANCE_DECISION.DENY) {
         await journal.recordDenied(sequence, request)
         return {
-          kind: 'stop', stop: { kind: 'governanceDenied', sequence, reason: verdict.reason, matchedRules: verdict.matchedRules },
+          kind: ACTIVITY_ADMISSION.STOP, stop: { kind: BRIDGE_VIOLATION.GOVERNANCE_DENIED, sequence, reason: verdict.reason, matchedRules: verdict.matchedRules },
           code: ERR.GOVERNANCE_DENIED, message: `Governance denied ${label}: ${verdict.reason}`
         }
       }
-      if (verdict.decision === 'REQUIRE_APPROVAL') {
+      if (verdict.decision === GOVERNANCE_DECISION.REQUIRE_APPROVAL) {
         await journal.recordWaitingApproval(sequence, request, verdict.approvalId)
         return {
-          kind: 'stop', stop: { kind: 'approvalRequired', sequence, approvalId: verdict.approvalId, summary: verdict.summary },
+          kind: ACTIVITY_ADMISSION.STOP, stop: { kind: BRIDGE_VIOLATION.APPROVAL_REQUIRED, sequence, approvalId: verdict.approvalId, summary: verdict.summary },
           code: ERR.APPROVAL_REQUIRED, message: `Approval required for ${label}`
         }
       }
     }
-    return { kind: 'execute', sequence, request }
+    return { kind: ACTIVITY_ADMISSION.EXECUTE, sequence, request }
   }
 
   /**
    * Journals the call as EXECUTING — before it goes out (Invariant: journal
    * before call). How it ends (COMPLETED / FAILED) is recorded by the journal
-   * itself, together with the run's other call outcomes.
+   * itself, together with the run's other call outcomes. `admittedConcurrently`
+   * comes from the bridge, the only place that sees the run's other calls.
    */
-  async begin(admission: Extract<ActivityAdmission, { kind: 'execute' }>): Promise<void> {
-    await this.bridge.journal.markExecuting(admission.sequence, admission.request, admission.approvalId)
+  async begin(admission: Extract<ActivityAdmission, { kind: typeof ACTIVITY_ADMISSION.EXECUTE }>, admittedConcurrently = false): Promise<void> {
+    await this.bridge.journal.markExecuting(admission.sequence, admission.request, admission.approvalId, admittedConcurrently)
   }
 }
 

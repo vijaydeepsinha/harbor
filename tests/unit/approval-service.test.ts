@@ -2,11 +2,11 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ApprovalService } from '../../src/runtime/execution/approval-service.js'
+import { ApprovalService, readApprovalAnswer } from '../../src/runtime/execution/approval-service.js'
 import { ExecutionManager } from '../../src/runtime/execution/execution-manager.js'
 import { ActivityJournal } from '../../src/runtime/execution/activity-journal.js'
 import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-execution-store.js'
-import { APPROVAL_STATUS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR } from '../../src/core/constants.js'
+import { APPROVAL_STATUS, APPROVAL_ANSWER_WORDS, ACTIVITY_STATUS, EXECUTION_STATUS, ERR } from '../../src/core/constants.js'
 import {
   ApprovalAlreadyDecidedError,
   ApprovalAnswerInvalidError,
@@ -179,6 +179,31 @@ describe('ApprovalService', () => {
     expect((await service.get(approvalId)).status).toBe(APPROVAL_STATUS.PENDING)
     expect((await persistence.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.WAITING_APPROVAL)
     expect(await persistence.acquireLock(executionId)).toBe(true) // the lock was released
+  })
+
+  it('readApprovalAnswer: booleans and the listed words are answers; everything else is not', () => {
+    const cases: Array<[unknown, boolean | undefined]> = [
+      [true, true], [false, false],
+      ...APPROVAL_ANSWER_WORDS.APPROVE.map((w): [unknown, boolean] => [w, true]),
+      ...APPROVAL_ANSWER_WORDS.REJECT.map((w): [unknown, boolean] => [w, false]),
+      ['Yes', true], ['  APPROVED ', true], ['Proceed', true], ['No', false], [' Rejected\n', false],
+      // Not answers: a truthy value is never a yes, and a sentence is not a word from the list.
+      [undefined, undefined], [null, undefined], [1, undefined], [0, undefined], ['', undefined], ['   ', undefined],
+      ['true', undefined], ['false', undefined], ['maybe', undefined], ['yes please', undefined], ['not approved', undefined],
+      ['yes, but only the first one', undefined], [['yes'], undefined], [{ approve: true }, undefined]
+    ]
+    for (const [value, expected] of cases) {
+      expect(readApprovalAnswer(value), `approve=${JSON.stringify(value)}`).toBe(expected)
+    }
+  })
+
+  it('the words the reviewer asked for approve exactly like approve: true', async () => {
+    expect(APPROVAL_ANSWER_WORDS.APPROVE).toEqual(expect.arrayContaining(['yes', 'sure', 'proceed', 'approved']))
+    const { approvalId } = await pauseOnApproval()
+    const approve = readApprovalAnswer('Sure')
+    const { outcome } = await service.decide(approvalId, { action: 'accept', ...(approve !== undefined ? { approve } : {}), via: 'http', executionId })
+    expect(outcome).toBe('APPROVED')
+    expect((await persistence.getActivity(executionId, 1))?.status).toBe(ACTIVITY_STATUS.APPROVED)
   })
 
   it('a PENDING approval left on a finished execution cannot change it', async () => {

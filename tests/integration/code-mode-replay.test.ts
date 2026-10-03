@@ -8,8 +8,8 @@ import { AuditCollector } from '../../src/runtime/observability/audit.js'
 import { ProgressCollector } from '../../src/runtime/observability/progress.js'
 import { resolveOperation } from '../../src/runtime/governance/operation-resolver.js'
 import { InMemoryExecutionStore } from '../../src/adapters/execution/in-memory-execution-store.js'
-import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
-import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import { noopCircuitBreaker } from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { forwardTokenPermissionGuard } from '../../src/adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
 import type { ConnectorAPI, ApiRequest, ExecuteRequestContext } from '../../src/spi/connector/connector-api.js'
 import type { OpenAPISpec } from '../../src/core/types/spec.types.js'
 import type { TokenPayload } from '../../src/core/types/auth.types.js'
@@ -64,7 +64,7 @@ function makeCtx(
   return {
     tokenPayload, invalidate: async () => {}, apiClient: connector,
     circuitBreaker: noopCircuitBreaker(), permissionGuard: forwardTokenPermissionGuard(),
-    idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c', sessionId: 's',
+    idempotencyKey: 'idem', idempotencyKeyTtlMs: 1000, correlationId: 'c',
     limits: { memoryLimitMb: 64, executeTimeoutMs: 5000, searchTimeoutMs: 1000, maxApiCalls: 20, maxConcurrentCalls: 3 },
     executionBridge: {
       journal: new ActivityJournal(persistence, executionId, 'trafficking', runIndex),

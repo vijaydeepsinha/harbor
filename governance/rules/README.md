@@ -106,7 +106,7 @@ must hold):
 | Operand | Value compared |
 |---|---|
 | `field: body.budget` | a request value — `budget` ≡ `body.budget`; `body.a.b`, `query.x`, `path.id` select explicitly; arrays may be indexed (`body.tags.0`) |
-| `ratio: { numerator: body.bid, denominator: body.currentBid }` | numerator ÷ denominator — *"bid > 1.3× the current bid"* → `greater_than: 1.3` |
+| `ratio: { numerator: body.bid, denominator: body.currentBid }` | numerator ÷ denominator — *"bid > 1.3× the current bid the request states"* → `greater_than: 1.3` (both values come from the request — see *A rule sees one request*) |
 | `percent_of: { part: body.budget, whole: body.totalBudget }` | 100 × part ÷ whole — *"budget > 20% of the total"* → `greater_than: 20` |
 | `days_between: { from: body.startDate, to: body.endDate }` | days from `from` to `to` (negative if `to` is earlier) — *"end is 30 days after start"* → `equals: 30` |
 
@@ -122,11 +122,13 @@ Evaluation is a pure function of the rule and the request — no I/O, no clock:
   `not_in`: a DENY written as `{ field: body.currency, not_in: [EUR, USD] }`
   does not fire when `currency` is absent — add `{ field: body.currency,
   exists: false }` under an `anyOf` if it should.
-- **Query values compare as they travel**: on the wire every query value is
-  text (`params: { all: true }` and `?all=true` both send `all=true`), so a
-  `query.*` leaf compares text for equality (`equals: true` matches `'true'`)
-  and reads a numeric string as its number for ordering. Body and path values
-  keep their JSON types — a body string `"5000"` is not `greater_than: 1000`.
+- **Query and path values compare as they travel**: on the wire every query
+  value and path parameter is text (`params: { all: true }` and `?all=true`
+  both send `all=true`; `/campaigns/42` carries `42`), so a `query.*` or
+  `path.*` leaf compares text for equality (`equals: true` matches `'true'`,
+  `path.id: { equals: 42 }` matches the segment `42`) and reads a numeric
+  string as its number for ordering. Body values keep their JSON types — a
+  body string `"5000"` is not `greater_than: 1000`.
 - A **body passed as a JSON string** (`body: JSON.stringify({...})`) is read
   as the object it encodes: it reaches the backend as the same bytes.
 - Only the request's **own** properties are read: `constructor`, `__proto__`
@@ -134,6 +136,24 @@ Evaluation is a pure function of the rule and the request — no I/O, no clock:
 - A computed operand that **cannot be computed** — a missing or non-number
   field, a zero denominator, a date that is not strict ISO 8601 — is treated
   exactly like a missing field.
+- **A rule sees one request.** It reads the request Harbor is about to send —
+  path parameters, query and body — and nothing else: Harbor does not fetch
+  the resource's current state, and earlier calls' responses are not visible
+  to a rule. A computed operand therefore compares two values *of the same
+  request*. *"Bid raised by more than 30%"* can be written only when the
+  API's request carries the old value as well (an update that sends `bid`
+  and the `currentBid` it replaces); when the request has only the new
+  value, no rule can see the change — compare against a fixed threshold, or
+  leave the relative check to the backend, which holds the current state.
+  The program writes the request, so such a value is its claim: also cover
+  requests where the ratio cannot compute (`ratio: { numerator: body.bid,
+  denominator: body.currentBid }` with `exists: false` under an `anyOf`),
+  not just an omitted field: `null`, zero and non-numbers also invalidate
+  the ratio. Require a positive claimed current bid too (`not: { field:
+  body.currentBid, greater_than: 0 }`), so a negative denominator cannot
+  hide an increase. Keep an absolute limit the claim cannot move.
+  `governance/rules/examples/campaign-governance.yaml` (`bid-jump`,
+  `bid-ceiling`) shows both.
 - Dates are `YYYY-MM-DD` or date-times **with a zone** (`2026-03-01T09:00:00Z`,
   `…+05:30`). A zone-less date-time or an impossible date (`2026-02-30`) does
   not compute: JavaScript would read the first in the host's time zone and roll
@@ -154,7 +174,7 @@ A body field named like a tree key (`allOf`, `anyOf`, `not`, `field`, `ratio`,
 `percent_of`, `days_between`) must be written with its prefix in the
 shorthand — `body.not`, not `not`.
 
-**Limits.** At most 8 levels of nesting and 64 nodes per rule.
+**Limits.** At most 8 levels of nesting and 64 nodes per rule — counted on the tree that is evaluated, so the flat shorthand (one `allOf` plus a leaf per field) takes at most 63 fields.
 
 ## Actions
 

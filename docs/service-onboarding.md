@@ -313,7 +313,7 @@ State machine: `CLOSED → (failureThreshold consecutive failed calls) → OPEN 
 | `url` | Startup still reads the local spec file; the URL is fetched on each refresh cycle |
 | `url-with-fallback` | Startup reads the local spec file; each refresh tries the URL first and falls back to the local file |
 
-The URL is never fetched at startup (a known limitation): a service needs a local spec file to load, and with `serviceRefreshIntervalMs: 0` the URL is never fetched at all. A fetched spec is capped at 20 MB, may use only internal `#/…` `$ref`s, and its URL is redacted in logs. `url-with-fallback` with a refresh interval is the recommended production setting — the service stays up when the remote API is unavailable.
+The URL is never fetched at startup (a known limitation): a service needs a local spec file to load, and with `serviceRefreshIntervalMs: 0` the URL is never fetched at all. A fetched spec is capped at 20 MB, may use only internal `#/…` `$ref`s, and its URL is redacted in logs: query parameter names and multiplicity are kept, but **every value** is replaced with `REDACTED`, including values under arbitrary names such as `code` or `session`. Userinfo and fragments are removed (`redactUrl` in `src/core/utils/url.ts`). The origin and path remain visible; do not embed credentials there or in parameter names. `url-with-fallback` with a refresh interval is the recommended production setting — the service stays up when the remote API is unavailable.
 
 ### `sandbox`
 

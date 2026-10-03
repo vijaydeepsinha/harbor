@@ -7,7 +7,7 @@ import { toNodeHandler, type NodeMcpRequestHandler } from '@modelcontextprotocol
 import type { Logger } from '../observability/logger.js'
 import type { ServiceRegistry } from '../registry/service-registry.js'
 import type { OAuthResourceConfig } from '../../core/types/oauth.types.js'
-import { extractBearerFromRequest, bearerFailureToHttpResponse } from '../../spi/auth/bearer-authorization.js'
+import { extractBearerFromRequest, bearerFailureToHttpResponse } from '../auth/bearer-authorization.js'
 import { handleProtectedResourceMetadata } from './oauth-metadata-handler.js'
 import { readMcpRequestIdentity } from './mcp-request-identity.js'
 import { sendJson, sendGatewayError } from './send-response.js'
