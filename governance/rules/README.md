@@ -5,38 +5,64 @@ attempt. Rules answer *"is Harbor allowed to execute this operation, and under
 what conditions?"* — they are **not** Skills (which tell the agent *how* to
 accomplish a task and live under `services/<name>/skills/`).
 
-Every `*.yaml` / `*.yml` / `*.json` file **directly in this directory** is
-loaded at boot. Files in sub-directories are not — `examples/` is
-documentation. **No rule file ships here**: until you add one, every call is
-ungoverned (see [How a call is decided](#how-a-call-is-decided)).
+Governance Rules are **service-owned policy**, alongside each service's
+OpenAPI spec and agent-facing Skills. Skills explain *how* an agent should use
+the API; Governance Rules decide *whether* a backend operation may execute,
+and can require human approval. They share service ownership and lifecycle,
+but have different formats, audiences, and enforcement roles.
 
-`GOVERNANCE_RULES_DIR` unset means *this* directory — the install's own
-`governance/rules/`, whatever the working directory (like `SERVICES_DIR`); a
-value you set is resolved against the working directory. The production
-Docker image does not copy `governance/`, so mount your rules there or point
-`GOVERNANCE_RULES_DIR` at them.
+For each service, the default rule directory is
+`<serviceDir>/governance/rules/` (where `serviceDir` is that service's
+directory under `SERVICES_DIR`). Every `*.yaml` / `*.yml` / `*.json` file
+directly in that folder is loaded; nested folders are not. This repository's
+root `governance/rules/` contains documentation and examples only and is not a
+live rule source. **No active rule files ship with the demo services.**
 
-Rules do not have to ship with the deployment:
+Each service may select its own source and refresh interval in its
+`config.json`:
 
-| `GOVERNANCE_RULES_SOURCE` | Rules come from |
-|---|---|
-| `dir` (default) | the files in `GOVERNANCE_RULES_DIR` (a mounted volume or ConfigMap works) |
-| `url` | one document at `GOVERNANCE_RULES_URL` (`{ rules: [...] }`, a list, or one rule), fetched with GET within `GOVERNANCE_RULES_URL_TIMEOUT_MS`; parsed as JSON when the `Content-Type` says JSON or the URL path ends in `.json`, as YAML otherwise |
-| anything else | a source registered with `registerGovernanceRuleSourceBackend(type, factory)` (`src/wiring/strategy-builders.ts`) — object storage, a config service, a database |
+```json
+{
+  "governance": {
+    "rulesSource": "file",
+    "rulesDir": "governance/rules",
+    "rulesRefreshSec": 0
+  }
+}
+```
 
-`GOVERNANCE_RULES_REFRESH_SEC` (default `0` = load once) re-reads the source on
-that interval. A changed set is swapped in whole; a refresh that cannot reach
-the source, reads an invalid set, or reads an empty set while rules are in
-force changes nothing — the last valid set stays in force and the failure is
-logged on every attempt. A file renamed aside by a deploy, an emptied mount
-or a URL answering `rules: []` looks exactly like "no rules", so clearing
-every rule takes a restart.
+`rulesDir` is optional for the `file` source and defaults to the folder above;
+relative paths are resolved from the service directory. A service may instead
+set `rulesSource: "url"` and `rulesUrl` (one `{ rules: [...] }` document, a
+list, or one rule, fetched with GET within `rulesUrlTimeoutMs`; JSON when the
+response Content-Type says JSON or URL ends in `.json`, YAML otherwise), or
+name a source registered with `registerGovernanceRuleSourceBackend`. Settings
+are independent per service: a service can use a mounted directory while
+another uses a URL or custom source, with its own `rulesRefreshSec`.
 
-At boot there is no previous set, so an unreadable source or an invalid first
-set stops the gateway. The one exception is a rules directory that does not
-exist: the gateway starts with **no rules** and logs a warning. A refresh
-that finds the directory missing keeps the rules in force, and one that finds
-it created loads it.
+`rulesRefreshSec` defaults to `0` (load once). A changed set is swapped in
+whole; a refresh that cannot reach the source, reads an invalid set, or reads
+an empty set while rules are in force changes nothing — the last valid set
+stays in force. Clearing all rules for a service requires restarting the
+gateway.
+
+Every enabled service's source is loaded and validated during gateway
+startup. For a URL source, Harbor performs the GET before startup completes
+and uses the latest response immediately; it does not wait for the first
+periodic refresh. A failed initial URL load stops startup because no last
+valid in-memory set exists yet. Failed later refreshes keep the active set.
+
+Once a service is registered, an unknown source type, unreadable configured
+source or invalid initial rule set stops gateway startup so it cannot
+accidentally run without its intended policy. Invalid URL/refresh config
+discovered while scanning skips that service (as with other invalid service
+config); if no other service registers, the gateway exits. The default
+directory source is the exception:
+if a service's default or configured directory does not exist, that service
+starts with **no rules** and logs a warning. A refresh that finds it missing
+keeps rules in force, and one that finds it created loads it. A service marked
+`"enabled": false` is skipped before its governance source is constructed or
+read.
 
 A file holds one rule, a list of rules, or `{ rules: [...] }`:
 
@@ -65,11 +91,13 @@ What `match` names sets how broadly a rule applies:
 
 | Level | `match` names | Applies to | Example |
 |---|---|---|---|
-| **gateway** | no service, operation or path | every service | `match: { method: DELETE }` |
+| **service policy baseline** | no service, operation or path | every call governed by this service's own rule source | `match: { method: DELETE }` |
 | **service** | a `service` only | every endpoint of that service | `match: { service: trafficking }` |
 | **endpoint** | an `operation` or a `path` (incl. `/prefix/**`) | those endpoints | `match: { service: trafficking, operation: createCampaign }` |
 
-`*` (and the path `/**`) names nothing, so it does not raise a rule's level.
+Rule sources are isolated by service: a rule loaded for one service is never
+evaluated for another. Within one service's source, `*` (and the path `/**`)
+names nothing, so it does not raise a rule's level.
 It matches any *present* value: every call has a service and a path, but
 `operation: '*'` never targets a call without an `operationId` — one whose
 path the spec does not have, or whose operation declares none.
@@ -231,7 +259,7 @@ ungoverned. To fail closed, add a gateway-level rule that targets every call;
 any service or endpoint rule that matches still decides first:
 
 ```yaml
-- name: deny-everything-else         # gateway: targets every call (every call has a service)
+- name: deny-everything-else         # service-local baseline for this source
   match: { service: '*' }
   action: { type: DENY, reason: No Governance Rule allows this operation }
 ```

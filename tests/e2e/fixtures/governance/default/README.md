@@ -1,8 +1,11 @@
 # E2E Governance Rule fixtures
 
-Loaded by the `harbor` E2E instance (`GOVERNANCE_RULES_DIR` points here,
-`GOVERNANCE_DEFAULT_DECISION=ALLOW`). Files load in filename order; the numeric
-prefixes fix that order because it is the tie-break for precedence.
+The `harbor` E2E profile assigns the `commerce/` policy directory to its
+commerce service and `ops/` to its operations service through each generated
+service's `config.json`. These sets are loaded independently. Files load in
+filename order within their service; numeric prefixes fix that order because
+it is the tie-break for precedence. The gateway's process-wide fallback is
+`GOVERNANCE_DEFAULT_DECISION=ALLOW`.
 
 The default decision applies only when a rule *targets* an operation but none
 *matches* (`NO_MATCHING_RULE`). An operation no rule targets is ungoverned and

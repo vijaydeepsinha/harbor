@@ -465,9 +465,9 @@ export const EXECUTION_CODE_RETENTION = {
 } as const
 export type ExecutionCodeRetention = (typeof EXECUTION_CODE_RETENTION)[keyof typeof EXECUTION_CODE_RETENTION]
 
-/** Built-in Governance Rule sources (`GOVERNANCE_RULES_SOURCE`); others via registerGovernanceRuleSourceBackend. */
+/** Built-in per-service Governance Rule sources (`governance.rulesSource`); others via registerGovernanceRuleSourceBackend. */
 export const GOVERNANCE_RULE_SOURCE_TYPE = {
-    DIR: 'dir',
+    FILE: 'file',
     URL: 'url',
 } as const
 

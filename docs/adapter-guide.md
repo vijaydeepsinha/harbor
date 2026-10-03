@@ -28,7 +28,7 @@ All concrete strategies (including no-op defaults, file/HTTP spec loaders and ru
 | Idempotency | `src/spi/idempotency/idempotency-strategy.ts → IdempotencyStrategy` | `idempotency.type` in a service's `config.json`; `IDEMPOTENCY_TYPE` for services without an `idempotency` block | `registerIdempotencyBackend` |
 | Execution store | `src/spi/execution/execution-store.ts → ExecutionPersistence` | `EXECUTION_STORE_TYPE` | `registerExecutionStoreBackend` |
 | Audit sink | `src/spi/observability/audit-sink.ts → AuditSink` | `AUDIT_SINKS` — a comma list; every sink receives every event | `registerAuditSinkBackend` |
-| Governance Rule source | `src/spi/governance/rule-source.ts → GovernanceRuleSource` | `GOVERNANCE_RULES_SOURCE` | `registerGovernanceRuleSourceBackend` |
+| Governance Rule source | `src/spi/governance/rule-source.ts → GovernanceRuleSource` | each service's `config.json` `governance.rulesSource` | `registerGovernanceRuleSourceBackend` |
 | Outbound connector | `src/spi/connector/connector-api.ts → ConnectorAPI` | — built per service in `src/runtime/gateway/service-resources-factory.ts` | none (see [below](#writing-a-custom-outbound-connector-connectorapi)) |
 
 Auth strategies and circuit breakers are chosen from a fixed set in `src/wiring/service-wiring.ts` (`auth.type`, `circuitBreaker.type`); they have no registration hook.
@@ -67,10 +67,22 @@ TOKEN_CACHE_TYPE=redis
 IDEMPOTENCY_TYPE=postgres              # default for services without an idempotency block
 EXECUTION_STORE_TYPE=dynamo-db
 AUDIT_SINKS=console,siem
-GOVERNANCE_RULES_SOURCE=config-service
 ```
 
-or, for idempotency, per service in `config.json`:
+To fetch a service's Governance Rules from a URL, configure its `config.json`:
+
+```json
+{
+  "governance": {
+    "rulesSource": "url",
+    "rulesUrl": "https://config.example/orders/rules.yaml",
+    "rulesUrlTimeoutMs": 5000,
+    "rulesRefreshSec": 60
+  }
+}
+```
+
+Idempotency can also be selected per service:
 
 ```json
 { "idempotency": { "type": "postgres", "connectionString": "postgres://...", "idempotencyKeyTtlMs": 600000 } }
@@ -79,7 +91,7 @@ or, for idempotency, per service in `config.json`:
 **Names and failures.**
 - `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept a built-in type or a kebab-case name (`^[a-z][a-z0-9-]*$`); anything else stops boot at config validation (`src/core/config/config.ts`). No enum needs editing.
 - A well-formed name that nothing registered is refused by the builder (`Unknown … type`). For the token cache and the execution store that stops boot. For idempotency the services using that name are skipped, and the gateway exits if none are left.
-- `AUDIT_SINKS` and `GOVERNANCE_RULES_SOURCE` take any string; an unknown sink or rule source stops boot.
+- `AUDIT_SINKS` takes any string; an unknown sink stops boot. An unknown service-selected Governance Rule source or invalid initial policy stops boot.
 - The registry is consulted before the built-ins, so registering a built-in name (`memcache`) replaces that implementation.
 
 **What each factory receives:**
@@ -90,7 +102,7 @@ or, for idempotency, per service in `config.json`:
 | `IdempotencyFactory` | `(config, logger)`. From `config.json`, the service's whole `idempotency` block, extra keys included; from `IDEMPOTENCY_TYPE`, `{ type }`. Called once per service. |
 | `ExecutionStoreFactory` | `(config, logger)` with `config` = `{ type }`. |
 | `AuditSinkFactory` | `({ loggerFor })` — `loggerFor(service)` returns that service's logger. |
-| `GovernanceRuleSourceFactory` | `(governance, logger)` — the `ExecutionConfig['governance']` block (`rulesDir`, `rulesUrl`, `rulesRefreshSec`, …). |
+| `GovernanceRuleSourceFactory` | `(governance, logger)` — that service's source config (`rulesDir`, `rulesUrl`, `rulesRefreshSec`, …). |
 
 ---
 
@@ -231,8 +243,8 @@ export interface GovernanceRuleSource {
 
 **Key rules:**
 - Return the whole set or throw — never part of it. A missing document must not read as "that rule no longer exists".
-- Document order breaks precedence ties (file order for the directory source).
-- At boot a throw stops the gateway (the built-in directory source's missing directory is the one tolerated case). On a refresh (`GOVERNANCE_RULES_REFRESH_SEC` > 0) a throw keeps the last valid set, and a set that would replace non-empty rules with none is refused.
+- Document order breaks precedence ties (file order for the file source's directory).
+- Every enabled service's source is loaded before startup completes; a URL source is fetched immediately rather than waiting for its first timer. At boot, a throw stops the gateway (a missing file-source directory is the one tolerated case). On a service's refresh interval (`governance.rulesRefreshSec` > 0), a throw keeps that service's last valid set, and a set that would replace non-empty rules with none is refused.
 
 References: `src/adapters/governance/strategies/directory-rule-source.strategy.ts`, `src/adapters/governance/strategies/url-rule-source.strategy.ts`; tests: `tests/unit/governance-rule-sources.test.ts`.
 
@@ -302,7 +314,7 @@ npx vitest run tests/unit/token-cache.test.ts
 | File execution store | `src/adapters/execution/file-execution-store.ts` | `file` |
 | Memcache execution store | `src/adapters/execution/memcache-execution-store.ts` | `memcache` |
 | Console audit sink | `src/adapters/observability/console-audit-sink.ts` | `console` |
-| Directory rule source | `src/adapters/governance/strategies/directory-rule-source.strategy.ts` | `dir` |
+| File rule source | `src/adapters/governance/strategies/directory-rule-source.strategy.ts` | `file` |
 | URL rule source | `src/adapters/governance/strategies/url-rule-source.strategy.ts` | `url` |
 | No-op circuit breaker | `src/adapters/resilience/strategies/noop-circuit-breaker.strategy.ts` | `noop` |
 | Count-based circuit breaker | `src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.ts` | `count-based` |

@@ -207,20 +207,47 @@ reported "no such operation" (ungoverned, allowed).
 
 ## 6. Governance Rules
 
-Rules come from a **rule source** (`src/spi/governance/rule-source.ts`): by default
-the `*.yaml|yml|json` files directly in `GOVERNANCE_RULES_DIR` — unset, the
-install's own `governance/rules/`, whatever the working directory; no rule
-files ship there, so a fresh gateway governs nothing — or one document at
-`GOVERNANCE_RULES_URL` (`GOVERNANCE_RULES_SOURCE=url`), or a source
-registered with `registerGovernanceRuleSourceBackend`. With
-`GOVERNANCE_RULES_REFRESH_SEC` above 0 the source is re-read on that interval
-(`src/runtime/governance/rule-refresher.ts`): a changed set is swapped in
-atomically; an unreachable source, an invalid set, or an empty set that would
-replace a non-empty one keeps the last valid set (clearing every rule takes a
-restart). A rules directory that does not exist is tolerated at boot only:
-the gateway starts with no rules and logs a warning; a refresh that finds it
-missing keeps the rules in force, and one that finds it created loads it.
-Format and operators in [`governance/rules/README.md`](../governance/rules/README.md).
+Rules come from the owning service's configured source
+(`src/spi/governance/rule-source.ts`). By default, the top-level
+`*.yaml|yml|json` files in `<serviceDir>/governance/rules/` are read through
+`governance.rulesSource: "file"`; a service may instead configure a URL
+(`"url"`) or a source registered with
+`registerGovernanceRuleSourceBackend`. The source and `rulesRefreshSec` are
+configured in each service's `config.json`; relative `rulesDir` paths resolve
+against that service's directory. Each active service has an isolated rule
+store/refresher, while evaluation, approvals, execution persistence, and
+activity journaling remain in one central runtime. Rules from one service are
+never evaluated for another. A disabled service is skipped before its source
+is constructed or loaded.
+
+With `rulesRefreshSec` above 0, only that service's source is re-read on its
+interval (`src/runtime/governance/rule-refresher.ts`): a changed set is
+swapped in atomically; an unreachable source, an invalid set, or an empty set
+that would replace a non-empty one keeps that service's last valid set
+(clearing all rules takes a restart). Invalid URL/refresh config discovered
+during service scanning skips that service; an unknown source type, unreadable
+initial source, or invalid initial ruleset after registration stops boot. A missing local
+directory is tolerated at boot: that service starts with no rules and logs a
+warning; a refresh that finds it missing keeps rules in force, and one that
+finds it created loads it. Format and operators are in
+[`governance/rules/README.md`](../governance/rules/README.md).
+
+The source is loaded and validated once during startup. For `"url"`, Harbor
+fetches the endpoint before startup completes and uses that set immediately;
+the first fetch is not deferred until the periodic timer. A failed later
+refresh retains the active rules until a valid update arrives.
+
+Example service configuration:
+
+```json
+{
+  "governance": {
+    "rulesSource": "file",
+    "rulesDir": "governance/rules",
+    "rulesRefreshSec": 60
+  }
+}
+```
 
 - **Targeting** uses the service's own OpenAPI document: a call to
   `POST /campaigns/C1/activate` resolves to `operationId: activateCampaign`,
@@ -594,11 +621,6 @@ not a new guarantee that a failed disk write survived a restart.
 | `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC` | `300` | how long a crashed pod's run lock survives; must exceed the longest run |
 | `EXECUTION_CODE_RETENTION` | `DROP` | `DROP`: a terminal execution's program text is removed · `KEEP`: stored against the `executionId` |
 | `EXECUTION_RETENTION_SEC` | `86400` | seconds a finished execution and its records are kept before deletion; `0` = keep forever |
-| `GOVERNANCE_RULES_SOURCE` | `dir` | `dir` \| `url` \| a registered source type |
-| `GOVERNANCE_RULES_DIR` | `<install root>/governance/rules` | rule files for the `dir` source (top level only); a set value is relative to the working directory |
-| `GOVERNANCE_RULES_URL` | — | rule document for the `url` source |
-| `GOVERNANCE_RULES_URL_TIMEOUT_MS` | `5000` | fetch timeout for the `url` source |
-| `GOVERNANCE_RULES_REFRESH_SEC` | `0` | re-read the source every N seconds (0 = once, at boot); a failed refresh, or one that would empty a non-empty set, keeps the last valid set |
 | `GOVERNANCE_DEFAULT_DECISION` | `DENY` | a call some rule targets but none matches; calls no rule targets are allowed (`NO_GOVERNANCE`) whatever this says |
 | `GOVERNANCE_REQUEST_STATE_KEY` | *(random per process)* | ≥32-char HMAC key; required for multi-instance deployments |
 | `GOVERNANCE_APPROVAL_TTL_SEC` | `600` | how long a paused execution's `requestState` stays redeemable (the approval itself does not expire, §14) |
@@ -606,6 +628,10 @@ not a new guarantee that a failed disk write survived a restart.
 | `AUDIT_SINKS` | `console` | comma list of `console` and registered sink types; empty while audit is on stops boot |
 | `HARBOR_SERVER_ID` | `HARBOR_GATEWAY` | `X-Harbor-Server-ID` on every backend call (printable ASCII, ≤128 characters) |
 | `MCP_MAX_BODY_BYTES` | `4194304` (4 MiB) | largest `/mcp` request body; over it ⇒ `413 PAYLOAD_TOO_LARGE`. `/executions` bodies have a fixed 64 KiB cap |
+
+Each service's `config.json` independently selects its governance source and
+refresh schedule; see [Configuration](configuration.md)
+and the rule authoring [reference](../governance/rules/README.md).
 
 ## 14. Known limitations and open decisions
 
@@ -617,9 +643,10 @@ call rather than a fix.
 - **Decision:** a call no rule targets is allowed (`NO_GOVERNANCE`) even with
   `GOVERNANCE_DEFAULT_DECISION=DENY` — the default applies only to calls some
   rule targets. A path the spec does not have has no `operationId`, so only a
-  gateway- or service-level rule (or a `path` rule naming its `{id}`-collapsed
-  form) reaches it. Should unresolved operations fail closed? Until decided,
-  a deployment that must fail closed adds a gateway-level catch-all (§6).
+  service-local broad/gateway-level rule (or a `path` rule naming its
+  `{id}`-collapsed form) reaches it. Should unresolved operations fail closed?
+  Until decided, a deployment that must fail closed adds a catch-all rule to
+  each service's policy (§6).
 - Rule targets are not checked against the specs. A typo in `service`,
   `operation` or `path` loads fine and targets nothing; a spec refresh that
   renames an `operationId` or drops a path silently un-governs the rules
@@ -641,9 +668,11 @@ call rather than a fix.
   the rules in force). A stored approval never expires — only the
   `requestState` carrying it does (`GOVERNANCE_APPROVAL_TTL_SEC`), and a
   resume via `_meta["harbor/execution-id"]` is asked the same question again.
-- The production image copies no `governance/` directory, so a container runs
-  with zero rules — every call ungoverned — unless rules are mounted at
-  `GOVERNANCE_RULES_DIR` or served from a URL.
+- No active rules ship with the demo service directories. Rules are loaded
+  from the configured source for each enabled service; the root `governance/`
+  folder is documentation/examples, not a process-wide ruleset. A missing
+  default local directory leaves that service with no rules and logs a
+  warning.
 
 **Approvals and identity**
 
@@ -733,5 +762,5 @@ call rather than a fix.
 | 10 | completed POSTs never replay against the service | replay returns the stored response |
 | 11 | transport stateless | no session; per-request `McpServer` |
 | 12 | durability in the store | `ExecutionPersistence` |
-| 13 | Skills ≠ Governance Rules | separate directories, code, vocabulary |
+| 13 | Skills and Governance Rules remain distinct | same service ownership, but separate directories, formats, audiences, and evaluation paths |
 | 14 | decisions deterministic, no LLM | pure evaluator; no model dependency |

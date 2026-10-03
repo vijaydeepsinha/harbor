@@ -72,7 +72,7 @@ The smallest working file names an auth strategy:
 
 ## `config.json` — Full Reference
 
-`config.json` is not schema-validated (a known limitation): a wrong type is not caught at startup. For example, `"enabled": "false"` (a string) does **not** disable the service, and a `tls` block missing one of its three paths is silently dropped. Check field types against the tables below.
+`config.json` is not comprehensively schema-validated (a known limitation): many wrong types are not caught at startup. Governance URL and refresh values are validated during service scanning; source backend names are checked when the central runtime constructs each source. For example, `"enabled": "false"` (a string) does **not** disable the service, and a `tls` block missing one of its three paths is silently dropped. Check field types against the tables below.
 
 ### Top-level fields
 
@@ -87,6 +87,7 @@ The service key is the folder name; there is no `name` field.
 | `circuitBreaker` | object | no breaker | See [`circuitBreaker`](#circuitbreaker) |
 | `idempotency` | object | gateway default (`IDEMPOTENCY_TYPE`, `noop` unless set) | See [`idempotency`](#idempotency) |
 | `spec` | object | `{ "source": "file" }` | See [`spec`](#spec) |
+| `governance` | object | `file` source, `<serviceDir>/governance/rules`, refresh disabled | See [Governance Rules](#governance-rules) |
 | `sandbox` | object | gateway `SANDBOX_*` defaults | See [`sandbox`](#sandbox) |
 | `serviceRefreshIntervalMs` | number | `0` | Spec + skills reload interval (ms). `0` = never; otherwise an integer from `1000` to `2147483647`, or the service is skipped |
 | `serviceRefreshTimeoutMs` | number | `10000` | Timeout for each spec reload attempt; a positive integer ≤ `2147483647`, or the service is skipped |
@@ -314,6 +315,45 @@ State machine: `CLOSED → (failureThreshold consecutive failed calls) → OPEN 
 | `url-with-fallback` | Startup reads the local spec file; each refresh tries the URL first and falls back to the local file |
 
 The URL is never fetched at startup (a known limitation): a service needs a local spec file to load, and with `serviceRefreshIntervalMs: 0` the URL is never fetched at all. A fetched spec is capped at 20 MB, may use only internal `#/…` `$ref`s, and its URL is redacted in logs: query parameter names and multiplicity are kept, but **every value** is replaced with `REDACTED`, including values under arbitrary names such as `code` or `session`. Userinfo and fragments are removed (`redactUrl` in `src/core/utils/url.ts`). The origin and path remain visible; do not embed credentials there or in parameter names. `url-with-fallback` with a refresh interval is the recommended production setting — the service stays up when the remote API is unavailable.
+
+### Governance Rules
+
+Governance Rules are service-owned policy, loaded independently for each
+enabled service and evaluated by Harbor's central execution runtime. This is
+similar to Skills being attached to a service, but their role is different:
+Skills tell the agent how to use the API; Governance Rules enforce whether a
+backend call is allowed or needs approval. A disabled service never
+constructs or loads its governance source.
+
+```json
+{
+  "governance": {
+    "rulesSource": "file",
+    "rulesDir": "governance/rules",
+    "rulesRefreshSec": 60
+  }
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `rulesSource` | `"file"` | `"file"`, `"url"`, or a custom source registered with `registerGovernanceRuleSourceBackend` |
+| `rulesDir` | `<serviceDir>/governance/rules` | File source. Reads top-level YAML/YML/JSON files only. A relative path is resolved from the service directory |
+| `rulesUrl` | — | Required for `"url"`; one JSON/YAML rule document fetched at startup and each scheduled refresh |
+| `rulesUrlTimeoutMs` | `5000` | Positive timeout for the URL source |
+| `rulesRefreshSec` | `0` | Non-negative interval for this service only; `0` loads once |
+
+The URL source is fetched and validated once at startup before the gateway
+accepts calls; it does not wait for the first periodic refresh. An absent
+default file-source directory is tolerated and logs a warning; that service
+then has no rules. Invalid governance config found during scanning skips that
+service; an unknown source type, unreadable initial source or invalid initial
+rules after registration fails gateway startup. During periodic refresh, a
+source failure, invalid set, or empty set replacing a non-empty set retains
+the service's last valid rules until a valid update arrives. Root
+`governance/rules/` contains the format reference and examples, not an active
+gateway-wide policy. See [`../governance/rules/README.md`](../governance/rules/README.md)
+for rule syntax.
 
 ### `sandbox`
 

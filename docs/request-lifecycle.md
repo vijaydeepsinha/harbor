@@ -117,9 +117,11 @@ The gateway factory runs these steps once at startup:
    `ENABLE_AUDIT` is on (`true`/`1`, the default); none when it is `false`/`0`.
 
 5. **Builds the Code Mode runtime** — the execution store (`EXECUTION_STORE_TYPE`), execution
-   manager, approval service, retention sweeper, `requestState` codec, and the Governance Rules
-   from `GOVERNANCE_RULES_SOURCE`. An unreadable source or an invalid rule stops boot; a rules
-   directory that does not exist boots with no rules and a WARN (every call is then ungoverned).
+   manager, approval service, retention sweeper, `requestState` codec, and a rule source/store/
+   refresher for each registered service. Sources and refresh intervals come from that service's
+   `config.json`. An unreadable configured source or invalid initial rule stops boot; a missing
+   default local directory boots that service with no rules and a WARN. Disabled services never
+   construct or load their rule source.
 
 6. **Creates the per-request `McpServer` factory** with the five tools wired to the shared
    registry: `discover_services`, `discover_skills`, `get_skill_details`, `search_code`,

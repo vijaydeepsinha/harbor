@@ -2,7 +2,6 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import {readFileSync} from 'node:fs'
-import {fileURLToPath} from 'node:url'
 import {z} from 'zod'
 import type {
     CouchbaseConnectionConfig,
@@ -20,21 +19,12 @@ import {
     EXECUTION_CODE_RETENTION,
     EXECUTION_STORE_TYPE,
     GOVERNANCE_DECISION,
-    GOVERNANCE_RULE_SOURCE_TYPE,
     MCP_DEFAULT_HOST,
     MCP_DEFAULT_MAX_BODY_BYTES,
     MCP_DEFAULT_PORT,
     REQUEST_SOURCE_VALUE,
     STORE_TYPE
 } from '../constants.js'
-
-/**
- * `<install root>/governance/rules`: three levels up from both
- * src/core/config/config.ts and dist/core/config/config.js — the same root
- * SERVICES_DIR defaults to, so the rules are found whatever the working
- * directory the gateway was started from.
- */
-export const DEFAULT_GOVERNANCE_RULES_DIR = fileURLToPath(new URL('../../../governance/rules', import.meta.url))
 
 // ── Config-file loader ───────────────────────────────────────────────────────
 //
@@ -246,14 +236,6 @@ const GlobalConfigSchema = z.object({
     EXECUTION_CODE_RETENTION: z.enum([EXECUTION_CODE_RETENTION.DROP, EXECUTION_CODE_RETENTION.KEEP]).default(EXECUTION_CODE_RETENTION.DROP),
     // Seconds a finished (terminal) execution and all its records are kept before deletion; 0 = keep forever.
     EXECUTION_RETENTION_SEC: z.coerce.number().int().min(0).default(86_400),
-    // Unset ⇒ <install root>/governance/rules, like SERVICES_DIR (see DEFAULT_GOVERNANCE_RULES_DIR); a set value is relative to the working directory.
-    GOVERNANCE_RULES_DIR: z.string().min(1).optional(),
-    // Where rules come from: dir (GOVERNANCE_RULES_DIR), url (GOVERNANCE_RULES_URL), or a registered source type.
-    GOVERNANCE_RULES_SOURCE: z.string().min(1).default(GOVERNANCE_RULE_SOURCE_TYPE.DIR),
-    GOVERNANCE_RULES_URL: z.string().url().optional(),
-    GOVERNANCE_RULES_URL_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-    // 0 = load once at boot. A refresh that fails (unreachable, invalid) keeps the last valid rule set.
-    GOVERNANCE_RULES_REFRESH_SEC: z.coerce.number().int().min(0).default(0),
     // Fail closed where governance applies: a call some rule targets but none matches is denied.
     // Calls no rule targets are ungoverned and allowed regardless (NO_GOVERNANCE).
     GOVERNANCE_DEFAULT_DECISION: z.enum([GOVERNANCE_DECISION.ALLOW, GOVERNANCE_DECISION.DENY, GOVERNANCE_DECISION.REQUIRE_APPROVAL]).default(GOVERNANCE_DECISION.DENY),
@@ -261,6 +243,21 @@ const GlobalConfigSchema = z.object({
     GOVERNANCE_REQUEST_STATE_KEY: z.string().min(32).optional(),
     GOVERNANCE_APPROVAL_TTL_SEC: z.coerce.number().int().positive().default(600),
 }).superRefine((env, ctx) => {
+    for (const key of [
+        'GOVERNANCE_RULES_SOURCE',
+        'GOVERNANCE_RULES_DIR',
+        'GOVERNANCE_RULES_URL',
+        'GOVERNANCE_RULES_URL_TIMEOUT_MS',
+        'GOVERNANCE_RULES_REFRESH_SEC'
+    ]) {
+        if (process.env[key] !== undefined) {
+            ctx.addIssue({
+                code: 'custom',
+                path: [key],
+                message: 'rule source and refresh settings are per-service; configure them in each service config.json under "governance"'
+            })
+        }
+    }
     // Audit on with no destination would drop every record while the switch says it is on.
     if (env.ENABLE_AUDIT && env.AUDIT_SINKS.split(',').every(sink => sink.trim() === '')) {
         ctx.addIssue({
@@ -351,11 +348,6 @@ export function validateGlobalConfig(): GlobalConfig {
             store: resolveExecutionStoreConfig(env),
             retention: {code: env.EXECUTION_CODE_RETENTION, executionSec: env.EXECUTION_RETENTION_SEC},
             governance: {
-                rulesDir: env.GOVERNANCE_RULES_DIR ?? DEFAULT_GOVERNANCE_RULES_DIR,
-                rulesSource: env.GOVERNANCE_RULES_SOURCE,
-                ...(env.GOVERNANCE_RULES_URL ? {rulesUrl: env.GOVERNANCE_RULES_URL} : {}),
-                rulesUrlTimeoutMs: env.GOVERNANCE_RULES_URL_TIMEOUT_MS,
-                rulesRefreshSec: env.GOVERNANCE_RULES_REFRESH_SEC,
                 defaultDecision: env.GOVERNANCE_DEFAULT_DECISION,
                 ...(env.GOVERNANCE_REQUEST_STATE_KEY ? {requestStateKey: env.GOVERNANCE_REQUEST_STATE_KEY} : {}),
                 approvalTtlSec: env.GOVERNANCE_APPROVAL_TTL_SEC

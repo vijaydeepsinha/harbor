@@ -12,11 +12,11 @@ const silent = pino({level: 'silent'}) as unknown as Logger
 const config = (retention?: ExecutionConfig['retention']): ExecutionConfig => ({
     store: {type: 'in-memory'},
     ...(retention ? {retention} : {}),
-    governance: {rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600}
+    governance: {defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600}
 })
 
 async function codeAfterCompletion(c: ExecutionConfig): Promise<string | undefined> {
-    const governanceRuntime = await buildGovernanceRuntime(c, silent)
+    const governanceRuntime = await buildGovernanceRuntime(c, [], silent)
     const rec = await governanceRuntime.executionManager.create({
         service: 'svc',
         code: 'async () => 1',

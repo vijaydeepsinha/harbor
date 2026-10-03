@@ -33,9 +33,14 @@ services/
     config.json      ← required: at least an "auth" block; host, port, circuit breaker, …
     skills/
       my-skill.md    ← optional guidance the AI reads before calling your API
+    governance/
+      rules/
+        policy.yaml  ← optional host-enforced policy for this service
 ```
 
-See `docs/service-onboarding.md` and `docs/configuration.md` for the full `config.json` reference.
+Skills and Governance Rules are both service-owned resources, but serve different roles: Skills guide the agent; Governance Rules are evaluated by Harbor before backend calls. Configure a rule source and its refresh interval in the service's `config.json` `governance` block. Disabled services do not load their policies.
+
+See `docs/service-onboarding.md`, `docs/configuration.md` and `governance/rules/README.md` for the full `config.json` and rule format references.
 
 ## Removing the demo services
 

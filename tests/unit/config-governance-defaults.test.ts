@@ -2,16 +2,11 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
-import {tmpdir} from 'node:os'
-import {resolve} from 'node:path'
-import {fileURLToPath} from 'node:url'
 import {validateGlobalConfig} from '../../src/core/config/config.js'
 import {GOVERNANCE_DECISION} from '../../src/core/constants.js'
 
-const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
-
 describe('governance configuration defaults', () => {
-    const KEYS = ['TOKEN_CACHE_TYPE', 'IDEMPOTENCY_TYPE', 'ENABLE_AUDIT', 'AUDIT_SINKS', 'GOVERNANCE_RULES_DIR', 'GOVERNANCE_DEFAULT_DECISION', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
+    const KEYS = ['TOKEN_CACHE_TYPE', 'IDEMPOTENCY_TYPE', 'ENABLE_AUDIT', 'AUDIT_SINKS', 'GOVERNANCE_RULES_DIR', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'GOVERNANCE_DEFAULT_DECISION', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
         'EXECUTION_STORE_TYPE', 'EXECUTION_STORE_MEMCACHE_HOST', 'EXECUTION_STORE_MEMCACHE_PORT', 'EXECUTION_STORE_MEMCACHE_TIMEOUT_MS',
         'EXECUTION_STORE_MEMCACHE_KEY_PREFIX', 'EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC', 'HARBOR_SERVER_ID'] as const
     let saved: Record<string, string | undefined> = {}
@@ -31,35 +26,32 @@ describe('governance configuration defaults', () => {
         expect(validateGlobalConfig().execution.governance.defaultDecision).toBe(GOVERNANCE_DECISION.DENY)
     })
 
-    it('the default rules directory is the install root\'s governance/rules, whatever the working directory', () => {
-        const cwd = process.cwd()
+    it('keeps decision defaults and approval settings global, but does not configure a global rule source', () => {
+        const governance = validateGlobalConfig().execution.governance
+        expect(governance).toMatchObject({
+            defaultDecision: GOVERNANCE_DECISION.DENY,
+            approvalTtlSec: 600
+        })
+
+        expect(governance).not.toHaveProperty('rulesDir')
+        expect(governance).not.toHaveProperty('rulesSource')
+        expect(governance).not.toHaveProperty('rulesRefreshSec')
+    })
+
+    it('refuses legacy gateway-global rule source variables instead of silently running without those policies', () => {
+        process.env['GOVERNANCE_RULES_DIR'] = './old-global-rules'
+        const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+            throw new Error(`exit ${code}`)
+        }) as never)
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {
+        })
         try {
-            process.chdir(tmpdir())
-            expect(validateGlobalConfig().execution.governance.rulesDir).toBe(resolve(REPO_ROOT, 'governance', 'rules'))
+            expect(() => validateGlobalConfig()).toThrow('exit 1')
+            expect(String(error.mock.calls[0]?.[0])).toContain('per-service')
         } finally {
-            process.chdir(cwd)
+            exit.mockRestore()
+            error.mockRestore()
         }
-        process.env['GOVERNANCE_RULES_DIR'] = './my-rules'
-        expect(validateGlobalConfig().execution.governance.rulesDir).toBe('./my-rules')
-    })
-
-    it('rules load once from the directory by default', () => {
-        expect(validateGlobalConfig().execution.governance).toMatchObject({
-            rulesSource: 'dir',
-            rulesRefreshSec: 0,
-            rulesUrlTimeoutMs: 5000
-        })
-        expect(validateGlobalConfig().execution.governance.rulesUrl).toBeUndefined()
-    })
-
-    it('reads the url source and the refresh interval', () => {
-        process.env['GOVERNANCE_RULES_SOURCE'] = 'url'
-        process.env['GOVERNANCE_RULES_URL'] = 'https://rules.example/set.yaml'
-        process.env['GOVERNANCE_RULES_URL_TIMEOUT_MS'] = '2500'
-        process.env['GOVERNANCE_RULES_REFRESH_SEC'] = '30'
-        expect(validateGlobalConfig().execution.governance).toMatchObject({
-            rulesSource: 'url', rulesUrl: 'https://rules.example/set.yaml', rulesUrlTimeoutMs: 2500, rulesRefreshSec: 30
-        })
     })
 
     it('drops a terminal execution\'s code by default; KEEP keeps it', () => {

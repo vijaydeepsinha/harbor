@@ -137,8 +137,8 @@ describe('ExecutionRetentionSweeper', () => {
             const governanceRuntime = await buildGovernanceRuntime({
                 store: {type: 'in-memory'},
                 retention: {executionSec: 60},
-                governance: {rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600}
-            }, silent)
+                governance: {defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600}
+            }, [], silent)
             const rec = await governanceRuntime.executionManager.create({service: 'svc', code: 'c', userIdHash: 'h'})
             await governanceRuntime.executionManager.beginRun(rec.executionId)
             await governanceRuntime.executionManager.endRun(rec.executionId, {kind: 'completed', result: 1})

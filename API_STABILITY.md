@@ -98,7 +98,7 @@ registerExecutionStoreBackend(type: string, factory: ExecutionStoreFactory): voi
 registerGovernanceRuleSourceBackend(type: string, factory: GovernanceRuleSourceFactory): void // 🟡
 ```
 
-Call them once at startup, before `createMcpGateway`. A registered backend is selected by name: `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept a kebab-case registered name, a service's `config.json` `idempotency.type` may name one, `AUDIT_SINKS` lists sink names and `GOVERNANCE_RULES_SOURCE` names a rule source. An unregistered name is refused at boot: the gateway stops, except that a service whose idempotency type names nothing registered is skipped. The factory types (`TokenCacheFactory`, `IdempotencyFactory`, `AuditSinkFactory`, `ExecutionStoreFactory`, `GovernanceRuleSourceFactory`) are exported beside them and carry the same status as their register function.
+Call them once at startup, before `createMcpGateway`. A registered backend is selected by name: `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept a kebab-case registered name, a service's `config.json` `idempotency.type` may name one, `AUDIT_SINKS` lists sink names, and each service's `config.json` `governance.rulesSource` selects its rule source. An unregistered name is refused at boot: the gateway stops, except that a service whose idempotency type names nothing registered is skipped. The factory types (`TokenCacheFactory`, `IdempotencyFactory`, `AuditSinkFactory`, `ExecutionStoreFactory`, `GovernanceRuleSourceFactory`) are exported beside them and carry the same status as their register function.
 
 ---
 

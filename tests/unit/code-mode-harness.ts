@@ -137,7 +137,7 @@ export const globalConfig: GlobalConfig = {
     defaultIdempotency: {type: 'noop'},
     execution: {
         store: {type: 'in-memory'},
-        governance: {rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.ALLOW, approvalTtlSec: 600}
+        governance: {defaultDecision: GOVERNANCE_DECISION.ALLOW, approvalTtlSec: 600}
     }
 }
 
@@ -159,11 +159,12 @@ export function makeRuntime(
         contentHash: 'deadbeefcafe0000'
     })))
     return {
-        persistence, executionManager: manager, approvals, rules: ruleStore,
+        persistence, executionManager: manager, approvals,
+        rulesForService: () => ruleStore.getRules(),
         requestState: createResumeStateCodec({key: REQUEST_STATE_KEY, ttlSeconds: 600}),
         executionConfig: {
             store: {type: 'in-memory'},
-            governance: {rulesDir: '/nonexistent', defaultDecision, approvalTtlSec: 600}
+            governance: {defaultDecision, approvalTtlSec: 600}
         },
         async shutdown() {
         }

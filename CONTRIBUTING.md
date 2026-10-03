@@ -214,7 +214,7 @@ Same pattern — create under `src/adapters/idempotency/strategies/`, register w
 
 ### 4c. Execution Store, Audit Sink, Rule Source
 
-The Code Mode governance layer has three more registries in `src/wiring/strategy-builders.ts`: `registerExecutionStoreBackend` (`EXECUTION_STORE_TYPE`; run the contract suite in `tests/unit/execution-store.test.ts` against your store), `registerAuditSinkBackend` (`AUDIT_SINKS`) and `registerGovernanceRuleSourceBackend` (`GOVERNANCE_RULES_SOURCE`). See [`docs/code-mode-governance.md`](docs/code-mode-governance.md).
+The Code Mode governance layer has three more registries in `src/wiring/strategy-builders.ts`: `registerExecutionStoreBackend` (`EXECUTION_STORE_TYPE`; run the contract suite in `tests/unit/execution-store.test.ts` against your store), `registerAuditSinkBackend` (`AUDIT_SINKS`) and `registerGovernanceRuleSourceBackend` (selected by each service's `config.json` `governance.rulesSource`). See [`docs/code-mode-governance.md`](docs/code-mode-governance.md).
 
 ### 4d. Outbound Transport (ConnectorAPI)
 

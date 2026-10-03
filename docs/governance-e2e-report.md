@@ -42,7 +42,7 @@ What has changed since hand-over, so the body no longer says it:
 - The default decision is DENY and applies only to a call some rule targets but none matches (`NO_MATCHING_RULE`); a call no rule targets is ALLOW `NO_GOVERNANCE` (5928732). The §D "default ALLOW with `NO_MATCHING_RULE`" case is now `allow › should_allow_an_ungoverned_call_when_no_rule_targets_it`.
 - A resume while the approval is still pending gets the pause again rather than `EXECUTION_NOT_RESUMABLE` (4f9a832). A stale answer is not applied; the current approval is reissued (`authorization › should_not_apply_a_stale_answer_and_reissue_the_current_approval`).
 - A terminal execution's `originalCode` is dropped by default (`EXECUTION_CODE_RETENTION`, 79622ee).
-- Rules can refresh (`GOVERNANCE_RULES_REFRESH_SEC`, 66f7b41), and a `memcache` store shares the journal and run lock across pods (0a9dc25).
+- Each service can refresh its own rules using `governance.rulesRefreshSec` in `config.json` (66f7b41); a `memcache` store shares the journal and run lock across pods (0a9dc25).
 - Replay binds the approved request: `APPROVED`, `WAITING_APPROVAL` and `EXECUTING` records bind query and body as well as method and path (241d217).
 - The bridge logic the §K mutations targeted now lives in `src/runtime/sandbox/bridge-request-handler.ts` and `src/runtime/execution/activity-gate.ts` (see `TESTING.md`).
 - Per-file E2E counts in §D changed: approval 12 → 14, bypass 8 → 22, idempotency 7 → 8, protocol 24 → 25.

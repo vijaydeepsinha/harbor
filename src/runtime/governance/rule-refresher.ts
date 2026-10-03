@@ -16,9 +16,9 @@ export type RuleRefreshResult = 'swapped' | 'unchanged' | 'failed' | 'skipped'
  * Last-known-good: a refresh that cannot read the source, reads a set that
  * does not validate, or reads an empty set while rules are in force, changes
  * nothing — the previous set keeps being enforced and the failure is logged
- * on every attempt. A set is only ever swapped in
- * whole, so an evaluation never sees half an update. (At boot there is no
- * previous set: a bad first load stops the gateway instead.)
+ * on every attempt. A set is only ever swapped in whole, so an evaluation
+ * never sees half an update. (At boot there is no previous set: a bad first
+ * load stops the gateway instead.)
  */
 export class GovernanceRuleRefresher {
     private timer: ReturnType<typeof setInterval> | null = null
@@ -34,7 +34,7 @@ export class GovernanceRuleRefresher {
 
     start(): void {
         if (this.intervalSec <= 0) {
-            this.logger.info({source: this.source.name}, 'Governance rule refresh disabled (GOVERNANCE_RULES_REFRESH_SEC = 0)')
+            this.logger.info({source: this.source.name}, 'Governance rule refresh disabled (rulesRefreshSec = 0)')
             return
         }
         this.timer = setInterval(() => {

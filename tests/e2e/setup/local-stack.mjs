@@ -35,9 +35,15 @@ const TSX_ARGS = ['--import', 'tsx', 'src/index.ts']
 
 mkdirSync(LOGS, {recursive: true})
 mkdirSync(LOCAL, {recursive: true})
-const servicesDir = materializeServices(join(FIXTURES, 'services'), join(LOCAL, 'services'), {
+const servicesDir = materializeServices(join(FIXTURES, 'services'), join(LOCAL, 'services-default'), {
     host: '127.0.0.1',
-    port: MOCK_PORT
+    port: MOCK_PORT,
+    governanceProfile: join(FIXTURES, 'governance', 'default')
+})
+const strictServicesDir = materializeServices(join(FIXTURES, 'services'), join(LOCAL, 'services-strict'), {
+    host: '127.0.0.1',
+    port: MOCK_PORT,
+    governanceProfile: join(FIXTURES, 'governance', 'strict')
 })
 const executionsDir = join(LOCAL, 'executions')
 if (existsSync(executionsDir)) rmSync(executionsDir, {recursive: true, force: true})
@@ -72,7 +78,6 @@ const startMock = () => start('mock-api', process.execPath, [join(ROOT, 'tests',
 })
 const startHarbor = () => start('harbor', process.execPath, TSX_ARGS, harborEnv({
     MCP_PORT: String(HARBOR_PORT),
-    GOVERNANCE_RULES_DIR: join(FIXTURES, 'governance', 'default'),
     GOVERNANCE_DEFAULT_DECISION: 'ALLOW',
     GOVERNANCE_APPROVAL_TTL_SEC: '600',
     GOVERNANCE_REQUEST_STATE_KEY: 'e2e-request-state-key-0123456789abcdef0123456789',
@@ -81,7 +86,7 @@ const startHarbor = () => start('harbor', process.execPath, TSX_ARGS, harborEnv(
 }))
 const startStrict = () => start('harbor-strict', process.execPath, TSX_ARGS, harborEnv({
     MCP_PORT: String(STRICT_PORT),
-    GOVERNANCE_RULES_DIR: join(FIXTURES, 'governance', 'strict'),
+    SERVICES_DIR: strictServicesDir,
     GOVERNANCE_DEFAULT_DECISION: 'DENY',
     GOVERNANCE_APPROVAL_TTL_SEC: '3',
     GOVERNANCE_REQUEST_STATE_KEY: 'e2e-strict-request-state-key-0123456789abcdef01234',

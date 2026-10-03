@@ -39,6 +39,18 @@ export type ExecutionStoreBackendConfig =
     | { type: 'file'; dir: string }
     | ({ type: 'memcache'; keyPrefix?: string; lockTtlSec?: number } & MemcacheConnectionConfig)
 
+/** Per-service source and refresh settings for Governance Rules. */
+export interface GovernanceRuleSourceConfig {
+    /** Absolute path after service config resolution. */
+    rulesDir: string
+    /** `file` (default), `url`, or a registered source type. */
+    rulesSource: string
+    rulesUrl?: string
+    rulesUrlTimeoutMs: number
+    /** Seconds; 0 disables periodic refresh. */
+    rulesRefreshSec: number
+}
+
 /** Durable execution settings, including governance (see docs/code-mode-governance.md). */
 export interface ExecutionConfig {
     store: ExecutionStoreBackendConfig
@@ -50,16 +62,6 @@ export interface ExecutionConfig {
         executionSec?: number
     }
     governance: {
-        /** Directory of Governance Rule files (`*.yaml` / `*.yml` / `*.json`) for the `dir` source. Missing dir ⇒ no rules. */
-        rulesDir: string
-        /** Where rules come from: `dir` (default), `url`, or a type registered with registerGovernanceRuleSourceBackend. */
-        rulesSource?: string
-        /** Rule document URL for the `url` source. */
-        rulesUrl?: string
-        /** Fetch timeout for the `url` source. */
-        rulesUrlTimeoutMs?: number
-        /** Re-read the source every N seconds (0 / absent ⇒ load once at boot). A failed refresh keeps the last valid set. */
-        rulesRefreshSec?: number
         /**
          * Decision for a call that some rule targets (its `match` fits) but no rule
          * matches. A call no rule targets is ungoverned and always allowed

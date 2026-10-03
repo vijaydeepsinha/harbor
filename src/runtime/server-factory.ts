@@ -45,10 +45,12 @@ export async function createMcpGateway(
     // ── 3. Build service registry from scanned results ──────────────────────
     // One failing service must not take down the gateway: log, skip, continue.
     const registry = new ServiceRegistry()
+    const activeGovernanceServices: Array<{name: string; governance: (typeof scannedServices)[number]['governance']}> = []
     for (const svc of scannedServices) {
         try {
             const resources = await buildServiceResources(svc, globalConfig, tokenCacheStrategy)
             registry.register(svc.name, resources)
+            activeGovernanceServices.push({name: svc.name, governance: svc.governance})
             gatewayLogger.info(
                 {service: svc.name, skills: resources.skillStore.getSkills().length},
                 'Service registered'
@@ -83,7 +85,9 @@ export async function createMcpGateway(
     gatewayLogger.info({sinks: auditPipeline.sinkNames}, 'Audit pipeline ready')
 
     // Process-wide governance runtime: executions outlive requests and isolates.
-    const governanceRuntime = await buildGovernanceRuntime(globalConfig.execution, gatewayLogger, auditPipeline)
+    const governanceRuntime = await buildGovernanceRuntime(
+        globalConfig.execution, activeGovernanceServices, gatewayLogger, auditPipeline
+    )
 
     const createMcpServer = buildMcpServerFactory({
         registry,

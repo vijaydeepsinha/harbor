@@ -77,6 +77,52 @@ describe('scanServicesDirectory — one bad entry never takes the others down', 
         expect(scanned.map(s => s.name).sort()).toEqual(['minute', 'off'])
     })
 
+    it('defaults governance rules to the service-local folder and normalizes custom per-service source settings', async () => {
+        root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
+        service(root, 'default')
+        service(root, 'remote', {
+            governance: {
+                rulesSource: 'url',
+                rulesUrl: 'https://policy.example/remote.yaml',
+                rulesUrlTimeoutMs: 2500,
+                rulesRefreshSec: 30
+            }
+        })
+        const scanned = await scanServicesDirectory(root, silent)
+        expect(scanned.find(s => s.name === 'default')?.governance).toEqual({
+            rulesDir: join(root, 'default', 'governance', 'rules'),
+            rulesSource: 'file',
+            rulesUrlTimeoutMs: 5000,
+            rulesRefreshSec: 0
+        })
+        expect(scanned.find(s => s.name === 'remote')?.governance).toEqual({
+            rulesDir: join(root, 'remote', 'governance', 'rules'),
+            rulesSource: 'url',
+            rulesUrl: 'https://policy.example/remote.yaml',
+            rulesUrlTimeoutMs: 2500,
+            rulesRefreshSec: 30
+        })
+    })
+
+    it('does not inspect governance settings for disabled services', async () => {
+        root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
+        service(root, 'disabled', {
+            enabled: false,
+            governance: {rulesSource: 'url', rulesRefreshSec: -1}
+        })
+        service(root, 'enabled')
+        const scanned = await scanServicesDirectory(root, silent)
+        expect(scanned.map(s => s.name)).toEqual(['enabled'])
+    })
+
+    it('rejects invalid service governance refresh and URL config instead of silently disabling policy', async () => {
+        root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
+        service(root, 'bad-refresh', {governance: {rulesRefreshSec: -1}})
+        service(root, 'bad-url', {governance: {rulesSource: 'url'}})
+        const scanned = await scanServicesDirectory(root, silent)
+        expect(scanned).toEqual([])
+    })
+
     it('an unknown idempotency type is refused, not silently turned into no deduplication', async () => {
         root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
         service(root, 'svc', {idempotency: {type: 'postgres'}})

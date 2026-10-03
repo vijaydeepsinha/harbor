@@ -421,7 +421,7 @@ function makeBridge(
         journal,
         resolve: (method, rawPath) => resolveOperation(svc.specStore.getSpec(), method, rawPath),
         decide: async (sequence: number, request: ActivityRequestRecord): Promise<GovernanceVerdict> => {
-            const outcome = evaluateGovernance(governanceRuntime.rules.getRules(), {
+            const outcome = evaluateGovernance(governanceRuntime.rulesForService(svc.name), {
                 executionId: execution.executionId, activitySequence: sequence, service: svc.name,
                 method: request.method, specPath: request.specPath,
                 ...(request.operationId !== undefined ? {operationId: request.operationId} : {}),

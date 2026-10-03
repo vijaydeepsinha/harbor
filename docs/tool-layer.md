@@ -549,7 +549,8 @@ to `in-memory`):
   on the result) whose original program is persisted;
 - every `api.request()` is a journaled **activity**; on resume, completed
   activities are replayed from their stored responses and never re-executed;
-- **Governance Rules** (`governance/rules/`) decide `ALLOW` / `DENY` /
+- **Governance Rules** (each service's configured rule source, defaulting to
+  `services/<name>/governance/rules/`) decide `ALLOW` / `DENY` /
   `REQUIRE_APPROVAL` per activity before the external call;
 - `REQUIRE_APPROVAL` returns an MCP 2026-07-28 `input_required` result with a
   form elicitation and a sealed `requestState` when the client advertises

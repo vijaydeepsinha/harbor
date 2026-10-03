@@ -205,7 +205,7 @@ Correct behavior. Circuit state is kept per endpoint: the OpenAPI path template 
 
 **Which calls are governed?**
 
-Out of the box, none: no rule file ships active, so every call is allowed as `NO_GOVERNANCE`. Add YAML files to `governance/rules/` (format: [`governance/rules/README.md`](../governance/rules/README.md)); an invalid file stops boot. A call some rule targets but no rule matches gets `GOVERNANCE_DEFAULT_DECISION` (default `DENY`). A call no rule targets is allowed — including a path the spec does not describe, unless a `*` or `/**` rule covers it.
+Out of the box, no active rule file ships in the demo services, so calls are allowed as `NO_GOVERNANCE`. Put YAML/JSON policy under that service's `governance/rules/` directory, or configure its URL/custom source and refresh interval in `config.json`. The service's rules are loaded independently and evaluated by Harbor centrally; a disabled service does not load policy. An invalid initial rule stops boot. A call some rule targets but no rule matches gets `GOVERNANCE_DEFAULT_DECISION` (default `DENY`). A call no rule targets is allowed — including a path the spec does not describe, unless a `*` or `/**` rule covers it.
 
 ---
 
@@ -327,7 +327,7 @@ import { registerTokenCacheBackend } from './wiring/strategy-builders.js'
 registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCache(config, ttlMs, logger))
 ```
 
-Then set `TOKEN_CACHE_TYPE=redis` in your environment (token cache is global, not per-service). Any lower-case kebab-case name works; one nothing registered stops boot. The factory receives only `{ type }`, so the backend reads its own connection settings. `registerIdempotencyBackend` (`IDEMPOTENCY_TYPE`, or `"type"` in a service's `idempotency` block), `registerExecutionStoreBackend` (`EXECUTION_STORE_TYPE`), `registerAuditSinkBackend` (`AUDIT_SINKS`) and `registerGovernanceRuleSourceBackend` (`GOVERNANCE_RULES_SOURCE`) work the same way.
+Then set `TOKEN_CACHE_TYPE=redis` in your environment (token cache is global, not per-service). Any lower-case kebab-case name works; one nothing registered stops boot. The factory receives only `{ type }`, so the backend reads its own connection settings. `registerIdempotencyBackend` (`IDEMPOTENCY_TYPE`, or `"type"` in a service's `idempotency` block), `registerExecutionStoreBackend` (`EXECUTION_STORE_TYPE`), and `registerAuditSinkBackend` (`AUDIT_SINKS`) work the same way. `registerGovernanceRuleSourceBackend` registers a source selected per service with `config.json`'s `governance.rulesSource`.
 
 See [`adapter-guide.md`](adapter-guide.md) for complete walkthroughs.
 

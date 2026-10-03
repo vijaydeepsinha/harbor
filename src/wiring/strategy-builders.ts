@@ -5,7 +5,6 @@ import type {TokenCacheStrategy} from '../spi/auth/token-cache.js'
 import type {IdempotencyStrategy} from '../spi/idempotency/idempotency-strategy.js'
 import type {SpecLoaderStrategy} from '../spi/spec/spec-loader.js'
 import type {
-    ExecutionConfig,
     ExecutionStoreBackendConfig,
     IdempotencyBackendConfig,
     TokenCacheBackendConfig
@@ -26,6 +25,7 @@ import {fileSpec} from '../adapters/spec/strategies/file-spec-loader.strategy.js
 import {urlSpec} from '../adapters/spec/strategies/url-spec-loader.strategy.js'
 import {urlWithFallback} from '../adapters/spec/strategies/url-with-fallback-spec-loader.strategy.js'
 import type {GovernanceRuleSource} from '../spi/governance/rule-source.js'
+import type {GovernanceRuleSourceConfig} from '../core/types/config.types.js'
 import type {AuditSink} from '../spi/observability/audit-sink.js'
 import {CONSOLE_AUDIT_SINK, ConsoleAuditSink} from '../adapters/observability/console-audit-sink.js'
 import {DirectoryRuleSourceStrategy} from '../adapters/governance/strategies/directory-rule-source.strategy.js'
@@ -64,8 +64,9 @@ export type ExecutionStoreFactory = (
     logger?: Logger
 ) => ExecutionPersistence
 
+/** Builds a source using one service's rule settings. */
 export type GovernanceRuleSourceFactory = (
-    config: ExecutionConfig['governance'],
+    config: GovernanceRuleSourceConfig,
     logger?: Logger
 ) => GovernanceRuleSource
 
@@ -100,7 +101,7 @@ export function registerAuditSinkBackend(type: string, factory: AuditSinkFactory
     _auditSinkRegistry.set(type, factory)
 }
 
-/** Register a custom Governance Rule source (e.g. object storage, a config service) keyed by the GOVERNANCE_RULES_SOURCE value. */
+/** Register a custom Governance Rule source (e.g. object storage, a config service) keyed by a service's governance.rulesSource value. */
 export function registerGovernanceRuleSourceBackend(type: string, factory: GovernanceRuleSourceFactory): void {
     _ruleSourceRegistry.set(type, factory)
 }
@@ -183,23 +184,24 @@ export function buildAuditSinks(types: readonly string[], deps: AuditSinkDeps): 
     })
 }
 
+/** Creates the built-in or registered Governance Rule source for one service. */
 export function buildGovernanceRuleSource(
-    config: ExecutionConfig['governance'],
+    config: GovernanceRuleSourceConfig,
     logger?: Logger
 ): GovernanceRuleSource {
-    const type = config.rulesSource ?? GOVERNANCE_RULE_SOURCE_TYPE.DIR
+    const type = config.rulesSource ?? GOVERNANCE_RULE_SOURCE_TYPE.FILE
 
     const custom = _ruleSourceRegistry.get(type)
     if (custom) return custom(config, logger)
 
     switch (type) {
-        case GOVERNANCE_RULE_SOURCE_TYPE.DIR:
+        case GOVERNANCE_RULE_SOURCE_TYPE.FILE:
             return new DirectoryRuleSourceStrategy(config.rulesDir, logger)
         case GOVERNANCE_RULE_SOURCE_TYPE.URL:
-            if (!config.rulesUrl) throw new Error('GOVERNANCE_RULES_URL is required when GOVERNANCE_RULES_SOURCE is "url"')
+            if (!config.rulesUrl) throw new Error('governance.rulesUrl is required when governance.rulesSource is "url"')
             return new UrlRuleSourceStrategy(config.rulesUrl, config.rulesUrlTimeoutMs ?? 5000)
         default:
-            throw new Error(`Unknown governance rule source: "${type}"`)
+            throw new Error(`Unknown governance rule source "${type}" for service configuration`)
     }
 }
 

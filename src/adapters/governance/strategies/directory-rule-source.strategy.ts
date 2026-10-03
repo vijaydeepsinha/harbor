@@ -39,8 +39,8 @@ export class GovernanceRulesDirectoryAbsentError extends Error {
 }
 
 /**
- * `GOVERNANCE_RULES_SOURCE=dir` (default): rule files in `GOVERNANCE_RULES_DIR`,
- * re-read on every refresh. An absent directory throws (per the source
+ * `governance.rulesSource=file` (default): rule files in the service's
+ * `governance.rulesDir`, re-read on every refresh. An absent directory throws (per the source
  * contract, a document that cannot be read never reads as "no rules"): a
  * volume remount or a move-style deploy that briefly removes the directory
  * leaves the last valid set in force instead of turning governance off.
@@ -49,7 +49,7 @@ export class DirectoryRuleSourceStrategy implements GovernanceRuleSource {
     readonly name: string
 
     constructor(private readonly dir: string, private readonly logger?: Logger) {
-        this.name = `dir:${dir}`
+        this.name = `file:${dir}`
     }
 
     async load(): Promise<GovernanceRuleDocument[]> {

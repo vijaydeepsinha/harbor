@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import {existsSync, readdirSync, readFileSync, statSync} from 'node:fs'
-import {basename, extname, join} from 'node:path'
+import {basename, extname, join, resolve} from 'node:path'
 import matter from 'gray-matter'
 import SwaggerParser from '@apidevtools/swagger-parser'
 import type {OpenAPISpec} from '../../core/types/spec.types.js'
@@ -10,13 +10,14 @@ import type {AuthStrategy} from '../../spi/auth/auth-strategy.js'
 import type {CircuitBreakerStrategy} from '../../spi/resilience/circuit-breaker.js'
 import type {
     IdempotencyBackendConfig,
+    GovernanceRuleSourceConfig,
     SandboxOverride,
     ServiceAuthConfig,
     ServiceCircuitBreakerConfig
 } from '../../core/types/config.types.js'
 import type {PermissionGuard} from '../../spi/permissions/permission-guard.js'
 import type {Logger} from '../observability/logger.js'
-import {STORE_TYPE} from '../../core/constants.js'
+import {GOVERNANCE_RULE_SOURCE_TYPE, STORE_TYPE} from '../../core/constants.js'
 import {errorMessage} from '../../core/utils/errors.js'
 import {resolveAuth, resolveCircuitBreaker, resolvePermissionGuard} from '../../wiring/service-wiring.js'
 
@@ -49,6 +50,13 @@ interface ServiceConfig {
         source?: 'file' | 'url' | 'url-with-fallback'
         url?: string
     }
+    governance?: {
+        rulesSource?: string
+        rulesDir?: string
+        rulesUrl?: string
+        rulesUrlTimeoutMs?: number
+        rulesRefreshSec?: number
+    }
     serviceRefreshIntervalMs?: number
     serviceRefreshTimeoutMs?: number
     sandbox?: SandboxOverride
@@ -74,6 +82,7 @@ export interface ServiceDefinition {
     }
     serviceRefreshIntervalMs: number
     serviceRefreshTimeoutMs: number
+    governance: GovernanceRuleSourceConfig
     skills: SkillMetadata[]
     apiConfig: {
         protocol: 'http' | 'https'
@@ -164,6 +173,8 @@ async function scanSingleService(
         return null
     }
 
+    const governance = resolveGovernanceConfig(config.governance, serviceDir, name)
+
     // ── 3. Find and load spec ────────────────────────────────────────────────
     const specPath = findSpecFile(serviceDir)
     if (!specPath) {
@@ -227,6 +238,7 @@ async function scanSingleService(
         specSource,
         serviceRefreshIntervalMs,
         serviceRefreshTimeoutMs,
+        governance,
         skills,
         apiConfig,
         auth,
@@ -235,6 +247,40 @@ async function scanSingleService(
         ...(idempotencyBackend !== undefined ? {idempotencyBackend} : {}),
         idempotencyKeyTtlMs,
         sandboxOverride
+    }
+
+    function resolveGovernanceConfig(
+        config: ServiceConfig['governance'],
+        serviceDir: string,
+        serviceName: string
+    ): GovernanceRuleSourceConfig {
+        const rulesSource = config?.rulesSource ?? GOVERNANCE_RULE_SOURCE_TYPE.FILE
+        const rulesRefreshSec = config?.rulesRefreshSec ?? 0
+        const rulesUrlTimeoutMs = config?.rulesUrlTimeoutMs ?? 5000
+        const rulesUrl = config?.rulesUrl
+        if (!Number.isInteger(rulesRefreshSec) || rulesRefreshSec < 0 || rulesRefreshSec > Math.floor(MAX_TIMER_MS / 1000)) {
+            throw new Error(`service "${serviceName}": governance.rulesRefreshSec must be 0 or an integer from 1 to ${Math.floor(MAX_TIMER_MS / 1000)}, got ${String(rulesRefreshSec)}`)
+        }
+        if (!Number.isInteger(rulesUrlTimeoutMs) || rulesUrlTimeoutMs <= 0 || rulesUrlTimeoutMs > MAX_TIMER_MS) {
+            throw new Error(`service "${serviceName}": governance.rulesUrlTimeoutMs must be a positive integer ≤ ${MAX_TIMER_MS}, got ${String(rulesUrlTimeoutMs)}`)
+        }
+        if (rulesSource === 'url' && !rulesUrl) {
+            throw new Error(`service "${serviceName}": governance.rulesUrl is required when governance.rulesSource is "url"`)
+        }
+        if (rulesSource === 'url') {
+            try {
+                new URL(rulesUrl!)
+            } catch {
+                throw new Error(`service "${serviceName}": governance.rulesUrl must be a valid URL`)
+            }
+        }
+        return {
+            rulesDir: resolve(serviceDir, config?.rulesDir ?? 'governance/rules'),
+            rulesSource,
+            ...(rulesUrl !== undefined ? {rulesUrl} : {}),
+            rulesUrlTimeoutMs,
+            rulesRefreshSec
+        }
     }
 }
 

@@ -4,6 +4,7 @@
 import type {ExecutionConfig} from '../../core/types/config.types.js'
 import type {Logger} from '../../core/types/logger.types.js'
 import type {ExecutionPersistence} from '../../spi/execution/execution-store.js'
+import type {GovernanceRuleSourceConfig} from '../../core/types/config.types.js'
 import {
     buildExecutionStore,
     buildGovernanceRuleSource,
@@ -19,6 +20,7 @@ import {parseRuleDocuments} from '../governance/rule-loader.js'
 import {GovernanceRuleRefresher} from '../governance/rule-refresher.js'
 import {AuditPipeline, executionStateOf} from '../observability/audit-pipeline.js'
 import {errorMessage} from '../../core/utils/errors.js'
+import type {LoadedRule} from '../governance/rule-loader.js'
 
 /**
  * Shared governance runtime dependencies for execution, approvals and rules, built once per
@@ -29,14 +31,26 @@ export interface GovernanceRuntime {
     persistence: ExecutionPersistence
     executionManager: ExecutionManager
     approvals: ApprovalService
-    rules: GovernanceRuleStore
+    /** Returns the active rules for a registered service; throws for an unknown service. */
+    rulesForService(service: string): readonly LoadedRule[]
     requestState: ResumeStateCodec
     executionConfig: ExecutionConfig
 
     shutdown(): Promise<void>
 }
 
-export async function buildGovernanceRuntime(config: ExecutionConfig, logger: Logger, audit?: AuditPipeline): Promise<GovernanceRuntime> {
+/** Governance source settings for an enabled, registered service. */
+export interface ServiceGovernanceSource {
+    name: string
+    governance: GovernanceRuleSourceConfig
+}
+
+export async function buildGovernanceRuntime(
+    config: ExecutionConfig,
+    services: readonly ServiceGovernanceSource[],
+    logger: Logger,
+    audit?: AuditPipeline
+): Promise<GovernanceRuntime> {
     const persistence = buildExecutionStore(config.store, logger)
     const manager: ExecutionManager = new ExecutionManager(persistence, undefined, undefined, {
         ...(config.retention?.code !== undefined ? {codeRetention: config.retention.code} : {}),
@@ -53,49 +67,75 @@ export async function buildGovernanceRuntime(config: ExecutionConfig, logger: Lo
             }
         } : {})
     })
+    const ruleStores = new Map<string, GovernanceRuleStore>()
+    const ruleRefreshers: GovernanceRuleRefresher[] = []
+    try {
+        for (const service of services) {
+            const ruleSource = buildGovernanceRuleSource(service.governance, logger)
+            const rules = new GovernanceRuleStore()
+            const documents = await loadAtBoot(ruleSource, logger, service.name)
+            rules.swap(parseRuleDocuments(documents, logger, ruleSource.name))
+            ruleStores.set(service.name, rules)
+            ruleRefreshers.push(new GovernanceRuleRefresher(
+                ruleSource, rules, service.governance.rulesRefreshSec, logger
+            ))
+        }
+    } catch (err) {
+        await persistence.destroy?.()
+        throw err
+    }
     const retention = new ExecutionRetentionSweeper(persistence, config.retention?.executionSec ?? 0, logger)
     retention.start()
     const approvals = new ApprovalService(persistence, manager)
-    const rules = new GovernanceRuleStore()
-    // Fail loud at boot: a source that cannot be read, or a rule that does not
-    // validate, must never become "no rule". Later refreshes keep the last valid set.
-    const ruleSource = buildGovernanceRuleSource(config.governance, logger)
-    rules.swap(parseRuleDocuments(await loadAtBoot(ruleSource, logger), logger, ruleSource.name))
-    const ruleRefresher = new GovernanceRuleRefresher(ruleSource, rules, config.governance.rulesRefreshSec ?? 0, logger)
-    ruleRefresher.start()
+    for (const refresher of ruleRefreshers) refresher.start()
     const requestState = createResumeStateCodec({
         ...(config.governance.requestStateKey ? {key: config.governance.requestStateKey} : {}),
         ttlSeconds: config.governance.approvalTtlSec,
         logger
     })
     logger.info(
-        {store: persistence.name, rules: rules.describe(), defaultDecision: config.governance.defaultDecision},
+        {
+            store: persistence.name,
+            rules: Object.fromEntries(Array.from(ruleStores, ([service, store]) => [service, store.describe()])),
+            defaultDecision: config.governance.defaultDecision
+        },
         'Code Mode governance layer ready'
     )
     return {
-        persistence, executionManager: manager, approvals, rules, requestState, executionConfig: config,
+        persistence, executionManager: manager, approvals,
+        rulesForService(service: string): readonly LoadedRule[] {
+            const rules = ruleStores.get(service)
+            if (!rules) throw new Error(`No Governance Rule set is registered for service "${service}"`)
+            return rules.getRules()
+        },
+        requestState, executionConfig: config,
         async shutdown() {
             retention.stop()
-            ruleRefresher.stop()
+            for (const refresher of ruleRefreshers) refresher.stop()
             await persistence.destroy?.()
         }
     }
 }
 
 /**
- * The first load. The one tolerated failure is a rules directory that does
- * not exist yet: that boots with no rules — every call ungoverned — and says
- * so loudly, and a later refresh picks the directory up once it appears.
- * Anything else (unreadable source, invalid rule) stops the gateway.
+ * Loads the source before startup completes (including one immediate URL GET).
+ * The one tolerated failure is a file-source directory that does not exist yet:
+ * that boots with no rules — every call ungoverned — and says so loudly, and a
+ * later refresh picks the directory up once it appears. Anything else
+ * (unreadable source, invalid rule) stops the gateway.
  */
-async function loadAtBoot(source: GovernanceRuleSource, logger: Logger): Promise<GovernanceRuleDocument[]> {
+async function loadAtBoot(
+    source: GovernanceRuleSource,
+    logger: Logger,
+    serviceName: string
+): Promise<GovernanceRuleDocument[]> {
     try {
         return await source.load()
     } catch (err) {
         if (!(err instanceof GovernanceRulesDirectoryAbsentError)) throw err
         logger.warn(
-            {source: source.name},
-            'Governance rules directory does not exist — no Governance Rules are loaded, so every call is ungoverned (NO_GOVERNANCE). Set GOVERNANCE_RULES_DIR.'
+            {service: serviceName, source: source.name},
+            'Service Governance Rules directory does not exist — this service has no rules (NO_GOVERNANCE)'
         )
         return []
     }

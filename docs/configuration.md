@@ -19,7 +19,7 @@ Read at process entry (`src/index.ts`): `SERVICES_DIR`.
 Read before validation, to locate the optional config file: `MCP_CONFIG_FILE`.
 
 Parsed on every startup (`validateGlobalConfig` in `config.ts`):  
-`MCP_HOST`, `MCP_PORT`, `MCP_MAX_BODY_BYTES`, `MCP_TRANSPORT`, `MCP_TOKEN` (required when `MCP_TRANSPORT=stdio`), `AUTH_TOKEN_CACHE_TTL_MS`, `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE`, `SANDBOX_MEMORY_MB`, `SANDBOX_EXECUTE_TIMEOUT_MS`, `SANDBOX_SEARCH_TIMEOUT_MS`, `SANDBOX_MAX_API_CALLS`, `SANDBOX_MAX_CONCURRENT_CALLS`, `LOG_LEVEL`, `SERVICE_NAME`, `MCP_AGENT_NAME`, `HARBOR_SERVER_ID`, `ENVIRONMENT`, `ENABLE_AUDIT`, `AUDIT_SINKS`, `HARBOR_RESOURCE_URI`, `HARBOR_AUTH_SERVERS`, `HARBOR_SCOPES_SUPPORTED`, `EXECUTION_STORE_TYPE`, `EXECUTION_STORE_DIR`, `EXECUTION_STORE_MEMCACHE_KEY_PREFIX`, `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC`, `EXECUTION_CODE_RETENTION`, `EXECUTION_RETENTION_SEC`, `GOVERNANCE_RULES_SOURCE`, `GOVERNANCE_RULES_DIR`, `GOVERNANCE_RULES_URL`, `GOVERNANCE_RULES_URL_TIMEOUT_MS`, `GOVERNANCE_RULES_REFRESH_SEC`, `GOVERNANCE_DEFAULT_DECISION`, `GOVERNANCE_REQUEST_STATE_KEY`, `GOVERNANCE_APPROVAL_TTL_SEC`.
+`MCP_HOST`, `MCP_PORT`, `MCP_MAX_BODY_BYTES`, `MCP_TRANSPORT`, `MCP_TOKEN` (required when `MCP_TRANSPORT=stdio`), `AUTH_TOKEN_CACHE_TTL_MS`, `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE`, `SANDBOX_MEMORY_MB`, `SANDBOX_EXECUTE_TIMEOUT_MS`, `SANDBOX_SEARCH_TIMEOUT_MS`, `SANDBOX_MAX_API_CALLS`, `SANDBOX_MAX_CONCURRENT_CALLS`, `LOG_LEVEL`, `SERVICE_NAME`, `MCP_AGENT_NAME`, `HARBOR_SERVER_ID`, `ENVIRONMENT`, `ENABLE_AUDIT`, `AUDIT_SINKS`, `HARBOR_RESOURCE_URI`, `HARBOR_AUTH_SERVERS`, `HARBOR_SCOPES_SUPPORTED`, `EXECUTION_STORE_TYPE`, `EXECUTION_STORE_DIR`, `EXECUTION_STORE_MEMCACHE_KEY_PREFIX`, `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC`, `EXECUTION_CODE_RETENTION`, `EXECUTION_RETENTION_SEC`, `GOVERNANCE_DEFAULT_DECISION`, `GOVERNANCE_REQUEST_STATE_KEY`, `GOVERNANCE_APPROVAL_TTL_SEC`.
 
 Read only when the matching backend is active:
 
@@ -31,18 +31,15 @@ Read only when the matching backend is active:
 | `IDEMPOTENCY_TYPE=couchbase` | `IDEMPOTENCY_CB_HOST`, `IDEMPOTENCY_CB_PORT`, `IDEMPOTENCY_CB_BUCKET`, `IDEMPOTENCY_CB_USERNAME`, `IDEMPOTENCY_CB_PASSWORD`; optional `IDEMPOTENCY_CB_TIMEOUT_MS` |
 | `EXECUTION_STORE_TYPE=memcache` | `EXECUTION_STORE_MEMCACHE_HOST`, `EXECUTION_STORE_MEMCACHE_PORT`; optional `EXECUTION_STORE_MEMCACHE_TIMEOUT_MS`, `EXECUTION_STORE_MEMCACHE_KEY_PREFIX`, `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC` |
 | `EXECUTION_STORE_TYPE=file` | optional `EXECUTION_STORE_DIR` |
-| `GOVERNANCE_RULES_SOURCE=dir` (default) | optional `GOVERNANCE_RULES_DIR` |
-| `GOVERNANCE_RULES_SOURCE=url` | `GOVERNANCE_RULES_URL`; optional `GOVERNANCE_RULES_URL_TIMEOUT_MS` |
-
 Connection ports must be positive integers ≤ 65535 and `*_TIMEOUT_MS` values positive integers; anything else stops boot.
 
-**Kubernetes/other orchestrators:** ConfigMaps or environment files may contain extra keys for other tooling. The gateway **ignores** any env var not listed above.
+**Kubernetes/other orchestrators:** ConfigMaps or environment files may contain extra keys for other tooling. The gateway ignores unrelated env vars not listed above. The removed gateway-wide `GOVERNANCE_RULES_SOURCE`, `GOVERNANCE_RULES_DIR`, `GOVERNANCE_RULES_URL`, `GOVERNANCE_RULES_URL_TIMEOUT_MS` and `GOVERNANCE_RULES_REFRESH_SEC` variables are explicitly rejected with a migration message; configure each service's `governance` block instead.
 
 ### Registered backends
 
 `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept, besides their built-in names, the name of a backend your own entry point registered before calling `createMcpGateway` — with `registerTokenCacheBackend`, `registerIdempotencyBackend` or `registerExecutionStoreBackend` from `src/wiring/strategy-builders.ts`. The name must be lower-case kebab-case (`^[a-z][a-z0-9-]*$`). The builder resolves it; a name nothing registered is refused (for `TOKEN_CACHE_TYPE` and `EXECUTION_STORE_TYPE` the gateway exits; for `IDEMPOTENCY_TYPE` every service that relies on the default fails to build and is skipped). A registered factory receives `{ type }` only — the `*_MEMCACHE_*` / `*_CB_*` connection variables belong to the built-in backends, so a custom backend reads its own settings.
 
-`AUDIT_SINKS` and `GOVERNANCE_RULES_SOURCE` work the same way with `registerAuditSinkBackend` and `registerGovernanceRuleSourceBackend`. See [`adapter-guide.md`](adapter-guide.md).
+`AUDIT_SINKS` works the same way with `registerAuditSinkBackend`. Governance Rule sources are also registered with `registerGovernanceRuleSourceBackend`, but selected independently in each service's `config.json` under `governance.rulesSource`. See [`adapter-guide.md`](adapter-guide.md).
 
 ### Config file loader (optional)
 
@@ -184,16 +181,36 @@ When `HARBOR_RESOURCE_URI` is not set the metadata endpoints return 404 and 401 
 | `EXECUTION_STORE_DIR` | `./var/executions` | Directory for the `file` store (one JSON document per execution), relative to the working directory |
 | `EXECUTION_CODE_RETENTION` | `DROP` | `DROP`: remove a terminal execution's program text · `KEEP`: keep it stored against the `executionId` |
 | `EXECUTION_RETENTION_SEC` | `86400` | Seconds a finished execution and all its records (activities, approvals, decisions) are kept before deletion; `0` = keep forever. Paused and interrupted executions are never deleted |
-| `GOVERNANCE_RULES_SOURCE` | `dir` | Where Governance Rules come from: `dir`, `url`, or a type registered with `registerGovernanceRuleSourceBackend` |
-| `GOVERNANCE_RULES_DIR` | `<install root>/governance/rules` | Rule files for the `dir` source (`*.yaml`/`*.yml`/`*.json`, top level only — `examples/` beneath it is not read). Unset ⇒ the `governance/rules` folder at the repo or image root, whatever the working directory; a set value is relative to the working directory. An invalid file fails boot |
-| `GOVERNANCE_RULES_URL` | — | Rule document for the `url` source (required with it) |
-| `GOVERNANCE_RULES_URL_TIMEOUT_MS` | `5000` | Fetch timeout for the `url` source |
-| `GOVERNANCE_RULES_REFRESH_SEC` | `0` | Re-read the rule source every N seconds (`0` = once, at boot). An unreachable source, a vanished directory or an invalid set keeps the last valid set; so does a refresh that would replace a non-empty set with an empty one — clearing every rule takes a restart |
 | `GOVERNANCE_DEFAULT_DECISION` | `DENY` | Decision for a call that some rule targets but no rule matches: `ALLOW`, `DENY`, `REQUIRE_APPROVAL`. A call no rule targets is always allowed (`NO_GOVERNANCE`) — including a path the spec does not describe, unless a `*` or `/**` rule covers it |
 | `GOVERNANCE_REQUEST_STATE_KEY` | *(random per process)* | ≥32-character HMAC key sealing the MRTR `requestState`. Unset, a restart invalidates every outstanding `requestState`; set one shared key for multi-instance deployments |
 | `GOVERNANCE_APPROVAL_TTL_SEC` | `600` | Seconds a paused execution's `requestState` stays redeemable. Stored approvals themselves do not expire |
 
-**No rules ship active.** The repository's `governance/rules/` holds only its README and `examples/`, so out of the box every call is `NO_GOVERNANCE`. If the rules directory does not exist at boot, the gateway starts with no rules and logs a WARN saying every call is ungoverned; a later refresh picks the directory up once it appears. The production Docker image ships no `governance/rules` folder — mount one or point `GOVERNANCE_RULES_DIR` at it.
+Governance Rule source and refresh settings are **per service**, not process-level:
+
+| `config.json` field | Default | Description |
+|---|---|---|
+| `governance.rulesSource` | `file` | `file`, `url`, or a type registered with `registerGovernanceRuleSourceBackend` |
+| `governance.rulesDir` | `<serviceDir>/governance/rules` | Top-level YAML/YML/JSON files for the file source. Relative paths resolve from the service directory |
+| `governance.rulesUrl` | — | Rule document fetched at startup and on each scheduled refresh for the URL source |
+| `governance.rulesUrlTimeoutMs` | `5000` | Fetch timeout for the URL source |
+| `governance.rulesRefreshSec` | `0` | Refresh only this service's source every N seconds; `0` loads once |
+
+Example:
+
+```json
+{
+  "governance": {
+    "rulesSource": "url",
+    "rulesUrl": "https://config.example/orders/rules.yaml",
+    "rulesUrlTimeoutMs": 5000,
+    "rulesRefreshSec": 60
+  }
+}
+```
+
+Each enabled and successfully registered service gets an isolated ruleset and refresher; the central runtime still evaluates rules and controls approvals/execution. Disabled services are skipped before their governance config is validated or their source is constructed. Invalid URL/refresh config found during scanning skips that service (and startup exits if no services remain); after registration, an unknown source type, unreadable initial source, or invalid initial rules stop gateway boot. The URL source is fetched and validated once before startup completes, so the gateway starts with the latest available rules rather than waiting for the first timer tick. A missing default file-source directory starts that service with no rules and a warning; failed refreshes, invalid updates, and empty refreshes replacing active rules retain that service's last-known-good set.
+
+**No active rules ship with the demo services.** The repository's root `governance/rules/` contains the authoring reference and examples and is not loaded as a global ruleset. Put a service's local policy under `services/<name>/governance/rules/`, mount the configured directory, or configure a URL/custom source. The production Docker image includes service directories; no policy documents ship in them by default.
 
 **Several pods:** use `EXECUTION_STORE_TYPE=memcache`, one shared `GOVERNANCE_REQUEST_STATE_KEY`, and the same rule set on every pod.
 
@@ -218,6 +235,11 @@ See [`code-mode-governance.md`](code-mode-governance.md) and [`../governance/rul
 | `spec.source` / `spec.url` | `file` | See [Spec loading](#spec-loading) |
 | `serviceRefreshIntervalMs` | `0` | See [Service refresh](#service-refresh) |
 | `serviceRefreshTimeoutMs` | `10000` | See [Service refresh](#service-refresh) |
+| `governance.rulesSource` | `file` | This service's rule source: `file`, `url`, or a registered source type |
+| `governance.rulesDir` | `<serviceDir>/governance/rules` | Directory-source path, relative to the service directory when not absolute |
+| `governance.rulesUrl` | — | Rule document for this service when `rulesSource` is `url`; fetched once at startup and on each scheduled refresh |
+| `governance.rulesUrlTimeoutMs` | `5000` | URL-source timeout for this service |
+| `governance.rulesRefreshSec` | `0` | Refresh interval for this service's rules; `0` loads once |
 | `sandbox.*` | the `SANDBOX_*` env values | See [Sandbox overrides](#sandbox-overrides-per-service) |
 
 ---
@@ -267,6 +289,11 @@ An example, **not** a list of defaults. The required parts are `auth` and, for `
     "idempotencyKeyTtlMs": 600000
   },
   "spec": { "source": "file" },
+  "governance": {
+    "rulesSource": "file",
+    "rulesDir": "governance/rules",
+    "rulesRefreshSec": 60
+  },
   "serviceRefreshIntervalMs": 0,
   "serviceRefreshTimeoutMs": 10000,
   "sandbox": {
