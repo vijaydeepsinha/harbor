@@ -218,7 +218,6 @@ async function respond(apiExecuteResult: ApiExecuteResult, responder: Responder)
             // decision is part of the audit trail — under the principal that just authenticated, which
             // for a refused resume is the caller who tried, not the execution's owner. codeSubmitted
             // stays what this caller sent — never the persisted program, which may belong to someone else.
-            audit(r, {calls: NO_CALLS, executionId}, {
             // Destructure only the fields we need from the result object. This is equivalent to
             // `apiExecuteResult.refusal` and `apiExecuteResult.executionId`, but keeps the call-site concise.
             const {refusal, executionId} = apiExecuteResult
