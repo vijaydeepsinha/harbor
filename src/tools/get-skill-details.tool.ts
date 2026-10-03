@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer } from '@modelcontextprotocol/server'
-import { z } from 'zod'
-import type { ServiceRegistry } from '../runtime/registry/service-registry.js'
-import type { Logger } from '../runtime/observability/logger.js'
-import type { MetricsCollector } from '../core/types/metrics.types.js'
-import { mcpError, mcpSuccess, extractCorrelationId, resolveService, isToolError, validateAuth } from './tool-helpers.js'
-import { TOOL, LOG_PREFIX, ERR, METRIC, OUTCOME, UNKNOWN_SERVICE_LABEL } from '../core/constants.js'
+import {McpServer} from '@modelcontextprotocol/server'
+import {z} from 'zod'
+import type {ServiceRegistry} from '../runtime/registry/service-registry.js'
+import type {Logger} from '../runtime/observability/logger.js'
+import type {MetricsCollector} from '../core/types/metrics.types.js'
+import {extractCorrelationId, isToolError, mcpError, mcpSuccess, resolveService, validateAuth} from './tool-helpers.js'
+import {ERR, LOG_PREFIX, METRIC, OUTCOME, TOOL, UNKNOWN_SERVICE_LABEL} from '../core/constants.js'
 
 const DESCRIPTION = `Retrieves the full Markdown SOP for a specific skill.
 If discover_skills() returned a relevant skill, read it here to understand business rules,
@@ -23,56 +23,60 @@ Returns the complete Markdown content of the skill document — including step-b
 instructions, business rules, required fields, and constraints.`
 
 export function registerGetSkillDetailsTool(
-  server: McpServer,
-  registry: ServiceRegistry,
-  logger: Logger,
-  metrics: MetricsCollector,
-  clientToken?: string
+    server: McpServer,
+    registry: ServiceRegistry,
+    logger: Logger,
+    metrics: MetricsCollector,
+    clientToken?: string
 ): void {
-  const serviceNames = registry.serviceNames()
+    const serviceNames = registry.serviceNames()
 
-  server.registerTool(
-    TOOL.GET_SKILL_DETAILS,
-    { description: DESCRIPTION, inputSchema: z.object({ service: z.string(), skill_id: z.string() }) },
-    async ({ service, skill_id }, ctx) => {
-      const correlationId = extractCorrelationId(ctx)
+    server.registerTool(
+        TOOL.GET_SKILL_DETAILS,
+        {description: DESCRIPTION, inputSchema: z.object({service: z.string(), skill_id: z.string()})},
+        async ({service, skill_id}, ctx) => {
+            const correlationId = extractCorrelationId(ctx)
 
-      logger.info(
-        { correlationId, tool: TOOL.GET_SKILL_DETAILS, service, skill_id },
-        `${LOG_PREFIX.MCP_IN} ${TOOL.GET_SKILL_DETAILS} — fetching skill SOP`
-      )
+            logger.info(
+                {correlationId, tool: TOOL.GET_SKILL_DETAILS, service, skill_id},
+                `${LOG_PREFIX.MCP_IN} ${TOOL.GET_SKILL_DETAILS} — fetching skill SOP`
+            )
 
-      const svcResources = resolveService(registry, service, serviceNames)
-      if (isToolError(svcResources)) {
-        // The name is caller input: labelling metrics with it would mint a new series per made-up name.
-        metrics.increment(METRIC.TOOL_CALLS, { tool: TOOL.GET_SKILL_DETAILS, service: UNKNOWN_SERVICE_LABEL, outcome: OUTCOME.ERROR })
-        return svcResources
-      }
+            const svcResources = resolveService(registry, service, serviceNames)
+            if (isToolError(svcResources)) {
+                // The name is caller input: labelling metrics with it would mint a new series per made-up name.
+                metrics.increment(METRIC.TOOL_CALLS, {
+                    tool: TOOL.GET_SKILL_DETAILS,
+                    service: UNKNOWN_SERVICE_LABEL,
+                    outcome: OUTCOME.ERROR
+                })
+                return svcResources
+            }
 
-      const authResult = await validateAuth(svcResources, clientToken, correlationId, logger, TOOL.GET_SKILL_DETAILS)
-      if ('isError' in authResult) {
-        metrics.increment(METRIC.TOOL_CALLS, { tool: TOOL.GET_SKILL_DETAILS, service, outcome: OUTCOME.ERROR })
-        return authResult
-      }
+            const authResult = await validateAuth(svcResources, clientToken, correlationId, logger, TOOL.GET_SKILL_DETAILS)
+            if ('isError' in authResult) {
+                metrics.increment(METRIC.TOOL_CALLS, {tool: TOOL.GET_SKILL_DETAILS, service, outcome: OUTCOME.ERROR})
+                return authResult
+            }
 
-      const skills = svcResources.skillStore.getSkills()
-      const skill = skills.find(s => s.id === skill_id)
-      if (!skill) {
-        const available = skills.map(s => s.id).join(', ')
-        metrics.increment(METRIC.TOOL_CALLS, { tool: TOOL.GET_SKILL_DETAILS, service, outcome: OUTCOME.ERROR })
-        return mcpError(
-          `Skill "${skill_id}" not found in service "${service}". Available: ${available || '(none)'}`,
-          ERR.UNKNOWN_SKILL
-        )
-      }
+            const skills = svcResources.skillStore.getSkills()
+            const skill = skills.find(s => s.id === skill_id)
+            if (!skill) {
+                const available = skills.map(s => s.id).join(', ')
+                metrics.increment(METRIC.TOOL_CALLS, {tool: TOOL.GET_SKILL_DETAILS, service, outcome: OUTCOME.ERROR})
+                return mcpError(
+                    `Skill "${skill_id}" not found in service "${service}". Available: ${available || '(none)'}`,
+                    ERR.UNKNOWN_SKILL
+                )
+            }
 
-      logger.info(
-        { correlationId, tool: TOOL.GET_SKILL_DETAILS, service, skill_id, contentLength: skill.content.length },
-        `${LOG_PREFIX.MCP_OUT} ${TOOL.GET_SKILL_DETAILS} — full SOP returned`
-      )
+            logger.info(
+                {correlationId, tool: TOOL.GET_SKILL_DETAILS, service, skill_id, contentLength: skill.content.length},
+                `${LOG_PREFIX.MCP_OUT} ${TOOL.GET_SKILL_DETAILS} — full SOP returned`
+            )
 
-      metrics.increment(METRIC.TOOL_CALLS, { tool: TOOL.GET_SKILL_DETAILS, service, outcome: OUTCOME.SUCCESS })
-      return mcpSuccess(skill.content)
-    }
-  )
+            metrics.increment(METRIC.TOOL_CALLS, {tool: TOOL.GET_SKILL_DETAILS, service, outcome: OUTCOME.SUCCESS})
+            return mcpSuccess(skill.content)
+        }
+    )
 }

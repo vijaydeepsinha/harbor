@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { ApiRequest, ApiResponse, ExecuteRequestContext } from '../../core/types/connector.types.js'
+import type {ApiRequest, ApiResponse, ExecuteRequestContext} from '../../core/types/connector.types.js'
 
-export type { ApiRequest, ApiResponse, ExecuteRequestContext }
+export type {ApiRequest, ApiResponse, ExecuteRequestContext}
 
 /**
  * Outbound transport contract for skill code execution.
@@ -14,8 +14,8 @@ export type { ApiRequest, ApiResponse, ExecuteRequestContext }
  * backend transport without modifying sandbox code.
  */
 export interface ConnectorAPI {
-  request(
-    apiRequest: ApiRequest,
-    ctx: ExecuteRequestContext
-  ): Promise<ApiResponse>
+    request(
+        apiRequest: ApiRequest,
+        ctx: ExecuteRequestContext
+    ): Promise<ApiResponse>
 }

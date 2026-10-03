@@ -1,35 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { TokenCacheStrategy } from '../spi/auth/token-cache.js'
-import type { IdempotencyStrategy } from '../spi/idempotency/idempotency-strategy.js'
-import type { SpecLoaderStrategy } from '../spi/spec/spec-loader.js'
-import type { IdempotencyBackendConfig, TokenCacheBackendConfig, ExecutionStoreBackendConfig, ExecutionConfig } from '../core/types/config.types.js'
-import type { ExecutionPersistence } from '../spi/execution/execution-store.js'
-import { inMemoryExecutionStore } from '../adapters/execution/in-memory-execution-store.js'
-import { fileExecutionStore } from '../adapters/execution/file-execution-store.js'
-import { memcacheExecutionStore } from '../adapters/execution/memcache-execution-store.js'
-import type { Logger } from '../core/types/logger.types.js'
-import { inMemoryTokenCache } from '../adapters/auth/strategies/in-memory-token-cache.strategy.js'
-import { memcacheTokenCache } from '../adapters/auth/strategies/memcache-token-cache.strategy.js'
-import { couchbaseTokenCache } from '../adapters/auth/strategies/couchbase-token-cache.strategy.js'
-import { noopIdempotency } from '../adapters/idempotency/strategies/noop-idempotency.strategy.js'
-import { inMemoryIdempotency } from '../adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
-import { memcacheIdempotency } from '../adapters/idempotency/strategies/memcache-idempotency.strategy.js'
-import { couchbaseIdempotency } from '../adapters/idempotency/strategies/couchbase-idempotency.strategy.js'
-import { fileSpec } from '../adapters/spec/strategies/file-spec-loader.strategy.js'
-import { urlSpec } from '../adapters/spec/strategies/url-spec-loader.strategy.js'
-import { urlWithFallback } from '../adapters/spec/strategies/url-with-fallback-spec-loader.strategy.js'
-import type { GovernanceRuleSource } from '../spi/governance/rule-source.js'
-import type { AuditSink } from '../spi/observability/audit-sink.js'
-import { ConsoleAuditSink, CONSOLE_AUDIT_SINK } from '../adapters/observability/console-audit-sink.js'
-import { DirectoryRuleSourceStrategy } from '../adapters/governance/strategies/directory-rule-source.strategy.js'
-import { UrlRuleSourceStrategy } from '../adapters/governance/strategies/url-rule-source.strategy.js'
-import { STORE_TYPE, EXECUTION_STORE_TYPE, GOVERNANCE_RULE_SOURCE_TYPE } from '../core/constants.js'
+import type {TokenCacheStrategy} from '../spi/auth/token-cache.js'
+import type {IdempotencyStrategy} from '../spi/idempotency/idempotency-strategy.js'
+import type {SpecLoaderStrategy} from '../spi/spec/spec-loader.js'
+import type {
+    ExecutionConfig,
+    ExecutionStoreBackendConfig,
+    IdempotencyBackendConfig,
+    TokenCacheBackendConfig
+} from '../core/types/config.types.js'
+import type {ExecutionPersistence} from '../spi/execution/execution-store.js'
+import {inMemoryExecutionStore} from '../adapters/execution/in-memory-execution-store.js'
+import {fileExecutionStore} from '../adapters/execution/file-execution-store.js'
+import {memcacheExecutionStore} from '../adapters/execution/memcache-execution-store.js'
+import type {Logger} from '../core/types/logger.types.js'
+import {inMemoryTokenCache} from '../adapters/auth/strategies/in-memory-token-cache.strategy.js'
+import {memcacheTokenCache} from '../adapters/auth/strategies/memcache-token-cache.strategy.js'
+import {couchbaseTokenCache} from '../adapters/auth/strategies/couchbase-token-cache.strategy.js'
+import {noopIdempotency} from '../adapters/idempotency/strategies/noop-idempotency.strategy.js'
+import {inMemoryIdempotency} from '../adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
+import {memcacheIdempotency} from '../adapters/idempotency/strategies/memcache-idempotency.strategy.js'
+import {couchbaseIdempotency} from '../adapters/idempotency/strategies/couchbase-idempotency.strategy.js'
+import {fileSpec} from '../adapters/spec/strategies/file-spec-loader.strategy.js'
+import {urlSpec} from '../adapters/spec/strategies/url-spec-loader.strategy.js'
+import {urlWithFallback} from '../adapters/spec/strategies/url-with-fallback-spec-loader.strategy.js'
+import type {GovernanceRuleSource} from '../spi/governance/rule-source.js'
+import type {AuditSink} from '../spi/observability/audit-sink.js'
+import {CONSOLE_AUDIT_SINK, ConsoleAuditSink} from '../adapters/observability/console-audit-sink.js'
+import {DirectoryRuleSourceStrategy} from '../adapters/governance/strategies/directory-rule-source.strategy.js'
+import {UrlRuleSourceStrategy} from '../adapters/governance/strategies/url-rule-source.strategy.js'
+import {EXECUTION_STORE_TYPE, GOVERNANCE_RULE_SOURCE_TYPE, STORE_TYPE} from '../core/constants.js'
 
 // Synchronous directory loading and its boot error remain available to runtime
 // conveniences, without runtime importing a concrete adapter module.
-export { readRuleDirectory, GovernanceRulesDirectoryAbsentError } from '../adapters/governance/strategies/directory-rule-source.strategy.js'
+export {
+    readRuleDirectory, GovernanceRulesDirectoryAbsentError
+} from '../adapters/governance/strategies/directory-rule-source.strategy.js'
 
 // ── External backend registration ────────────────────────────────────────────
 //
@@ -42,24 +49,24 @@ export { readRuleDirectory, GovernanceRulesDirectoryAbsentError } from '../adapt
 //   registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCache(config, ttlMs))
 
 export type TokenCacheFactory = (
-  config: TokenCacheBackendConfig & Record<string, unknown>,
-  tokenCacheTtlMs: number,
-  logger?: Logger
+    config: TokenCacheBackendConfig & Record<string, unknown>,
+    tokenCacheTtlMs: number,
+    logger?: Logger
 ) => TokenCacheStrategy
 
 export type IdempotencyFactory = (
-  config: IdempotencyBackendConfig & Record<string, unknown>,
-  logger?: Logger
+    config: IdempotencyBackendConfig & Record<string, unknown>,
+    logger?: Logger
 ) => IdempotencyStrategy
 
 export type ExecutionStoreFactory = (
-  config: ExecutionStoreBackendConfig & Record<string, unknown>,
-  logger?: Logger
+    config: ExecutionStoreBackendConfig & Record<string, unknown>,
+    logger?: Logger
 ) => ExecutionPersistence
 
 export type GovernanceRuleSourceFactory = (
-  config: ExecutionConfig['governance'],
-  logger?: Logger
+    config: ExecutionConfig['governance'],
+    logger?: Logger
 ) => GovernanceRuleSource
 
 const _tokenCacheRegistry = new Map<string, TokenCacheFactory>()
@@ -69,132 +76,146 @@ const _ruleSourceRegistry = new Map<string, GovernanceRuleSourceFactory>()
 
 /** What an audit sink factory may use: the logger of the service an event belongs to. */
 export interface AuditSinkDeps {
-  loggerFor: (service: string) => Logger
+    loggerFor: (service: string) => Logger
 }
+
 export type AuditSinkFactory = (deps: AuditSinkDeps) => AuditSink
 const _auditSinkRegistry = new Map<string, AuditSinkFactory>()
 
 export function registerTokenCacheBackend(type: string, factory: TokenCacheFactory): void {
-  _tokenCacheRegistry.set(type, factory)
+    _tokenCacheRegistry.set(type, factory)
 }
 
 export function registerIdempotencyBackend(type: string, factory: IdempotencyFactory): void {
-  _idempotencyRegistry.set(type, factory)
+    _idempotencyRegistry.set(type, factory)
 }
 
 /** Register a custom execution store (e.g. Postgres, Redis) keyed by the EXECUTION_STORE_TYPE value. */
 export function registerExecutionStoreBackend(type: string, factory: ExecutionStoreFactory): void {
-  _executionStoreRegistry.set(type, factory)
+    _executionStoreRegistry.set(type, factory)
 }
 
 /** Register a custom audit sink (e.g. object storage, a log pipeline) keyed by its name in AUDIT_SINKS. */
 export function registerAuditSinkBackend(type: string, factory: AuditSinkFactory): void {
-  _auditSinkRegistry.set(type, factory)
+    _auditSinkRegistry.set(type, factory)
 }
 
 /** Register a custom Governance Rule source (e.g. object storage, a config service) keyed by the GOVERNANCE_RULES_SOURCE value. */
 export function registerGovernanceRuleSourceBackend(type: string, factory: GovernanceRuleSourceFactory): void {
-  _ruleSourceRegistry.set(type, factory)
+    _ruleSourceRegistry.set(type, factory)
 }
 
 // ── Builders ─────────────────────────────────────────────────────────────────
 
 export function buildTokenCacheStrategy(
-  config: TokenCacheBackendConfig | undefined,
-  tokenCacheTtlMs: number,
-  logger?: Logger
+    config: TokenCacheBackendConfig | undefined,
+    tokenCacheTtlMs: number,
+    logger?: Logger
 ): TokenCacheStrategy {
-  if (!config) return inMemoryTokenCache(tokenCacheTtlMs)
+    if (!config) return inMemoryTokenCache(tokenCacheTtlMs)
 
-  const custom = _tokenCacheRegistry.get(config.type)
-  if (custom) return custom(config as TokenCacheBackendConfig & Record<string, unknown>, tokenCacheTtlMs, logger)
+    const custom = _tokenCacheRegistry.get(config.type)
+    if (custom) return custom(config as TokenCacheBackendConfig & Record<string, unknown>, tokenCacheTtlMs, logger)
 
-  switch (config.type) {
-    case STORE_TYPE.IN_MEMORY: return inMemoryTokenCache(tokenCacheTtlMs)
-    case STORE_TYPE.MEMCACHE:  return memcacheTokenCache(tokenCacheTtlMs, config, logger)
-    case STORE_TYPE.COUCHBASE: return couchbaseTokenCache(tokenCacheTtlMs, config, logger)
-    default: throw new Error(`Unknown token cache type: "${(config as { type: string }).type}"`)
-  }
+    switch (config.type) {
+        case STORE_TYPE.IN_MEMORY:
+            return inMemoryTokenCache(tokenCacheTtlMs)
+        case STORE_TYPE.MEMCACHE:
+            return memcacheTokenCache(tokenCacheTtlMs, config, logger)
+        case STORE_TYPE.COUCHBASE:
+            return couchbaseTokenCache(tokenCacheTtlMs, config, logger)
+        default:
+            throw new Error(`Unknown token cache type: "${(config as { type: string }).type}"`)
+    }
 }
 
 export function buildIdempotencyStrategy(
-  config: IdempotencyBackendConfig | undefined,
-  logger?: Logger
+    config: IdempotencyBackendConfig | undefined,
+    logger?: Logger
 ): IdempotencyStrategy {
-  if (!config) return noopIdempotency()
+    if (!config) return noopIdempotency()
 
-  const custom = _idempotencyRegistry.get(config.type)
-  if (custom) return custom(config as IdempotencyBackendConfig & Record<string, unknown>, logger)
+    const custom = _idempotencyRegistry.get(config.type)
+    if (custom) return custom(config as IdempotencyBackendConfig & Record<string, unknown>, logger)
 
-  switch (config.type) {
-    case STORE_TYPE.NOOP:      return noopIdempotency()
-    case STORE_TYPE.IN_MEMORY: return inMemoryIdempotency(logger)
-    case STORE_TYPE.MEMCACHE:  return memcacheIdempotency(config, logger)
-    case STORE_TYPE.COUCHBASE: return couchbaseIdempotency(config, logger)
-    default: throw new Error(`Unknown idempotency type: "${(config as { type: string }).type}"`)
-  }
+    switch (config.type) {
+        case STORE_TYPE.NOOP:
+            return noopIdempotency()
+        case STORE_TYPE.IN_MEMORY:
+            return inMemoryIdempotency(logger)
+        case STORE_TYPE.MEMCACHE:
+            return memcacheIdempotency(config, logger)
+        case STORE_TYPE.COUCHBASE:
+            return couchbaseIdempotency(config, logger)
+        default:
+            throw new Error(`Unknown idempotency type: "${(config as { type: string }).type}"`)
+    }
 }
 
 export function buildExecutionStore(
-  config: ExecutionStoreBackendConfig | undefined,
-  logger?: Logger
+    config: ExecutionStoreBackendConfig | undefined,
+    logger?: Logger
 ): ExecutionPersistence {
-  if (!config) return inMemoryExecutionStore()
+    if (!config) return inMemoryExecutionStore()
 
-  const custom = _executionStoreRegistry.get(config.type)
-  if (custom) return custom(config as ExecutionStoreBackendConfig & Record<string, unknown>, logger)
+    const custom = _executionStoreRegistry.get(config.type)
+    if (custom) return custom(config as ExecutionStoreBackendConfig & Record<string, unknown>, logger)
 
-  switch (config.type) {
-    case EXECUTION_STORE_TYPE.IN_MEMORY: return inMemoryExecutionStore()
-    case EXECUTION_STORE_TYPE.FILE:      return fileExecutionStore(config.dir, logger)
-    case EXECUTION_STORE_TYPE.MEMCACHE:  return memcacheExecutionStore(config)
-    default: throw new Error(`Unknown execution store type: "${(config as { type: string }).type}"`)
-  }
+    switch (config.type) {
+        case EXECUTION_STORE_TYPE.IN_MEMORY:
+            return inMemoryExecutionStore()
+        case EXECUTION_STORE_TYPE.FILE:
+            return fileExecutionStore(config.dir, logger)
+        case EXECUTION_STORE_TYPE.MEMCACHE:
+            return memcacheExecutionStore(config)
+        default:
+            throw new Error(`Unknown execution store type: "${(config as { type: string }).type}"`)
+    }
 }
 
 /** One sink per AUDIT_SINKS entry, in order; an unknown name stops boot rather than silently dropping the trail. */
 export function buildAuditSinks(types: readonly string[], deps: AuditSinkDeps): AuditSink[] {
-  return types.map(type => {
-    const custom = _auditSinkRegistry.get(type)
-    if (custom) return custom(deps)
-    if (type === CONSOLE_AUDIT_SINK) return new ConsoleAuditSink(deps.loggerFor)
-    throw new Error(`Unknown audit sink: "${type}"`)
-  })
+    return types.map(type => {
+        const custom = _auditSinkRegistry.get(type)
+        if (custom) return custom(deps)
+        if (type === CONSOLE_AUDIT_SINK) return new ConsoleAuditSink(deps.loggerFor)
+        throw new Error(`Unknown audit sink: "${type}"`)
+    })
 }
 
 export function buildGovernanceRuleSource(
-  config: ExecutionConfig['governance'],
-  logger?: Logger
+    config: ExecutionConfig['governance'],
+    logger?: Logger
 ): GovernanceRuleSource {
-  const type = config.rulesSource ?? GOVERNANCE_RULE_SOURCE_TYPE.DIR
+    const type = config.rulesSource ?? GOVERNANCE_RULE_SOURCE_TYPE.DIR
 
-  const custom = _ruleSourceRegistry.get(type)
-  if (custom) return custom(config, logger)
+    const custom = _ruleSourceRegistry.get(type)
+    if (custom) return custom(config, logger)
 
-  switch (type) {
-    case GOVERNANCE_RULE_SOURCE_TYPE.DIR:
-      return new DirectoryRuleSourceStrategy(config.rulesDir, logger)
-    case GOVERNANCE_RULE_SOURCE_TYPE.URL:
-      if (!config.rulesUrl) throw new Error('GOVERNANCE_RULES_URL is required when GOVERNANCE_RULES_SOURCE is "url"')
-      return new UrlRuleSourceStrategy(config.rulesUrl, config.rulesUrlTimeoutMs ?? 5000)
-    default:
-      throw new Error(`Unknown governance rule source: "${type}"`)
-  }
+    switch (type) {
+        case GOVERNANCE_RULE_SOURCE_TYPE.DIR:
+            return new DirectoryRuleSourceStrategy(config.rulesDir, logger)
+        case GOVERNANCE_RULE_SOURCE_TYPE.URL:
+            if (!config.rulesUrl) throw new Error('GOVERNANCE_RULES_URL is required when GOVERNANCE_RULES_SOURCE is "url"')
+            return new UrlRuleSourceStrategy(config.rulesUrl, config.rulesUrlTimeoutMs ?? 5000)
+        default:
+            throw new Error(`Unknown governance rule source: "${type}"`)
+    }
 }
 
 export function buildSpecLoader(
-  specSource: { type: 'file' | 'url' | 'url-with-fallback'; url?: string },
-  specPath: string,
-  logger?: Logger
+    specSource: { type: 'file' | 'url' | 'url-with-fallback'; url?: string },
+    specPath: string,
+    logger?: Logger
 ): SpecLoaderStrategy {
-  switch (specSource.type) {
-    case 'file':
-      return fileSpec(specPath)
-    case 'url':
-      if (!specSource.url) throw new Error('spec.url is required when spec.source is "url"')
-      return urlSpec(specSource.url, undefined, logger)
-    case 'url-with-fallback':
-      if (!specSource.url) throw new Error('spec.url is required when spec.source is "url-with-fallback"')
-      return urlWithFallback(specSource.url, specPath, undefined, logger)
-  }
+    switch (specSource.type) {
+        case 'file':
+            return fileSpec(specPath)
+        case 'url':
+            if (!specSource.url) throw new Error('spec.url is required when spec.source is "url"')
+            return urlSpec(specSource.url, undefined, logger)
+        case 'url-with-fallback':
+            if (!specSource.url) throw new Error('spec.url is required when spec.source is "url-with-fallback"')
+            return urlWithFallback(specSource.url, specPath, undefined, logger)
+    }
 }

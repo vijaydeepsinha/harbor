@@ -1,30 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer } from '@modelcontextprotocol/server'
-import type { ServiceRegistry } from '../runtime/registry/service-registry.js'
-import type { Logger } from '../runtime/observability/logger.js'
-import type { MetricsCollector } from '../core/types/metrics.types.js'
-import { runSpecSearchInSandbox } from '../runtime/sandbox/spec-search-in-sandbox.js'
-import {
-  extractCorrelationId,
-  resolveService,
-  isToolError,
-  runSandboxTool,
-  serviceCodeSchema
-} from './tool-helpers.js'
-import { TOOL, LOG_PREFIX } from '../core/constants.js'
+import {McpServer} from '@modelcontextprotocol/server'
+import type {ServiceRegistry} from '../runtime/registry/service-registry.js'
+import type {Logger} from '../runtime/observability/logger.js'
+import type {MetricsCollector} from '../core/types/metrics.types.js'
+import {runSpecSearchInSandbox} from '../runtime/sandbox/spec-search-in-sandbox.js'
+import {extractCorrelationId, isToolError, resolveService, runSandboxTool, serviceCodeSchema} from './tool-helpers.js'
+import {LOG_PREFIX, TOOL} from '../core/constants.js'
 
 export function registerSearchCodeTool(
-  server: McpServer,
-  registry: ServiceRegistry,
-  logger: Logger,
-  metrics: MetricsCollector,
-  clientToken?: string
+    server: McpServer,
+    registry: ServiceRegistry,
+    logger: Logger,
+    metrics: MetricsCollector,
+    clientToken?: string
 ): void {
-  const serviceNames = registry.serviceNames()
+    const serviceNames = registry.serviceNames()
 
-  const SEARCH_CODE_DESCRIPTION = `Discover API endpoints for a specific service by writing a JavaScript async arrow function.
+    const SEARCH_CODE_DESCRIPTION = `Discover API endpoints for a specific service by writing a JavaScript async arrow function.
 You have access to a 'spec' object — the fully dereferenced OpenAPI spec for the chosen service.
 
 IMPORTANT: You MUST provide the "service" parameter to select which backend to search.
@@ -88,31 +82,31 @@ First: get endpoint list with parameter names only.
 Second: drill into the specific endpoint for full nested schema.
 This keeps each search result small and readable.`
 
-  server.registerTool(
-    TOOL.SEARCH_CODE,
-    { description: SEARCH_CODE_DESCRIPTION, inputSchema: serviceCodeSchema },
-    async ({ service, code }, ctx) => {
-      const correlationId = extractCorrelationId(ctx)
+    server.registerTool(
+        TOOL.SEARCH_CODE,
+        {description: SEARCH_CODE_DESCRIPTION, inputSchema: serviceCodeSchema},
+        async ({service, code}, ctx) => {
+            const correlationId = extractCorrelationId(ctx)
 
-      logger.info(
-        { correlationId, tool: TOOL.SEARCH_CODE, service, codeReceived: code },
-        `${LOG_PREFIX.MCP_IN} ${TOOL.SEARCH_CODE} — code received from AI client`
-      )
+            logger.info(
+                {correlationId, tool: TOOL.SEARCH_CODE, service, codeReceived: code},
+                `${LOG_PREFIX.MCP_IN} ${TOOL.SEARCH_CODE} — code received from AI client`
+            )
 
-      const svcResources = resolveService(registry, service, serviceNames)
-      if (isToolError(svcResources)) return svcResources
+            const svcResources = resolveService(registry, service, serviceNames)
+            if (isToolError(svcResources)) return svcResources
 
-      return runSandboxTool(
-        { tool: TOOL.SEARCH_CODE, service, resources: svcResources, clientToken, correlationId, logger, metrics },
-        async (tokenPayload) => {
-          // Apply per-token spec filtering before injecting into the sandbox.
-          // The default forward-token guard returns the spec unchanged; a real
-          // policy can drop paths/operations the caller is not allowed to see.
-          const rawSpec = svcResources.specStore.getSpec()
-          const filteredSpec = svcResources.permissionGuard.filterSpec(rawSpec, tokenPayload)
-          return runSpecSearchInSandbox(code, filteredSpec, svcResources.sandboxLimits)
+            return runSandboxTool(
+                {tool: TOOL.SEARCH_CODE, service, resources: svcResources, clientToken, correlationId, logger, metrics},
+                async (tokenPayload) => {
+                    // Apply per-token spec filtering before injecting into the sandbox.
+                    // The default forward-token guard returns the spec unchanged; a real
+                    // policy can drop paths/operations the caller is not allowed to see.
+                    const rawSpec = svcResources.specStore.getSpec()
+                    const filteredSpec = svcResources.permissionGuard.filterSpec(rawSpec, tokenPayload)
+                    return runSpecSearchInSandbox(code, filteredSpec, svcResources.sandboxLimits)
+                }
+            )
         }
-      )
-    }
-  )
+    )
 }

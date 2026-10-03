@@ -3,9 +3,14 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "../..",
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "allowImportingTsExtensions": false
   },
-  "include": ["./**/*.ts", "../../vitest.e2e.config.ts"],
+  "include": [
+    "./**/*.ts",
+    "../../vitest.e2e.config.ts"
+  ],
   "exclude": []
 }

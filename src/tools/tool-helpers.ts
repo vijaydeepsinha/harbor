@@ -1,29 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { z } from 'zod'
-import type { TokenPayload, AuthResult } from '../core/types/auth.types.js'
-import { SessionExpiredError } from '../core/types/auth.types.js'
-import type { ServiceRegistry, ServiceResources } from '../runtime/registry/service-registry.js'
-import type { Logger } from '../runtime/observability/logger.js'
-import type { MetricsCollector } from '../core/types/metrics.types.js'
+import {z} from 'zod'
+import type {AuthResult, TokenPayload} from '../core/types/auth.types.js'
+import {SessionExpiredError} from '../core/types/auth.types.js'
+import type {ServiceRegistry, ServiceResources} from '../runtime/registry/service-registry.js'
+import type {Logger} from '../runtime/observability/logger.js'
+import type {MetricsCollector} from '../core/types/metrics.types.js'
 import {
-  ERR,
-  AUTH_SCHEME,
-  METRIC,
-  OUTCOME,
-  LOG_PREFIX,
-  GATEWAY_NAME,
-  GATEWAY_VERSION,
-  SERVER_INFO_META_KEY,
-  PROTOCOL_VERSION_META_KEY,
-  CLIENT_INFO_META_KEY,
-  CLIENT_CAPABILITIES_META_KEY
+    AUTH_SCHEME,
+    CLIENT_CAPABILITIES_META_KEY,
+    CLIENT_INFO_META_KEY,
+    ERR,
+    GATEWAY_NAME,
+    GATEWAY_VERSION,
+    LOG_PREFIX,
+    METRIC,
+    OUTCOME,
+    PROTOCOL_VERSION_META_KEY,
+    SERVER_INFO_META_KEY
 } from '../core/constants.js'
-import { ensureError, errorCode, errorRetryable } from '../core/utils/errors.js'
+import {ensureError, errorCode, errorRetryable} from '../core/utils/errors.js'
+import type {ServerContext} from '@modelcontextprotocol/server'
 
 /** Server identity emitted in every response `_meta` (spec §10, recommended). */
-const SERVER_INFO = Object.freeze({ name: GATEWAY_NAME, version: GATEWAY_VERSION })
+const SERVER_INFO = Object.freeze({name: GATEWAY_NAME, version: GATEWAY_VERSION})
 
 /**
  * Application-level metadata a tool may attach to a response `_meta` channel
@@ -39,17 +40,15 @@ export type AppMeta = Record<string, unknown>
  * application metadata is merged first so it can never spoof server identity.
  */
 export function buildResponseMeta(appMeta?: AppMeta): Record<string, unknown> {
-  return { ...(appMeta ?? {}), [SERVER_INFO_META_KEY]: SERVER_INFO }
+    return {...(appMeta ?? {}), [SERVER_INFO_META_KEY]: SERVER_INFO}
 }
 
 /** MCP tool handlers expect `Record<string, unknown>`-compatible objects. */
 export type ToolResponse = {
-  content: Array<{ type: 'text'; text: string }>
-  isError?: boolean
-  _meta?: Record<string, unknown>
+    content: Array<{ type: 'text'; text: string }>
+    isError?: boolean
+    _meta?: Record<string, unknown>
 } & Record<string, unknown>
-
-import type { ServerContext } from '@modelcontextprotocol/server'
 
 /**
  * Builds the standard `isError` MCP tool response. The on-wire payload always
@@ -64,38 +63,38 @@ import type { ServerContext } from '@modelcontextprotocol/server'
  * serverInfo — never mixed into the model-visible error `content`.
  */
 export function mcpError(
-  message: string,
-  code: string,
-  retryable = false,
-  extra?: Record<string, unknown>,
-  appMeta?: AppMeta
+    message: string,
+    code: string,
+    retryable = false,
+    extra?: Record<string, unknown>,
+    appMeta?: AppMeta
 ): ToolResponse {
-  const payload: Record<string, unknown> = { ...(extra ?? {}), error: message, code, retryable }
-  return {
-    content: [{
-      type: 'text' as const,
-      text: JSON.stringify(payload)
-    }],
-    isError: true,
-    _meta: buildResponseMeta(appMeta)
-  }
+    const payload: Record<string, unknown> = {...(extra ?? {}), error: message, code, retryable}
+    return {
+        content: [{
+            type: 'text' as const,
+            text: JSON.stringify(payload)
+        }],
+        isError: true,
+        _meta: buildResponseMeta(appMeta)
+    }
 }
 
 export function mcpSuccess(data: unknown, appMeta?: AppMeta): ToolResponse {
-  return {
-    content: [{
-      type: 'text' as const,
-      text: typeof data === 'string' ? data : JSON.stringify(data, null, 2)
-    }],
-    _meta: buildResponseMeta(appMeta)
-  }
+    return {
+        content: [{
+            type: 'text' as const,
+            text: typeof data === 'string' ? data : JSON.stringify(data, null, 2)
+        }],
+        _meta: buildResponseMeta(appMeta)
+    }
 }
 
 /** Reads correlation id from the MCP handler context, falling back to a fresh UUID. */
 export function extractCorrelationId(ctx: ServerContext | undefined): string {
-  const id = ctx?.mcpReq?.id
-  if (id !== undefined && id !== null) return String(id)
-  return crypto.randomUUID()
+    const id = ctx?.mcpReq?.id
+    if (id !== undefined && id !== null) return String(id)
+    return crypto.randomUUID()
 }
 
 /**
@@ -110,25 +109,25 @@ export function extractCorrelationId(ctx: ServerContext | undefined): string {
  * bearer token (see {@link validateAuth}).
  */
 export interface AdvisoryRequestMeta {
-  protocolVersion?: string
-  clientInfo?: { name?: string; version?: string } & Record<string, unknown>
-  clientCapabilities?: Record<string, unknown>
+    protocolVersion?: string
+    clientInfo?: { name?: string; version?: string } & Record<string, unknown>
+    clientCapabilities?: Record<string, unknown>
 }
 
 export function readRequestMeta(ctx: ServerContext | undefined): AdvisoryRequestMeta {
-  const mcpReq = ctx?.mcpReq
-  const src: Record<string, unknown> = {
-    ...((mcpReq?._meta as Record<string, unknown> | undefined) ?? {}),
-    ...((mcpReq?.envelope as Record<string, unknown> | undefined) ?? {})
-  }
-  const view: AdvisoryRequestMeta = {}
-  const pv = src[PROTOCOL_VERSION_META_KEY]
-  if (typeof pv === 'string') view.protocolVersion = pv
-  const ci = src[CLIENT_INFO_META_KEY]
-  if (ci !== null && typeof ci === 'object') view.clientInfo = ci as AdvisoryRequestMeta['clientInfo']
-  const cc = src[CLIENT_CAPABILITIES_META_KEY]
-  if (cc !== null && typeof cc === 'object') view.clientCapabilities = cc as Record<string, unknown>
-  return view
+    const mcpReq = ctx?.mcpReq
+    const src: Record<string, unknown> = {
+        ...((mcpReq?._meta as Record<string, unknown> | undefined) ?? {}),
+        ...((mcpReq?.envelope as Record<string, unknown> | undefined) ?? {})
+    }
+    const view: AdvisoryRequestMeta = {}
+    const pv = src[PROTOCOL_VERSION_META_KEY]
+    if (typeof pv === 'string') view.protocolVersion = pv
+    const ci = src[CLIENT_INFO_META_KEY]
+    if (ci !== null && typeof ci === 'object') view.clientInfo = ci as AdvisoryRequestMeta['clientInfo']
+    const cc = src[CLIENT_CAPABILITIES_META_KEY]
+    if (cc !== null && typeof cc === 'object') view.clientCapabilities = cc as Record<string, unknown>
+    return view
 }
 
 /**
@@ -136,28 +135,28 @@ export function readRequestMeta(ctx: ServerContext | undefined): AdvisoryRequest
  * (`discover_skills`, `search_code`, `api_execute`). Kept in one place so the
  * contract only needs to change in a single spot.
  */
-export const serviceCodeSchema = z.object({ service: z.string(), code: z.string() })
+export const serviceCodeSchema = z.object({service: z.string(), code: z.string()})
 
 export function resolveService(
-  registry: ServiceRegistry,
-  service: string,
-  serviceNames: string[]
+    registry: ServiceRegistry,
+    service: string,
+    serviceNames: string[]
 ): ServiceResources | ToolResponse {
-  const resources = registry.get(service)
-  if (!resources) {
-    // Not retryable: the registry is fixed at boot, so the same name fails every time —
-    // `true` invited an agent to loop on it instead of picking a listed service.
-    return mcpError(
-      `Unknown service "${service}". Available: ${serviceNames.join(', ')}`,
-      ERR.UNKNOWN_SERVICE,
-      false
-    )
-  }
-  return resources
+    const resources = registry.get(service)
+    if (!resources) {
+        // Not retryable: the registry is fixed at boot, so the same name fails every time —
+        // `true` invited an agent to loop on it instead of picking a listed service.
+        return mcpError(
+            `Unknown service "${service}". Available: ${serviceNames.join(', ')}`,
+            ERR.UNKNOWN_SERVICE,
+            false
+        )
+    }
+    return resources
 }
 
 export function isToolError(result: unknown): result is ToolResponse {
-  return typeof result === 'object' && result !== null && 'isError' in result
+    return typeof result === 'object' && result !== null && 'isError' in result
 }
 
 /**
@@ -165,38 +164,38 @@ export function isToolError(result: unknown): result is ToolResponse {
  * back to the client.
  */
 export async function validateAuth(
-  resources: ServiceResources,
-  clientToken: string | undefined,
-  correlationId: string,
-  logger: Logger,
-  toolName: string
+    resources: ServiceResources,
+    clientToken: string | undefined,
+    correlationId: string,
+    logger: Logger,
+    toolName: string
 ): Promise<AuthResult | ToolResponse> {
-  const authHeader = clientToken ? `${AUTH_SCHEME} ${clientToken}` : undefined
-  return runValidation(resources, authHeader, correlationId, logger, toolName)
+    const authHeader = clientToken ? `${AUTH_SCHEME} ${clientToken}` : undefined
+    return runValidation(resources, authHeader, correlationId, logger, toolName)
 }
 
 async function runValidation(
-  resources: ServiceResources,
-  authHeader: string | undefined,
-  correlationId: string,
-  logger: Logger,
-  toolName: string
+    resources: ServiceResources,
+    authHeader: string | undefined,
+    correlationId: string,
+    logger: Logger,
+    toolName: string
 ): Promise<AuthResult | ToolResponse> {
-  try {
-    return await resources.authMiddleware.validateRequest(authHeader, correlationId)
-  } catch (err) {
-    if (err instanceof SessionExpiredError) {
-      logger.warn({ correlationId, service: resources.name }, `${toolName} session expired`)
-      return mcpError(err.message, err.code, false)
+    try {
+        return await resources.authMiddleware.validateRequest(authHeader, correlationId)
+    } catch (err) {
+        if (err instanceof SessionExpiredError) {
+            logger.warn({correlationId, service: resources.name}, `${toolName} session expired`)
+            return mcpError(err.message, err.code, false)
+        }
+        const errObj = ensureError(err)
+        logger.warn({correlationId, service: resources.name, error: errObj.message}, `${toolName} auth failed`)
+        return mcpError(
+            errObj.message,
+            errorCode(err, ERR.AUTH_FAILED),
+            errorRetryable(err)
+        )
     }
-    const errObj = ensureError(err)
-    logger.warn({ correlationId, service: resources.name, error: errObj.message }, `${toolName} auth failed`)
-    return mcpError(
-      errObj.message,
-      errorCode(err, ERR.AUTH_FAILED),
-      errorRetryable(err)
-    )
-  }
 }
 
 /**
@@ -215,36 +214,36 @@ async function runValidation(
  * this HOF; it calls {@link validateAuth} directly.
  */
 export async function runSandboxTool<T>(
-  opts: {
-    tool: string
-    service: string
-    resources: ServiceResources
-    clientToken: string | undefined
-    correlationId: string
-    logger: Logger
-    metrics: MetricsCollector
-  },
-  body: (tokenPayload: TokenPayload) => Promise<T>
+    opts: {
+        tool: string
+        service: string
+        resources: ServiceResources
+        clientToken: string | undefined
+        correlationId: string
+        logger: Logger
+        metrics: MetricsCollector
+    },
+    body: (tokenPayload: TokenPayload) => Promise<T>
 ): Promise<ToolResponse> {
-  const { tool, service, resources, clientToken, correlationId, logger, metrics } = opts
+    const {tool, service, resources, clientToken, correlationId, logger, metrics} = opts
 
-  const authResult = await validateAuth(resources, clientToken, correlationId, logger, tool)
-  if (isToolError(authResult)) return authResult
+    const authResult = await validateAuth(resources, clientToken, correlationId, logger, tool)
+    if (isToolError(authResult)) return authResult
 
-  try {
-    const result = await body(authResult.payload)
-    metrics.increment(METRIC.TOOL_CALLS, { tool, service, outcome: OUTCOME.SUCCESS })
-    logger.info(
-      { correlationId, tool, service, response: JSON.stringify(result, null, 2) },
-      `${LOG_PREFIX.MCP_OUT} ${tool} — response sent to AI client`
-    )
-    return mcpSuccess(result)
-  } catch (err) {
-    const errObj = ensureError(err)
-    const code = errorCode(err)
-    logger.warn({ correlationId, service, error: errObj.message, code }, `${tool} failed`)
-    metrics.increment(METRIC.TOOL_CALLS, { tool, service, outcome: OUTCOME.ERROR })
-    metrics.increment(METRIC.SANDBOX_ERRORS, { tool, errorType: code })
-    return mcpError(errObj.message, code, errorRetryable(err))
-  }
+    try {
+        const result = await body(authResult.payload)
+        metrics.increment(METRIC.TOOL_CALLS, {tool, service, outcome: OUTCOME.SUCCESS})
+        logger.info(
+            {correlationId, tool, service, response: JSON.stringify(result, null, 2)},
+            `${LOG_PREFIX.MCP_OUT} ${tool} — response sent to AI client`
+        )
+        return mcpSuccess(result)
+    } catch (err) {
+        const errObj = ensureError(err)
+        const code = errorCode(err)
+        logger.warn({correlationId, service, error: errObj.message, code}, `${tool} failed`)
+        metrics.increment(METRIC.TOOL_CALLS, {tool, service, outcome: OUTCOME.ERROR})
+        metrics.increment(METRIC.SANDBOX_ERRORS, {tool, errorType: code})
+        return mcpError(errObj.message, code, errorRetryable(err))
+    }
 }

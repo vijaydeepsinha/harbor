@@ -10,5 +10,5 @@ export const SAFE_HEADER_VALUE = /^[\x21-\x7E](?:[\x20-\x7E]{0,126}[\x21-\x7E])?
 
 /** The value when it is a safe header value, `undefined` otherwise. */
 export function safeHeaderValue(value: string | null | undefined): string | undefined {
-  return typeof value === 'string' && SAFE_HEADER_VALUE.test(value) ? value : undefined
+    return typeof value === 'string' && SAFE_HEADER_VALUE.test(value) ? value : undefined
 }

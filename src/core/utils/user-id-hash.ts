@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { createHash } from 'node:crypto'
-import type { TokenPayload } from '../types/auth.types.js'
+import {createHash} from 'node:crypto'
+import type {TokenPayload} from '../types/auth.types.js'
 
 /**
  * Stable principal identity shared by execution creation, resume, and HTTP
@@ -17,14 +17,14 @@ import type { TokenPayload } from '../types/auth.types.js'
  * remains the last resort for callers that arrive without a bearer at all.
  */
 export function hashAuthenticatedPrincipal(
-  payload: Pick<TokenPayload, 'access_token' | 'metadata'>,
-  rawToken?: string
+    payload: Pick<TokenPayload, 'access_token' | 'metadata'>,
+    rawToken?: string
 ): string {
-  // Only a scalar id names a principal. An object or array claim (a mapping
-  // mistake) stringifies to "[object Object]" or "a,b" — every such caller
-  // would share one identity and could resume each other's executions.
-  const userId = payload.metadata?.userId
-  const usable = (typeof userId === 'string' && userId !== '') || (typeof userId === 'number' && Number.isFinite(userId))
-  const identity = usable ? String(userId) : (rawToken ?? payload.access_token)
-  return createHash('sha256').update(identity).digest('hex')
+    // Only a scalar id names a principal. An object or array claim (a mapping
+    // mistake) stringifies to "[object Object]" or "a,b" — every such caller
+    // would share one identity and could resume each other's executions.
+    const userId = payload.metadata?.userId
+    const usable = (typeof userId === 'string' && userId !== '') || (typeof userId === 'number' && Number.isFinite(userId))
+    const identity = usable ? String(userId) : (rawToken ?? payload.access_token)
+    return createHash('sha256').update(identity).digest('hex')
 }

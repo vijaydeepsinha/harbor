@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer, type McpRequestContext } from '@modelcontextprotocol/server'
-import type { GlobalConfig } from '../../core/types/config.types.js'
-import type { Logger } from '../observability/logger.js'
-import type { MetricsCollector } from '../../core/types/metrics.types.js'
-import type { ServiceRegistry } from '../registry/service-registry.js'
-import { registerDiscoverServicesTool } from '../../tools/discover-services.tool.js'
-import { registerDiscoverSkillsTool } from '../../tools/discover-skills.tool.js'
-import { registerGetSkillDetailsTool } from '../../tools/get-skill-details.tool.js'
-import { registerSearchCodeTool } from '../../tools/search-code.tool.js'
-import { registerExecuteApiTool } from '../../tools/execute-api.tool.js'
-import { GATEWAY_NAME, GATEWAY_VERSION, TOOL, HTTP_HEADER } from '../../core/constants.js'
-import { safeHeaderValue } from '../../core/utils/header-value.js'
-import { errorMessage } from '../../core/utils/errors.js'
-import type { GovernanceRuntime } from '../execution/governance-runtime.js'
-import type { AuditPipeline } from '../observability/audit-pipeline.js'
+import {type McpRequestContext, McpServer} from '@modelcontextprotocol/server'
+import type {GlobalConfig} from '../../core/types/config.types.js'
+import type {Logger} from '../observability/logger.js'
+import type {MetricsCollector} from '../../core/types/metrics.types.js'
+import type {ServiceRegistry} from '../registry/service-registry.js'
+import {registerDiscoverServicesTool} from '../../tools/discover-services.tool.js'
+import {registerDiscoverSkillsTool} from '../../tools/discover-skills.tool.js'
+import {registerGetSkillDetailsTool} from '../../tools/get-skill-details.tool.js'
+import {registerSearchCodeTool} from '../../tools/search-code.tool.js'
+import {registerExecuteApiTool} from '../../tools/execute-api.tool.js'
+import {GATEWAY_NAME, GATEWAY_VERSION, HTTP_HEADER, TOOL} from '../../core/constants.js'
+import {safeHeaderValue} from '../../core/utils/header-value.js'
+import {errorMessage} from '../../core/utils/errors.js'
+import type {GovernanceRuntime} from '../execution/governance-runtime.js'
+import type {AuditPipeline} from '../observability/audit-pipeline.js'
 
 /** Options accepted by the `McpServer` constructor's second argument. */
 type McpServerOptions = NonNullable<ConstructorParameters<typeof McpServer>[1]>
@@ -37,24 +37,24 @@ type McpServerOptions = NonNullable<ConstructorParameters<typeof McpServer>[1]>
  *   `ttlMs: 0`. No aggressive TTL is invented (§16).
  */
 export function buildMcpServerOptions(governanceRuntime?: GovernanceRuntime): McpServerOptions {
-  return {
-    // MRTR requestState integrity: the seam verifies every echoed state
-    // (HMAC, TTL, method binding) before api_execute runs — spec MUST for
-    // state that drives authorization. Absent runtime ⇒ no governance ⇒ no state.
-    ...(governanceRuntime ? { requestState: { verify: (state: string, ctx: McpRequestContextForVerify) => governanceRuntime.requestState.verify(state, ctx) } } : {}),
-    capabilities: { tools: {} },
-    instructions:
-      'Harbor is an MCP gateway to backend services. Workflow: ' +
-      '1) discover_services() to list backends; ' +
-      '2) discover_skills() + get_skill_details() for business SOPs (optional); ' +
-      '3) search_code() to find exact endpoints; ' +
-      '4) api_execute() to run an authenticated call against a chosen service. ' +
-      'Always pass the "service" parameter to api_execute and use only paths confirmed by search_code().',
-    cacheHints: {
-      'tools/list': { ttlMs: 0, cacheScope: 'private' },
-      'server/discover': { ttlMs: 0, cacheScope: 'private' }
+    return {
+        // MRTR requestState integrity: the seam verifies every echoed state
+        // (HMAC, TTL, method binding) before api_execute runs — spec MUST for
+        // state that drives authorization. Absent runtime ⇒ no governance ⇒ no state.
+        ...(governanceRuntime ? {requestState: {verify: (state: string, ctx: McpRequestContextForVerify) => governanceRuntime.requestState.verify(state, ctx)}} : {}),
+        capabilities: {tools: {}},
+        instructions:
+            'Harbor is an MCP gateway to backend services. Workflow: ' +
+            '1) discover_services() to list backends; ' +
+            '2) discover_skills() + get_skill_details() for business SOPs (optional); ' +
+            '3) search_code() to find exact endpoints; ' +
+            '4) api_execute() to run an authenticated call against a chosen service. ' +
+            'Always pass the "service" parameter to api_execute and use only paths confirmed by search_code().',
+        cacheHints: {
+            'tools/list': {ttlMs: 0, cacheScope: 'private'},
+            'server/discover': {ttlMs: 0, cacheScope: 'private'}
+        }
     }
-  }
 }
 
 type McpRequestContextForVerify = Parameters<GovernanceRuntime['requestState']['verify']>[1]
@@ -68,16 +68,16 @@ type McpRequestContextForVerify = Parameters<GovernanceRuntime['requestState']['
 export type GatewayMcpServerFactory = (ctx: McpRequestContext) => McpServer
 
 export interface BuildMcpServerFactoryOptions {
-  registry: ServiceRegistry
-  globalConfig: GlobalConfig
-  logger: Logger
-  metrics: MetricsCollector
-  /** Fallback token for stdio transport where `ctx.authInfo` is never set. */
-  stdioToken?: string
-  /** Governance runtime; absent ⇒ legacy api_execute. */
-  governanceRuntime?: GovernanceRuntime
-  /** Audit sinks for api_execute records; absent ⇒ the service logger. */
-  auditPipeline?: AuditPipeline
+    registry: ServiceRegistry
+    globalConfig: GlobalConfig
+    logger: Logger
+    metrics: MetricsCollector
+    /** Fallback token for stdio transport where `ctx.authInfo` is never set. */
+    stdioToken?: string
+    /** Governance runtime; absent ⇒ legacy api_execute. */
+    governanceRuntime?: GovernanceRuntime
+    /** Audit sinks for api_execute records; absent ⇒ the service logger. */
+    auditPipeline?: AuditPipeline
 }
 
 /**
@@ -85,34 +85,40 @@ export interface BuildMcpServerFactoryOptions {
  * from `ctx.authInfo`; stdio mode falls back to the pre-configured token.
  */
 export function buildMcpServerFactory(opts: BuildMcpServerFactoryOptions): GatewayMcpServerFactory {
-  const { registry, globalConfig, logger, metrics, stdioToken = '', governanceRuntime, auditPipeline } = opts
+    const {registry, globalConfig, logger, metrics, stdioToken = '', governanceRuntime, auditPipeline} = opts
 
-  return (ctx: McpRequestContext) => {
-    const clientToken = ctx.authInfo?.token ?? stdioToken
-    // Optional: the caller's own id, forwarded to backends as-is when it is a safe header value (HTTP only).
-    const callerClientId = safeHeaderValue(ctx.requestInfo?.headers.get(HTTP_HEADER.HARBOR_CLIENT_ID))
-    const mcpServer = new McpServer({ name: GATEWAY_NAME, version: GATEWAY_VERSION }, buildMcpServerOptions(governanceRuntime))
+    return (ctx: McpRequestContext) => {
+        const clientToken = ctx.authInfo?.token ?? stdioToken
+        // Optional: the caller's own id, forwarded to backends as-is when it is a safe header value (HTTP only).
+        const callerClientId = safeHeaderValue(ctx.requestInfo?.headers.get(HTTP_HEADER.HARBOR_CLIENT_ID))
+        const mcpServer = new McpServer({
+            name: GATEWAY_NAME,
+            version: GATEWAY_VERSION
+        }, buildMcpServerOptions(governanceRuntime))
 
-    // Each tool is registered in its own try/catch: a construction-time throw
-    // from one tool (e.g. a schema-construction error) must not abort
-    // registration of the other four — it degrades to "N of 5 tools
-    // available" for this request/connection instead of zero.
-    const registrations: Array<[string, () => void]> = [
-      [TOOL.DISCOVER_SERVICES, () => registerDiscoverServicesTool(mcpServer, registry, logger, metrics)],
-      [TOOL.DISCOVER_SKILLS, () => registerDiscoverSkillsTool(mcpServer, registry, logger, metrics, clientToken)],
-      [TOOL.GET_SKILL_DETAILS, () => registerGetSkillDetailsTool(mcpServer, registry, logger, metrics, clientToken)],
-      [TOOL.SEARCH_CODE, () => registerSearchCodeTool(mcpServer, registry, logger, metrics, clientToken)],
-      [TOOL.API_EXECUTE, () => registerExecuteApiTool(mcpServer, registry, globalConfig, logger, metrics, clientToken, governanceRuntime, auditPipeline, callerClientId)]
-    ]
+        // Each tool is registered in its own try/catch: a construction-time throw
+        // from one tool (e.g. a schema-construction error) must not abort
+        // registration of the other four — it degrades to "N of 5 tools
+        // available" for this request/connection instead of zero.
+        const registrations: Array<[string, () => void]> = [
+            [TOOL.DISCOVER_SERVICES, () => registerDiscoverServicesTool(mcpServer, registry, logger, metrics)],
+            [TOOL.DISCOVER_SKILLS, () => registerDiscoverSkillsTool(mcpServer, registry, logger, metrics, clientToken)],
+            [TOOL.GET_SKILL_DETAILS, () => registerGetSkillDetailsTool(mcpServer, registry, logger, metrics, clientToken)],
+            [TOOL.SEARCH_CODE, () => registerSearchCodeTool(mcpServer, registry, logger, metrics, clientToken)],
+            [TOOL.API_EXECUTE, () => registerExecuteApiTool(mcpServer, registry, globalConfig, logger, metrics, clientToken, governanceRuntime, auditPipeline, callerClientId)]
+        ]
 
-    for (const [toolName, register] of registrations) {
-      try {
-        register()
-      } catch (err) {
-        logger.error({ tool: toolName, error: errorMessage(err) }, 'Tool registration failed — continuing with remaining tools')
-      }
+        for (const [toolName, register] of registrations) {
+            try {
+                register()
+            } catch (err) {
+                logger.error({
+                    tool: toolName,
+                    error: errorMessage(err)
+                }, 'Tool registration failed — continuing with remaining tools')
+            }
+        }
+
+        return mcpServer
     }
-
-    return mcpServer
-  }
 }

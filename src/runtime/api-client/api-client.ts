@@ -1,50 +1,50 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { readFileSync } from 'node:fs'
-import { Agent as HttpsAgent } from 'node:https'
-import { setTimeout as sleep } from 'node:timers/promises'
+import {readFileSync} from 'node:fs'
+import {Agent as HttpsAgent} from 'node:https'
+import {setTimeout as sleep} from 'node:timers/promises'
+import type {AxiosInstance} from 'axios'
 import axios from 'axios'
-import type { AxiosInstance } from 'axios'
-import type { CircuitBreakerStrategy } from '../../spi/resilience/circuit-breaker.js'
-import type { IdempotencyStrategy } from '../../spi/idempotency/idempotency-strategy.js'
-import type { ServiceDefinition } from '../registry/filesystem-scanner.js'
-import type { Logger } from '../observability/logger.js'
-import type { ConnectorAPI } from '../../spi/connector/connector-api.js'
+import type {CircuitBreakerStrategy} from '../../spi/resilience/circuit-breaker.js'
+import type {IdempotencyStrategy} from '../../spi/idempotency/idempotency-strategy.js'
+import type {ServiceDefinition} from '../registry/filesystem-scanner.js'
+import type {Logger} from '../observability/logger.js'
+import type {ApiRequest, ApiResponse, ConnectorAPI, ExecuteRequestContext} from '../../spi/connector/connector-api.js'
 import {
-  ERR,
-  HTTP_HEADER,
-  DEFAULT_HARBOR_SERVER_ID,
-  CONTENT_TYPE_JSON,
-  AUTH_SCHEME,
-  MCP_FRAMEWORK_VERSION,
-  TOOL,
-  LOG_PREFIX
+    AUTH_SCHEME,
+    CONTENT_TYPE_JSON,
+    DEFAULT_HARBOR_SERVER_ID,
+    ERR,
+    HTTP_HEADER,
+    LOG_PREFIX,
+    MCP_FRAMEWORK_VERSION,
+    TOOL
 } from '../../core/constants.js'
-import { ensureError } from '../../core/utils/errors.js'
-import { normalizeEndpointPath, joinUrl } from '../../core/utils/url.js'
+import {ensureError} from '../../core/utils/errors.js'
+import {joinUrl, normalizeEndpointPath} from '../../core/utils/url.js'
 
 // Re-exported for consumers that imported these types from this module directly.
-export type { ApiRequest, ApiResponse, ExecuteRequestContext } from '../../spi/connector/connector-api.js'
-import type { ApiRequest, ApiResponse, ExecuteRequestContext } from '../../spi/connector/connector-api.js'
+export type {ApiRequest, ApiResponse, ExecuteRequestContext} from '../../spi/connector/connector-api.js'
 
 export class ApiError extends Error {
-  readonly code = ERR.API_ERROR
-  constructor(
-    message: string,
-    readonly status?: number,
-    readonly retryable: boolean = false
-  ) {
-    super(message)
-    this.name = 'ApiError'
-  }
+    readonly code = ERR.API_ERROR
+
+    constructor(
+        message: string,
+        readonly status?: number,
+        readonly retryable: boolean = false
+    ) {
+        super(message)
+        this.name = 'ApiError'
+    }
 }
 
 export interface ApiClientContext {
-  serviceName: string
-  agentName: string
-  /** Sent as X-Harbor-Server-ID on every call (HARBOR_SERVER_ID); absent ⇒ DEFAULT_HARBOR_SERVER_ID. */
-  serverId?: string
+    serviceName: string
+    agentName: string
+    /** Sent as X-Harbor-Server-ID on every call (HARBOR_SERVER_ID); absent ⇒ DEFAULT_HARBOR_SERVER_ID. */
+    serverId?: string
 }
 
 /**
@@ -59,178 +59,178 @@ export interface ApiClientContext {
  *    resolved, or smuggle a second request.
  */
 const PROGRAM_FORBIDDEN_HEADERS: ReadonlySet<string> = new Set([
-  HTTP_HEADER.AUTHORIZATION, HTTP_HEADER.REQUEST_SOURCE, HTTP_HEADER.MCP_TOOL, HTTP_HEADER.MCP_SERVICE,
-  HTTP_HEADER.MCP_VERSION, HTTP_HEADER.SESSION_ID, HTTP_HEADER.IDEMPOTENCY_KEY,
-  HTTP_HEADER.CORRELATION_ID, HTTP_HEADER.HARBOR_SERVER_ID, HTTP_HEADER.HARBOR_CLIENT_ID,
-  'Host', 'Content-Length', 'Transfer-Encoding', 'Connection', 'Keep-Alive', 'Upgrade', 'TE', 'Trailer',
-  'Proxy-Authorization', 'Proxy-Connection', 'Cookie', 'Forwarded',
-  'X-Forwarded-For', 'X-Forwarded-Host', 'X-Forwarded-Proto', 'X-Forwarded-Port', 'X-Forwarded-Prefix', 'X-Real-IP',
-  'X-HTTP-Method-Override', 'X-HTTP-Method', 'X-Method-Override', 'X-Original-URL', 'X-Rewrite-URL', 'X-Original-Method'
+    HTTP_HEADER.AUTHORIZATION, HTTP_HEADER.REQUEST_SOURCE, HTTP_HEADER.MCP_TOOL, HTTP_HEADER.MCP_SERVICE,
+    HTTP_HEADER.MCP_VERSION, HTTP_HEADER.SESSION_ID, HTTP_HEADER.IDEMPOTENCY_KEY,
+    HTTP_HEADER.CORRELATION_ID, HTTP_HEADER.HARBOR_SERVER_ID, HTTP_HEADER.HARBOR_CLIENT_ID,
+    'Host', 'Content-Length', 'Transfer-Encoding', 'Connection', 'Keep-Alive', 'Upgrade', 'TE', 'Trailer',
+    'Proxy-Authorization', 'Proxy-Connection', 'Cookie', 'Forwarded',
+    'X-Forwarded-For', 'X-Forwarded-Host', 'X-Forwarded-Proto', 'X-Forwarded-Port', 'X-Forwarded-Prefix', 'X-Real-IP',
+    'X-HTTP-Method-Override', 'X-HTTP-Method', 'X-Method-Override', 'X-Original-URL', 'X-Rewrite-URL', 'X-Original-Method'
 ].map(h => h.toLowerCase()))
 
 /** Methods whose repetition has the same effect as sending them once (RFC 9110 §9.2.2) — the only ones retried. */
 const IDEMPOTENT_METHODS: ReadonlySet<string> = new Set(['GET', 'PUT', 'DELETE'])
 
 export class ApiClient implements ConnectorAPI {
-  private readonly axiosInstance: AxiosInstance
+    private readonly axiosInstance: AxiosInstance
 
-  constructor(
-    private readonly baseUrl: string,
-    private readonly apiConfig: ServiceDefinition['apiConfig'],
-    private readonly circuitBreaker: CircuitBreakerStrategy,
-    private readonly idempotency: IdempotencyStrategy,
-    private readonly logger: Logger,
-    private readonly context: ApiClientContext
-  ) {
-    const httpsAgent = apiConfig.tls
-      ? new HttpsAgent({
-          cert: readFileSync(apiConfig.tls.certPath),
-          key: readFileSync(apiConfig.tls.keyPath),
-          ca: readFileSync(apiConfig.tls.caPath)
+    constructor(
+        private readonly baseUrl: string,
+        private readonly apiConfig: ServiceDefinition['apiConfig'],
+        private readonly circuitBreaker: CircuitBreakerStrategy,
+        private readonly idempotency: IdempotencyStrategy,
+        private readonly logger: Logger,
+        private readonly context: ApiClientContext
+    ) {
+        const httpsAgent = apiConfig.tls
+            ? new HttpsAgent({
+                cert: readFileSync(apiConfig.tls.certPath),
+                key: readFileSync(apiConfig.tls.keyPath),
+                ca: readFileSync(apiConfig.tls.caPath)
+            })
+            : undefined
+
+        this.axiosInstance = axios.create({
+            baseURL: baseUrl,
+            // Without this an absolute `path` (`http://elsewhere/…`, `//host/…`)
+            // replaces baseURL and the caller's bearer goes to another host. The
+            // bridge already refuses such paths; this keeps any other ConnectorAPI
+            // caller on the service too.
+            allowAbsoluteUrls: false,
+            timeout: apiConfig.requestTimeoutMs,
+            httpsAgent,
+            validateStatus: () => true
         })
-      : undefined
-
-    this.axiosInstance = axios.create({
-      baseURL: baseUrl,
-      // Without this an absolute `path` (`http://elsewhere/…`, `//host/…`)
-      // replaces baseURL and the caller's bearer goes to another host. The
-      // bridge already refuses such paths; this keeps any other ConnectorAPI
-      // caller on the service too.
-      allowAbsoluteUrls: false,
-      timeout: apiConfig.requestTimeoutMs,
-      httpsAgent,
-      validateStatus: () => true
-    })
-  }
-
-  async request(
-    apiRequest: ApiRequest,
-    ctx: ExecuteRequestContext
-  ): Promise<ApiResponse> {
-    return this.idempotency.checkAndExecute(
-      ctx.idempotencyKey,
-      () => this.executeRequest(apiRequest, ctx),
-      ctx.idempotencyKeyTtlMs
-    )
-  }
-
-  async executeRequest(apiRequest: ApiRequest, ctx: ExecuteRequestContext): Promise<ApiResponse> {
-    const { tokenPayload, invalidate, idempotencyKey, correlationId, clientId, signal } = ctx
-    const { path: apiPath, method, params, body } = apiRequest
-    const breakerKey = ctx.endpoint ?? normalizeEndpointPath(apiPath)
-
-    // The program may add headers (Accept, Content-Type, its own X-…), but
-    // never one Harbor owns or one that changes routing — see
-    // PROGRAM_FORBIDDEN_HEADERS. Harbor's own are applied after the
-    // program's, so even a copy that slipped the filter could not win.
-    const programHeaders = Object.fromEntries(
-      Object.entries(apiRequest.headers ?? {}).filter(([name]) => !PROGRAM_FORBIDDEN_HEADERS.has(name.toLowerCase()))
-    )
-    const headers: Record<string, string> = {
-      [HTTP_HEADER.CONTENT_TYPE]: CONTENT_TYPE_JSON,
-      ...programHeaders,
-      [HTTP_HEADER.AUTHORIZATION]: `${AUTH_SCHEME} ${tokenPayload.access_token}`,
-      [HTTP_HEADER.REQUEST_SOURCE]: this.context.agentName,
-      [HTTP_HEADER.MCP_TOOL]: TOOL.API_EXECUTE,
-      [HTTP_HEADER.MCP_SERVICE]: this.context.serviceName,
-      [HTTP_HEADER.MCP_VERSION]: MCP_FRAMEWORK_VERSION,
-      [HTTP_HEADER.IDEMPOTENCY_KEY]: idempotencyKey,
-      [HTTP_HEADER.CORRELATION_ID]: correlationId,
-      [HTTP_HEADER.HARBOR_SERVER_ID]: this.context.serverId ?? DEFAULT_HARBOR_SERVER_ID,
-      ...(clientId !== undefined ? { [HTTP_HEADER.HARBOR_CLIENT_ID]: clientId } : {})
     }
 
-    let lastError: Error | undefined
-    // A POST or PATCH that timed out or got a 5xx may already have taken
-    // effect; sending it again could create a second order or charge twice,
-    // while the journal shows one activity. Only methods whose repetition is
-    // harmless (RFC 9110 §9.2.2) are retried; for the rest the outcome is
-    // unknown and the run stops (AGENTS.md §5 rule 2).
-    const maxRetries = IDEMPOTENT_METHODS.has(method) ? this.apiConfig.maxRetries : 0
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        this.logger.debug(
-          {
-            step: 'http-request',
-            attempt: attempt + 1,
-            method,
-            url: joinUrl(this.baseUrl, apiPath),
-            params,
-            correlationId
-          },
-          `${LOG_PREFIX.API_OUT} ${method} ${apiPath}`
+    async request(
+        apiRequest: ApiRequest,
+        ctx: ExecuteRequestContext
+    ): Promise<ApiResponse> {
+        return this.idempotency.checkAndExecute(
+            ctx.idempotencyKey,
+            () => this.executeRequest(apiRequest, ctx),
+            ctx.idempotencyKeyTtlMs
         )
+    }
 
-        const response = await this.axiosInstance.request({
-          method,
-          url: apiPath,
-          params,
-          data: body,
-          headers,
-          signal
-        })
+    async executeRequest(apiRequest: ApiRequest, ctx: ExecuteRequestContext): Promise<ApiResponse> {
+        const {tokenPayload, invalidate, idempotencyKey, correlationId, clientId, signal} = ctx
+        const {path: apiPath, method, params, body} = apiRequest
+        const breakerKey = ctx.endpoint ?? normalizeEndpointPath(apiPath)
 
-        this.logger.info(
-          {
-            step: 'http-response',
-            method,
-            path: apiPath,
-            status: response.status,
-            ok: response.status >= 200 && response.status < 400,
-            correlationId
-          },
-          `${LOG_PREFIX.API_IN} ${response.status} ${method} ${apiPath}`
+        // The program may add headers (Accept, Content-Type, its own X-…), but
+        // never one Harbor owns or one that changes routing — see
+        // PROGRAM_FORBIDDEN_HEADERS. Harbor's own are applied after the
+        // program's, so even a copy that slipped the filter could not win.
+        const programHeaders = Object.fromEntries(
+            Object.entries(apiRequest.headers ?? {}).filter(([name]) => !PROGRAM_FORBIDDEN_HEADERS.has(name.toLowerCase()))
         )
-
-        if (response.status >= 200 && response.status < 400) {
-          return { data: response.data, status: response.status, ok: true }
+        const headers: Record<string, string> = {
+            [HTTP_HEADER.CONTENT_TYPE]: CONTENT_TYPE_JSON,
+            ...programHeaders,
+            [HTTP_HEADER.AUTHORIZATION]: `${AUTH_SCHEME} ${tokenPayload.access_token}`,
+            [HTTP_HEADER.REQUEST_SOURCE]: this.context.agentName,
+            [HTTP_HEADER.MCP_TOOL]: TOOL.API_EXECUTE,
+            [HTTP_HEADER.MCP_SERVICE]: this.context.serviceName,
+            [HTTP_HEADER.MCP_VERSION]: MCP_FRAMEWORK_VERSION,
+            [HTTP_HEADER.IDEMPOTENCY_KEY]: idempotencyKey,
+            [HTTP_HEADER.CORRELATION_ID]: correlationId,
+            [HTTP_HEADER.HARBOR_SERVER_ID]: this.context.serverId ?? DEFAULT_HARBOR_SERVER_ID,
+            ...(clientId !== undefined ? {[HTTP_HEADER.HARBOR_CLIENT_ID]: clientId} : {})
         }
 
-        if (response.status >= 400 && response.status < 500) {
-          if (response.status === 401) {
-            this.logger.info(
-              { step: 'token-invalidated', method, path: apiPath, correlationId },
-              `${LOG_PREFIX.API_IN} backend rejected token — invalidating cache`
-            )
+        let lastError: Error | undefined
+        // A POST or PATCH that timed out or got a 5xx may already have taken
+        // effect; sending it again could create a second order or charge twice,
+        // while the journal shows one activity. Only methods whose repetition is
+        // harmless (RFC 9110 §9.2.2) are retried; for the rest the outcome is
+        // unknown and the run stops (AGENTS.md §5 rule 2).
+        const maxRetries = IDEMPOTENT_METHODS.has(method) ? this.apiConfig.maxRetries : 0
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
-              await invalidate()
+                this.logger.debug(
+                    {
+                        step: 'http-request',
+                        attempt: attempt + 1,
+                        method,
+                        url: joinUrl(this.baseUrl, apiPath),
+                        params,
+                        correlationId
+                    },
+                    `${LOG_PREFIX.API_OUT} ${method} ${apiPath}`
+                )
+
+                const response = await this.axiosInstance.request({
+                    method,
+                    url: apiPath,
+                    params,
+                    data: body,
+                    headers,
+                    signal
+                })
+
+                this.logger.info(
+                    {
+                        step: 'http-response',
+                        method,
+                        path: apiPath,
+                        status: response.status,
+                        ok: response.status >= 200 && response.status < 400,
+                        correlationId
+                    },
+                    `${LOG_PREFIX.API_IN} ${response.status} ${method} ${apiPath}`
+                )
+
+                if (response.status >= 200 && response.status < 400) {
+                    return {data: response.data, status: response.status, ok: true}
+                }
+
+                if (response.status >= 400 && response.status < 500) {
+                    if (response.status === 401) {
+                        this.logger.info(
+                            {step: 'token-invalidated', method, path: apiPath, correlationId},
+                            `${LOG_PREFIX.API_IN} backend rejected token — invalidating cache`
+                        )
+                        try {
+                            await invalidate()
+                        } catch (err) {
+                            this.logger.warn(
+                                {correlationId, error: ensureError(err).message},
+                                'Token cache invalidation failed'
+                            )
+                        }
+                    }
+                    return {data: response.data, status: response.status, ok: false}
+                }
+
+                // 5xx — service failure
+                lastError = new ApiError(
+                    `Upstream API returned ${response.status}`,
+                    response.status,
+                    true
+                )
+
+                if (attempt < maxRetries) {
+                    await sleep(backoffMs(attempt))
+                }
             } catch (err) {
-              this.logger.warn(
-                { correlationId, error: ensureError(err).message },
-                'Token cache invalidation failed'
-              )
+                // Sandbox disposed — not a backend failure; skip CB recording and retries.
+                if (signal?.aborted) throw ensureError(err)
+                lastError = ensureError(err)
+
+                if (attempt < maxRetries) {
+                    await sleep(backoffMs(attempt))
+                }
             }
-          }
-          return { data: response.data, status: response.status, ok: false }
         }
 
-        // 5xx — service failure
-        lastError = new ApiError(
-          `Upstream API returned ${response.status}`,
-          response.status,
-          true
-        )
-
-        if (attempt < maxRetries) {
-          await sleep(backoffMs(attempt))
-        }
-      } catch (err) {
-        // Sandbox disposed — not a backend failure; skip CB recording and retries.
-        if (signal?.aborted) throw ensureError(err)
-        lastError = ensureError(err)
-
-        if (attempt < maxRetries) {
-          await sleep(backoffMs(attempt))
-        }
-      }
+        // One logical call, one breaker failure — however many attempts it took —
+        // so failureThreshold means "N calls failed", as documented.
+        this.circuitBreaker.recordFailure(breakerKey)
+        throw lastError ?? new ApiError('Unknown API error')
     }
-
-    // One logical call, one breaker failure — however many attempts it took —
-    // so failureThreshold means "N calls failed", as documented.
-    this.circuitBreaker.recordFailure(breakerKey)
-    throw lastError ?? new ApiError('Unknown API error')
-  }
 }
 
 /**
@@ -240,6 +240,6 @@ export class ApiClient implements ConnectorAPI {
  * temporary upstream hiccup doesn't turn into a synchronised retry storm.
  */
 function backoffMs(attempt: number): number {
-  const base = 500 * Math.pow(2, attempt)
-  return base + Math.random() * 500
+    const base = 500 * Math.pow(2, attempt)
+    return base + Math.random() * 500
 }

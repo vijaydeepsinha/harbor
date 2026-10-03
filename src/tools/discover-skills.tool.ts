@@ -1,30 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { McpServer } from '@modelcontextprotocol/server'
-import type { ServiceRegistry } from '../runtime/registry/service-registry.js'
-import type { Logger } from '../runtime/observability/logger.js'
-import type { MetricsCollector } from '../core/types/metrics.types.js'
-import { runSkillsSearchInSandbox } from '../runtime/sandbox/skills-search-in-sandbox.js'
-import {
-  extractCorrelationId,
-  resolveService,
-  isToolError,
-  runSandboxTool,
-  serviceCodeSchema
-} from './tool-helpers.js'
-import { TOOL, LOG_PREFIX } from '../core/constants.js'
+import {McpServer} from '@modelcontextprotocol/server'
+import type {ServiceRegistry} from '../runtime/registry/service-registry.js'
+import type {Logger} from '../runtime/observability/logger.js'
+import type {MetricsCollector} from '../core/types/metrics.types.js'
+import {runSkillsSearchInSandbox} from '../runtime/sandbox/skills-search-in-sandbox.js'
+import {extractCorrelationId, isToolError, resolveService, runSandboxTool, serviceCodeSchema} from './tool-helpers.js'
+import {LOG_PREFIX, TOOL} from '../core/constants.js'
 
 export function registerDiscoverSkillsTool(
-  server: McpServer,
-  registry: ServiceRegistry,
-  logger: Logger,
-  metrics: MetricsCollector,
-  clientToken?: string
+    server: McpServer,
+    registry: ServiceRegistry,
+    logger: Logger,
+    metrics: MetricsCollector,
+    clientToken?: string
 ): void {
-  const serviceNames = registry.serviceNames()
+    const serviceNames = registry.serviceNames()
 
-  const DESCRIPTION = `Searches for high-level business workflows and SOPs within a service
+    const DESCRIPTION = `Searches for high-level business workflows and SOPs within a service
 by writing a JavaScript async arrow function. Use this to find the logical "How-To" steps
 for a task. Returns skill IDs and descriptions.
 
@@ -69,24 +63,32 @@ async () => {
 
 After finding the relevant skill, use get_skill_details() to read the full SOP.`
 
-  server.registerTool(
-    TOOL.DISCOVER_SKILLS,
-    { description: DESCRIPTION, inputSchema: serviceCodeSchema },
-    async ({ service, code }, ctx) => {
-      const correlationId = extractCorrelationId(ctx)
+    server.registerTool(
+        TOOL.DISCOVER_SKILLS,
+        {description: DESCRIPTION, inputSchema: serviceCodeSchema},
+        async ({service, code}, ctx) => {
+            const correlationId = extractCorrelationId(ctx)
 
-      logger.info(
-        { correlationId, tool: TOOL.DISCOVER_SKILLS, service, codeReceived: code },
-        `${LOG_PREFIX.MCP_IN} ${TOOL.DISCOVER_SKILLS} — code received from AI client`
-      )
+            logger.info(
+                {correlationId, tool: TOOL.DISCOVER_SKILLS, service, codeReceived: code},
+                `${LOG_PREFIX.MCP_IN} ${TOOL.DISCOVER_SKILLS} — code received from AI client`
+            )
 
-      const svcResources = resolveService(registry, service, serviceNames)
-      if (isToolError(svcResources)) return svcResources
+            const svcResources = resolveService(registry, service, serviceNames)
+            if (isToolError(svcResources)) return svcResources
 
-      return runSandboxTool(
-        { tool: TOOL.DISCOVER_SKILLS, service, resources: svcResources, clientToken, correlationId, logger, metrics },
-        async () => runSkillsSearchInSandbox(code, svcResources.skillStore.getSkills(), svcResources.sandboxLimits)
-      )
-    }
-  )
+            return runSandboxTool(
+                {
+                    tool: TOOL.DISCOVER_SKILLS,
+                    service,
+                    resources: svcResources,
+                    clientToken,
+                    correlationId,
+                    logger,
+                    metrics
+                },
+                async () => runSkillsSearchInSandbox(code, svcResources.skillStore.getSkills(), svcResources.sandboxLimits)
+            )
+        }
+    )
 }

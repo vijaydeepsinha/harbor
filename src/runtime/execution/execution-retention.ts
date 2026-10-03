@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { Logger } from '../../core/types/logger.types.js'
-import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
-import { errorMessage } from '../../core/utils/errors.js'
+import type {Logger} from '../../core/types/logger.types.js'
+import type {ExecutionPersistence} from '../../spi/execution/execution-store.js'
+import {errorMessage} from '../../core/utils/errors.js'
 
 /** Deletions per store query, so one sweep never loads an unbounded list. */
 const SWEEP_BATCH = 100
@@ -18,55 +18,58 @@ const MAX_SWEEP_INTERVAL_SEC = 3600
  * logged and retried on the next tick; it never affects running executions.
  */
 export class ExecutionRetentionSweeper {
-  private timer: ReturnType<typeof setInterval> | null = null
-  private running = false
+    private timer: ReturnType<typeof setInterval> | null = null
+    private running = false
 
-  constructor(
-    private readonly persistence: ExecutionPersistence,
-    private readonly retentionSec: number,
-    private readonly logger: Logger,
-    private readonly now: () => string = () => new Date().toISOString()
-  ) {}
-
-  start(): void {
-    if (this.retentionSec <= 0) {
-      this.logger.info('Execution retention disabled (EXECUTION_RETENTION_SEC = 0) — finished executions are kept')
-      return
+    constructor(
+        private readonly persistence: ExecutionPersistence,
+        private readonly retentionSec: number,
+        private readonly logger: Logger,
+        private readonly now: () => string = () => new Date().toISOString()
+    ) {
     }
-    const intervalSec = Math.min(this.retentionSec, MAX_SWEEP_INTERVAL_SEC)
-    this.timer = setInterval(() => { void this.sweep() }, intervalSec * 1000)
-    if (this.timer.unref) this.timer.unref()
-    this.logger.info({ retentionSec: this.retentionSec, intervalSec }, 'Execution retention sweep started')
-  }
 
-  /** One sweep; returns how many executions were deleted. Never throws. */
-  async sweep(): Promise<number> {
-    if (this.running) return 0
-    this.running = true
-    let deleted = 0
-    try {
-      const now = this.now()
-      for (;;) {
-        const expired = await this.persistence.listExpiredExecutions(now, SWEEP_BATCH)
-        for (const executionId of expired) {
-          await this.persistence.deleteExecution(executionId)
-          deleted++
+    start(): void {
+        if (this.retentionSec <= 0) {
+            this.logger.info('Execution retention disabled (EXECUTION_RETENTION_SEC = 0) — finished executions are kept')
+            return
         }
-        if (expired.length < SWEEP_BATCH) break
-      }
-      if (deleted > 0) this.logger.info({ deleted }, 'Expired executions deleted')
-    } catch (err) {
-      this.logger.error({ deleted, error: errorMessage(err) }, 'Execution retention sweep failed — will retry')
-    } finally {
-      this.running = false
+        const intervalSec = Math.min(this.retentionSec, MAX_SWEEP_INTERVAL_SEC)
+        this.timer = setInterval(() => {
+            void this.sweep()
+        }, intervalSec * 1000)
+        if (this.timer.unref) this.timer.unref()
+        this.logger.info({retentionSec: this.retentionSec, intervalSec}, 'Execution retention sweep started')
     }
-    return deleted
-  }
 
-  stop(): void {
-    if (this.timer !== null) {
-      clearInterval(this.timer)
-      this.timer = null
+    /** One sweep; returns how many executions were deleted. Never throws. */
+    async sweep(): Promise<number> {
+        if (this.running) return 0
+        this.running = true
+        let deleted = 0
+        try {
+            const now = this.now()
+            for (; ;) {
+                const expired = await this.persistence.listExpiredExecutions(now, SWEEP_BATCH)
+                for (const executionId of expired) {
+                    await this.persistence.deleteExecution(executionId)
+                    deleted++
+                }
+                if (expired.length < SWEEP_BATCH) break
+            }
+            if (deleted > 0) this.logger.info({deleted}, 'Expired executions deleted')
+        } catch (err) {
+            this.logger.error({deleted, error: errorMessage(err)}, 'Execution retention sweep failed — will retry')
+        } finally {
+            this.running = false
+        }
+        return deleted
     }
-  }
+
+    stop(): void {
+        if (this.timer !== null) {
+            clearInterval(this.timer)
+            this.timer = null
+        }
+    }
 }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { z } from 'zod'
-import { ALLOWED_HTTP_METHODS, GOVERNANCE_DECISION } from '../../core/constants.js'
+import {z} from 'zod'
+import {ALLOWED_HTTP_METHODS, GOVERNANCE_DECISION} from '../../core/constants.js'
 
 /**
  * Governance Rule — Harbor-facing policy over external operations (§20).
@@ -42,22 +42,22 @@ const scalar = z.union([z.string(), z.number(), z.boolean()])
 
 /** The comparison operators — one set, used by flat-form fields and tree leaves alike. */
 const comparisonOperators = {
-  equals: scalar.optional(),
-  not_equals: scalar.optional(),
-  greater_than: z.number().optional(),
-  greater_than_or_equal: z.number().optional(),
-  less_than: z.number().optional(),
-  less_than_or_equal: z.number().optional(),
-  in: z.array(scalar).min(1).optional(),
-  not_in: z.array(scalar).min(1).optional(),
-  exists: z.boolean().optional(),
-  starts_with: z.string().optional(),
-  contains: scalar.optional()
+    equals: scalar.optional(),
+    not_equals: scalar.optional(),
+    greater_than: z.number().optional(),
+    greater_than_or_equal: z.number().optional(),
+    less_than: z.number().optional(),
+    less_than_or_equal: z.number().optional(),
+    in: z.array(scalar).min(1).optional(),
+    not_in: z.array(scalar).min(1).optional(),
+    exists: z.boolean().optional(),
+    starts_with: z.string().optional(),
+    contains: scalar.optional()
 }
 
 /** One field's operators in the flat form (`budget: { greater_than: 1 }`). */
 export const conditionSchema = z.object(comparisonOperators).strict()
-  .refine(c => Object.keys(c).length > 0, { message: 'a condition needs at least one operator' })
+    .refine(c => Object.keys(c).length > 0, {message: 'a condition needs at least one operator'})
 
 export type Condition = z.infer<typeof conditionSchema>
 export const CONDITION_OPERATORS = Object.keys(comparisonOperators) as ReadonlyArray<keyof Condition>
@@ -71,59 +71,59 @@ export const CONDITION_OPERANDS = ['field', 'ratio', 'percent_of', 'days_between
 
 /** A computed operand is a number; only these operators can hold on it. */
 const NUMERIC_OPERATORS: ReadonlySet<keyof Condition> = new Set<keyof Condition>([
-  'equals', 'not_equals', 'greater_than', 'greater_than_or_equal', 'less_than', 'less_than_or_equal', 'in', 'not_in', 'exists'
+    'equals', 'not_equals', 'greater_than', 'greater_than_or_equal', 'less_than', 'less_than_or_equal', 'in', 'not_in', 'exists'
 ])
 
 const fieldPath = z.string().min(1)
 
 const leafSchema = z.object({
-  kind: z.literal('leaf'),
-  field: fieldPath.optional(),
-  /** numerator ÷ denominator — e.g. "bid > 1.3× the current bid". */
-  ratio: z.object({ numerator: fieldPath, denominator: fieldPath }).strict().optional(),
-  /** 100 × part ÷ whole — e.g. "budget > 20% of the total budget". */
-  percent_of: z.object({ part: fieldPath, whole: fieldPath }).strict().optional(),
-  /** (to − from) in days between two ISO 8601 dates — e.g. "endDate is 30 days after startDate". */
-  days_between: z.object({ from: fieldPath, to: fieldPath }).strict().optional(),
-  ...comparisonOperators
+    kind: z.literal('leaf'),
+    field: fieldPath.optional(),
+    /** numerator ÷ denominator — e.g. "bid > 1.3× the current bid". */
+    ratio: z.object({numerator: fieldPath, denominator: fieldPath}).strict().optional(),
+    /** 100 × part ÷ whole — e.g. "budget > 20% of the total budget". */
+    percent_of: z.object({part: fieldPath, whole: fieldPath}).strict().optional(),
+    /** (to − from) in days between two ISO 8601 dates — e.g. "endDate is 30 days after startDate". */
+    days_between: z.object({from: fieldPath, to: fieldPath}).strict().optional(),
+    ...comparisonOperators
 }).strict().superRefine((leaf, ctx) => {
-  const operands = CONDITION_OPERANDS.filter(k => leaf[k] !== undefined)
-  if (operands.length !== 1) {
-    ctx.addIssue({ code: 'custom', message: `a condition reads exactly one of ${CONDITION_OPERANDS.join(', ')}` })
-  }
-  const operators = CONDITION_OPERATORS.filter(k => leaf[k] !== undefined)
-  if (operators.length === 0) {
-    ctx.addIssue({ code: 'custom', message: 'a condition needs at least one operator' })
-  }
-  // A computed operand is a number: an operator or value that can never hold
-  // on a number is a mistake in the rule, so it fails at load, not silently.
-  const computed = operands.length === 1 && operands[0] !== 'field' ? operands[0] : undefined
-  if (computed) {
-    for (const op of operators) {
-      if (!NUMERIC_OPERATORS.has(op) || !numericValue(op, leaf[op])) {
-        ctx.addIssue({
-          code: 'custom', path: [op],
-          message: `${computed} yields a number: use ${[...NUMERIC_OPERATORS].join(', ')} with number values`
-        })
-      }
+    const operands = CONDITION_OPERANDS.filter(k => leaf[k] !== undefined)
+    if (operands.length !== 1) {
+        ctx.addIssue({code: 'custom', message: `a condition reads exactly one of ${CONDITION_OPERANDS.join(', ')}`})
     }
-  }
+    const operators = CONDITION_OPERATORS.filter(k => leaf[k] !== undefined)
+    if (operators.length === 0) {
+        ctx.addIssue({code: 'custom', message: 'a condition needs at least one operator'})
+    }
+    // A computed operand is a number: an operator or value that can never hold
+    // on a number is a mistake in the rule, so it fails at load, not silently.
+    const computed = operands.length === 1 && operands[0] !== 'field' ? operands[0] : undefined
+    if (computed) {
+        for (const op of operators) {
+            if (!NUMERIC_OPERATORS.has(op) || !numericValue(op, leaf[op])) {
+                ctx.addIssue({
+                    code: 'custom', path: [op],
+                    message: `${computed} yields a number: use ${[...NUMERIC_OPERATORS].join(', ')} with number values`
+                })
+            }
+        }
+    }
 })
 
 function numericValue(op: keyof Condition, value: unknown): boolean {
-  if (op === 'exists') return true
-  if (op === 'in' || op === 'not_in') return Array.isArray(value) && value.every(v => typeof v === 'number')
-  return typeof value === 'number'
+    if (op === 'exists') return true
+    if (op === 'in' || op === 'not_in') return Array.isArray(value) && value.every(v => typeof v === 'number')
+    return typeof value === 'number'
 }
 
 export type ConditionLeaf = z.infer<typeof leafSchema>
 
 /** The normalised condition tree every loaded rule carries (`kind` is set by Harbor, not written by authors). */
 export type ConditionNode =
-  | { kind: 'allOf'; allOf: ConditionNode[] }
-  | { kind: 'anyOf'; anyOf: ConditionNode[] }
-  | { kind: 'not'; not: ConditionNode }
-  | ConditionLeaf
+    | { kind: 'allOf'; allOf: ConditionNode[] }
+    | { kind: 'anyOf'; anyOf: ConditionNode[] }
+    | { kind: 'not'; not: ConditionNode }
+    | ConditionLeaf
 
 const COMPOSITES = ['allOf', 'anyOf', 'not'] as const
 
@@ -134,16 +134,16 @@ const COMPOSITES = ['allOf', 'anyOf', 'not'] as const
  * carries `kind` is validated as-is, so parsing is idempotent.
  */
 function tagNode(value: unknown): unknown {
-  if (value === null || typeof value !== 'object' || Array.isArray(value) || 'kind' in value) return value
-  const composite = COMPOSITES.find(k => k in value)
-  return { ...value, kind: composite ?? 'leaf' }
+    if (value === null || typeof value !== 'object' || Array.isArray(value) || 'kind' in value) return value
+    const composite = COMPOSITES.find(k => k in value)
+    return {...value, kind: composite ?? 'leaf'}
 }
 
 export const conditionNodeSchema: z.ZodType<ConditionNode> = z.lazy(() => z.preprocess(tagNode, z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('allOf'), allOf: z.array(conditionNodeSchema).min(1) }).strict(),
-  z.object({ kind: z.literal('anyOf'), anyOf: z.array(conditionNodeSchema).min(1) }).strict(),
-  z.object({ kind: z.literal('not'), not: conditionNodeSchema }).strict(),
-  leafSchema
+    z.object({kind: z.literal('allOf'), allOf: z.array(conditionNodeSchema).min(1)}).strict(),
+    z.object({kind: z.literal('anyOf'), anyOf: z.array(conditionNodeSchema).min(1)}).strict(),
+    z.object({kind: z.literal('not'), not: conditionNodeSchema}).strict(),
+    leafSchema
 ])))
 
 /** Keys that make `conditions` a tree node rather than the flat shorthand. */
@@ -155,23 +155,23 @@ const TREE_KEYS: ReadonlySet<string> = new Set<string>(['kind', ...COMPOSITES, .
  * in the flat form.
  */
 function isFlatForm(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
-    Object.entries(value).every(([k, v]) => !TREE_KEYS.has(k) || (k === 'kind' && typeof v !== 'string'))
+    return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+        Object.entries(value).every(([k, v]) => !TREE_KEYS.has(k) || (k === 'kind' && typeof v !== 'string'))
 }
 
 function treeSize(node: ConditionNode, depth = 1): { depth: number; nodes: number } {
-  const children =
-    node.kind === 'allOf' ? node.allOf
-    : node.kind === 'anyOf' ? node.anyOf
-    : node.kind === 'not' ? [node.not]
-    : []
-  return children.reduce(
-    (acc, child) => {
-      const c = treeSize(child, depth + 1)
-      return { depth: Math.max(acc.depth, c.depth), nodes: acc.nodes + c.nodes }
-    },
-    { depth, nodes: 1 }
-  )
+    const children =
+        node.kind === 'allOf' ? node.allOf
+            : node.kind === 'anyOf' ? node.anyOf
+                : node.kind === 'not' ? [node.not]
+                    : []
+    return children.reduce(
+        (acc, child) => {
+            const c = treeSize(child, depth + 1)
+            return {depth: Math.max(acc.depth, c.depth), nodes: acc.nodes + c.nodes}
+        },
+        {depth, nodes: 1}
+    )
 }
 
 /**
@@ -181,33 +181,39 @@ function treeSize(node: ConditionNode, depth = 1): { depth: number; nodes: numbe
  * reported at its own path; anything malformed stops the rule from loading.
  */
 const conditionsSchema = z.unknown().transform((raw, ctx): ConditionNode | undefined => {
-  if (raw === undefined) return undefined
-  const forward = (issues: ReadonlyArray<{ message: string; path: ReadonlyArray<PropertyKey> }>) => {
-    for (const issue of issues) ctx.addIssue({ code: 'custom', message: issue.message, path: [...issue.path] })
-    return z.NEVER
-  }
+    if (raw === undefined) return undefined
+    const forward = (issues: ReadonlyArray<{ message: string; path: ReadonlyArray<PropertyKey> }>) => {
+        for (const issue of issues) ctx.addIssue({code: 'custom', message: issue.message, path: [...issue.path]})
+        return z.NEVER
+    }
 
-  let normalised: ConditionNode
-  if (isFlatForm(raw)) {
-    const flat = z.record(fieldPath, conditionSchema).safeParse(raw)
-    if (!flat.success) return forward(flat.error.issues)
-    const leaves = Object.entries(flat.data).map(([field, c]): ConditionNode => ({ kind: 'leaf', field, ...c }))
-    if (leaves.length === 0) return undefined
-    normalised = { kind: 'allOf', allOf: leaves }
-  } else {
-    const tree = conditionNodeSchema.safeParse(raw)
-    if (!tree.success) return forward(tree.error.issues)
-    normalised = tree.data
-  }
-  // The limits apply to what is evaluated, so the flat shorthand cannot carry more than the tree it stands for.
-  const size = treeSize(normalised)
-  if (size.depth > MAX_CONDITION_DEPTH) {
-    return forward([{ message: `conditions nest ${size.depth} levels deep; the limit is ${MAX_CONDITION_DEPTH}`, path: [] }])
-  }
-  if (size.nodes > MAX_CONDITION_NODES) {
-    return forward([{ message: `conditions have ${size.nodes} nodes; the limit is ${MAX_CONDITION_NODES}`, path: [] }])
-  }
-  return normalised
+    let normalised: ConditionNode
+    if (isFlatForm(raw)) {
+        const flat = z.record(fieldPath, conditionSchema).safeParse(raw)
+        if (!flat.success) return forward(flat.error.issues)
+        const leaves = Object.entries(flat.data).map(([field, c]): ConditionNode => ({kind: 'leaf', field, ...c}))
+        if (leaves.length === 0) return undefined
+        normalised = {kind: 'allOf', allOf: leaves}
+    } else {
+        const tree = conditionNodeSchema.safeParse(raw)
+        if (!tree.success) return forward(tree.error.issues)
+        normalised = tree.data
+    }
+    // The limits apply to what is evaluated, so the flat shorthand cannot carry more than the tree it stands for.
+    const size = treeSize(normalised)
+    if (size.depth > MAX_CONDITION_DEPTH) {
+        return forward([{
+            message: `conditions nest ${size.depth} levels deep; the limit is ${MAX_CONDITION_DEPTH}`,
+            path: []
+        }])
+    }
+    if (size.nodes > MAX_CONDITION_NODES) {
+        return forward([{
+            message: `conditions have ${size.nodes} nodes; the limit is ${MAX_CONDITION_NODES}`,
+            path: []
+        }])
+    }
+    return normalised
 })
 
 /** `*` matches anything; otherwise exact, case-sensitive. */
@@ -223,42 +229,42 @@ export const PATH_SUBTREE_SUFFIX = '/**'
  * would be ambiguous and fails at load.
  */
 const pathPattern = matchValue.refine(
-  p => !p.includes('**') || (p.endsWith(PATH_SUBTREE_SUFFIX) && !p.slice(0, -PATH_SUBTREE_SUFFIX.length).includes('*')),
-  { message: '"**" is only allowed as the whole last segment, e.g. /campaigns/**' }
+    p => !p.includes('**') || (p.endsWith(PATH_SUBTREE_SUFFIX) && !p.slice(0, -PATH_SUBTREE_SUFFIX.length).includes('*')),
+    {message: '"**" is only allowed as the whole last segment, e.g. /campaigns/**'}
 ).refine(
-  // A template without the leading slash (`campaigns/{id}`) can never equal a resolved one: it would load and govern nothing.
-  p => p === '*' || p.startsWith('/'),
-  { message: 'a path is an OpenAPI template starting with "/" (e.g. /campaigns/{id}), a subtree (/campaigns/**) or *' }
+    // A template without the leading slash (`campaigns/{id}`) can never equal a resolved one: it would load and govern nothing.
+    p => p === '*' || p.startsWith('/'),
+    {message: 'a path is an OpenAPI template starting with "/" (e.g. /campaigns/{id}), a subtree (/campaigns/**) or *'}
 )
 
 export const governanceRuleSchema = z.object({
-  name: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'kebab-case, e.g. high-budget-campaign'),
-  description: z.string().optional(),
-  /** Free-form revision marker kept on every decision for audit (§35). */
-  version: z.union([z.string(), z.number()]).optional().transform(v => (v === undefined ? '1' : String(v))),
-  match: z.object({
-    service: matchValue.optional(),
-    /** OpenAPI operationId. */
-    operation: matchValue.optional(),
-    /** One HTTP method or a list (`[GET, PUT]`) — restricts the rule to those kinds of request at any level. */
-    method: z.union([z.enum(ALLOWED_HTTP_METHODS), z.array(z.enum(ALLOWED_HTTP_METHODS)).min(1)]).optional()
-      .transform(m => (m === undefined ? undefined : Array.isArray(m) ? m : [m])),
-    /** OpenAPI path template exactly as in the spec (e.g. `/campaigns/{id}/activate`), or a subtree (`/campaigns/**`). */
-    path: pathPattern.optional()
-  }).strict().refine(m => Object.keys(m).length > 0, { message: 'match needs at least one of service, operation, method, path' }),
-  /** Boolean tree over request values; bare field names read the body, `body.` / `query.` / `path.` select explicitly. */
-  conditions: conditionsSchema.optional(),
-  /**
-   * `true` pins the decision to this rule's level: when it matches, more
-   * specific levels are not consulted (e.g. a gateway-wide "never DELETE"
-   * that no service or endpoint rule can override).
-   */
-  final: z.boolean().optional(),
-  /** Advisory outcome only — never a request mutation or a side effect. */
-  action: z.object({
-    type: z.enum([GOVERNANCE_DECISION.ALLOW, GOVERNANCE_DECISION.DENY, GOVERNANCE_DECISION.REQUIRE_APPROVAL]),
-    reason: z.string().optional()
-  }).strict()
+    name: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'kebab-case, e.g. high-budget-campaign'),
+    description: z.string().optional(),
+    /** Free-form revision marker kept on every decision for audit (§35). */
+    version: z.union([z.string(), z.number()]).optional().transform(v => (v === undefined ? '1' : String(v))),
+    match: z.object({
+        service: matchValue.optional(),
+        /** OpenAPI operationId. */
+        operation: matchValue.optional(),
+        /** One HTTP method or a list (`[GET, PUT]`) — restricts the rule to those kinds of request at any level. */
+        method: z.union([z.enum(ALLOWED_HTTP_METHODS), z.array(z.enum(ALLOWED_HTTP_METHODS)).min(1)]).optional()
+            .transform(m => (m === undefined ? undefined : Array.isArray(m) ? m : [m])),
+        /** OpenAPI path template exactly as in the spec (e.g. `/campaigns/{id}/activate`), or a subtree (`/campaigns/**`). */
+        path: pathPattern.optional()
+    }).strict().refine(m => Object.keys(m).length > 0, {message: 'match needs at least one of service, operation, method, path'}),
+    /** Boolean tree over request values; bare field names read the body, `body.` / `query.` / `path.` select explicitly. */
+    conditions: conditionsSchema.optional(),
+    /**
+     * `true` pins the decision to this rule's level: when it matches, more
+     * specific levels are not consulted (e.g. a gateway-wide "never DELETE"
+     * that no service or endpoint rule can override).
+     */
+    final: z.boolean().optional(),
+    /** Advisory outcome only — never a request mutation or a side effect. */
+    action: z.object({
+        type: z.enum([GOVERNANCE_DECISION.ALLOW, GOVERNANCE_DECISION.DENY, GOVERNANCE_DECISION.REQUIRE_APPROVAL]),
+        reason: z.string().optional()
+    }).strict()
 }).strict()
 
 export type GovernanceRule = z.infer<typeof governanceRuleSchema>

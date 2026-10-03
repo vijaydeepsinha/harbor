@@ -1,55 +1,57 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { describe, it, expect } from 'vitest'
-import { resolveAuth, resolveCircuitBreaker } from '../../src/wiring/service-wiring.js'
-import { AUTH_TYPE, CB_TYPE } from '../../src/core/constants.js'
-import { StaticTokenAuthStrategy } from '../../src/adapters/auth/strategies/static-token.strategy.js'
-import { NoopCircuitBreakerStrategy } from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
-import { CountBasedCircuitBreakerStrategy } from '../../src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
+import {describe, expect, it} from 'vitest'
+import {resolveAuth, resolveCircuitBreaker} from '../../src/wiring/service-wiring.js'
+import {AUTH_TYPE, CB_TYPE} from '../../src/core/constants.js'
+import {StaticTokenAuthStrategy} from '../../src/adapters/auth/strategies/static-token.strategy.js'
+import {NoopCircuitBreakerStrategy} from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
+import {
+    CountBasedCircuitBreakerStrategy
+} from '../../src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
 
 describe('resolveAuth', () => {
-  it('throws when auth config is undefined', () => {
-    expect(() => resolveAuth(undefined)).toThrow('config.auth is required')
-  })
+    it('throws when auth config is undefined', () => {
+        expect(() => resolveAuth(undefined)).toThrow('config.auth is required')
+    })
 
-  it('returns StaticTokenAuthStrategy for static-token type', () => {
-    const strategy = resolveAuth({ type: AUTH_TYPE.STATIC_TOKEN, token: 'secret' })
-    expect(strategy).toBeInstanceOf(StaticTokenAuthStrategy)
-  })
+    it('returns StaticTokenAuthStrategy for static-token type', () => {
+        const strategy = resolveAuth({type: AUTH_TYPE.STATIC_TOKEN, token: 'secret'})
+        expect(strategy).toBeInstanceOf(StaticTokenAuthStrategy)
+    })
 
-  it('throws when static-token type has no token', () => {
-    expect(() =>
-      resolveAuth({ type: AUTH_TYPE.STATIC_TOKEN } as never)
-    ).toThrow('config.auth.token is required for static-token auth')
-  })
+    it('throws when static-token type has no token', () => {
+        expect(() =>
+            resolveAuth({type: AUTH_TYPE.STATIC_TOKEN} as never)
+        ).toThrow('config.auth.token is required for static-token auth')
+    })
 
-  it('throws when oauth-2.1 type has no audience (resource binding, spec §17)', () => {
-    expect(() =>
-      resolveAuth({ type: AUTH_TYPE.OAUTH_2_1, authorizationServer: 'https://auth.example.com' } as never)
-    ).toThrow('config.auth.audience (resource binding) is required for oauth-2.1 auth')
-  })
+    it('throws when oauth-2.1 type has no audience (resource binding, spec §17)', () => {
+        expect(() =>
+            resolveAuth({type: AUTH_TYPE.OAUTH_2_1, authorizationServer: 'https://auth.example.com'} as never)
+        ).toThrow('config.auth.audience (resource binding) is required for oauth-2.1 auth')
+    })
 })
 
 describe('resolveCircuitBreaker', () => {
-  it('returns NoopCircuitBreakerStrategy when config is undefined', () => {
-    const cb = resolveCircuitBreaker(undefined)
-    expect(cb).toBeInstanceOf(NoopCircuitBreakerStrategy)
-    expect(cb.name).toBe(CB_TYPE.NOOP)
-  })
-
-  it('returns NoopCircuitBreakerStrategy for noop type', () => {
-    const cb = resolveCircuitBreaker({ type: CB_TYPE.NOOP })
-    expect(cb).toBeInstanceOf(NoopCircuitBreakerStrategy)
-  })
-
-  it('returns CountBasedCircuitBreakerStrategy for count-based type', () => {
-    const cb = resolveCircuitBreaker({
-      type: CB_TYPE.COUNT_BASED,
-      failureThreshold: 5,
-      recoveryTimeMs: 30_000
+    it('returns NoopCircuitBreakerStrategy when config is undefined', () => {
+        const cb = resolveCircuitBreaker(undefined)
+        expect(cb).toBeInstanceOf(NoopCircuitBreakerStrategy)
+        expect(cb.name).toBe(CB_TYPE.NOOP)
     })
-    expect(cb).toBeInstanceOf(CountBasedCircuitBreakerStrategy)
-    expect(cb.name).toBe(CB_TYPE.COUNT_BASED)
-  })
+
+    it('returns NoopCircuitBreakerStrategy for noop type', () => {
+        const cb = resolveCircuitBreaker({type: CB_TYPE.NOOP})
+        expect(cb).toBeInstanceOf(NoopCircuitBreakerStrategy)
+    })
+
+    it('returns CountBasedCircuitBreakerStrategy for count-based type', () => {
+        const cb = resolveCircuitBreaker({
+            type: CB_TYPE.COUNT_BASED,
+            failureThreshold: 5,
+            recoveryTimeMs: 30_000
+        })
+        expect(cb).toBeInstanceOf(CountBasedCircuitBreakerStrategy)
+        expect(cb.name).toBe(CB_TYPE.COUNT_BASED)
+    })
 })
