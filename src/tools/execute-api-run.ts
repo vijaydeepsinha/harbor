@@ -48,8 +48,8 @@ export type ApiExecuteReport =
   /**
    * The run failed, paused or was stopped — or never started (beginRun refused
    * it: locked, finished, approval still pending). `status` is what the
-   * response reports: the run's outcome once it started, the stored status
-   * when it did not.
+   * response reports: the recorded outcome, or the read-back status after a
+   * failed settlement. Omitted when the stored status cannot be confirmed.
    */
   | { kind: 'failed'; executionId?: string; program: string; calls: CallLogSource; error: unknown; status?: ExecutionStatus }
 
@@ -73,9 +73,6 @@ export interface ApiExecuteRunDeps {
   /** The caller's X-Harbor-Client-ID from the inbound request, forwarded on every backend call. */
   callerClientId?: string
 }
-
-/** Where a run that could not be recorded is left: resumable, and resumed by replaying its journal. */
-const LEFT_RUNNING = `${EXECUTION_STATUS.RUNNING}, run lock released`
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
   EXECUTION_STATUS.COMPLETED, EXECUTION_STATUS.FAILED, EXECUTION_STATUS.DENIED, EXECUTION_STATUS.CANCELLED
@@ -121,26 +118,31 @@ export async function runApiExecute(input: ApiExecuteRunInput, deps: ApiExecuteR
     result = await runApiInSandbox(program, sandboxContext(input, deps, program, executionId, bridge, calls))
   } catch (error) {
     const { status } = classifyFailure(error)
+    let reported: ExecutionStatus | undefined = status
     // beginRun may itself have thrown (locked, not resumable, approval still
     // pending) — then no run started, there is no lock to release and the
     // stored execution must stay exactly as it was.
     if (governanceRuntime && executionId !== undefined && started) {
       const outcome = runOutcomeFor(error, status, getErrorCode(error), ensureError(error).message)
-      // The run's own outcome is what the client gets, whether or not the
-      // store takes it. If it does not, the record stays RUNNING with its
-      // lock released (endRun releases it either way): a resume replays the
-      // journal and reaches this outcome again, and records it then.
-      const id = executionId
-      await governanceRuntime.executionManager.endRun(id, outcome).catch((e: unknown) => reportPersistenceFailure({
-        operation: PERSISTENCE_OPERATION.RUN_END, executionId: id, intended: status, left: LEFT_RUNNING,
-        recovery: 'a resume replays the journal to the same outcome and records it', error: ensureError(e)
-      }))
+      // Preserve the program's error even if settlement fails, but metadata
+      // must describe the observed record, not the write we intended.
+      try {
+        await governanceRuntime.executionManager.endRun(executionId, outcome)
+      } catch (e) {
+        const persisted = await readBackSettlement(governanceRuntime, executionId, reportPersistenceFailure)
+        reported = persisted?.status
+        reportPersistenceFailure({
+          operation: PERSISTENCE_OPERATION.RUN_END, executionId, intended: status, left: reported ?? 'unknown',
+          recovery: 'inspect the execution and lock; if resumable, replay the journal to record the outcome',
+          error: ensureError(e)
+        })
+      }
     }
     // When no run started nothing changed, so the response reports the
     // execution as it is stored — not the status this error would have given a run.
-    const reported = started || !governanceRuntime || executionId === undefined
-      ? status
-      : await governanceRuntime.executionManager.load(executionId).then(r => r.status, () => undefined)
+    if (!started && governanceRuntime && executionId !== undefined) {
+      reported = await governanceRuntime.executionManager.load(executionId).then(r => r.status, () => undefined)
+    }
     return {
       kind: 'failed', ...(executionId !== undefined ? { executionId } : {}), program, calls, error,
       ...(reported !== undefined ? { status: reported } : {})
@@ -151,18 +153,44 @@ export async function runApiExecute(input: ApiExecuteRunInput, deps: ApiExecuteR
     try {
       await governanceRuntime.executionManager.endRun(executionId, { kind: RUN_OUTCOME.COMPLETED, result })
     } catch (e) {
-      // The program completed; only recording it failed. Writing FAILED now
-      // would make finished work unresumable and invite resubmitting it — so
-      // the record stays RUNNING (lock released) and the client is told to
-      // resume, which replays every call from the journal and sends none again.
+      // A rejected write may have applied, or only lock release may have
+      // failed. Never overwrite completion or assume the record is RUNNING.
+      const persisted = await readBackSettlement(governanceRuntime, executionId, reportPersistenceFailure)
       reportPersistenceFailure({
-        operation: PERSISTENCE_OPERATION.RUN_END, executionId, intended: EXECUTION_STATUS.COMPLETED, left: LEFT_RUNNING,
-        recovery: 'a resume replays every call from the journal (none is sent again) and records the result', error: ensureError(e)
+        operation: PERSISTENCE_OPERATION.RUN_END, executionId, intended: EXECUTION_STATUS.COMPLETED,
+        left: persisted?.status ?? 'unknown',
+        recovery: persisted?.status === EXECUTION_STATUS.COMPLETED
+          ? 'completion is recorded; return the persisted result, do not resume or resubmit; inspect any retained lock'
+          : 'inspect the execution and lock; if resumable, replay the journal to record the result',
+        error: ensureError(e)
       })
-      return { kind: 'failed', executionId, program, calls, error: new RunOutcomeNotRecordedError(executionId), status: EXECUTION_STATUS.RUNNING }
+      if (persisted?.status === EXECUTION_STATUS.COMPLETED) {
+        return { kind: 'completed', executionId, program, calls, result: persisted.result }
+      }
+      return {
+        kind: 'failed', executionId, program, calls, error: new RunOutcomeNotRecordedError(executionId),
+        ...(persisted !== undefined ? { status: persisted.status } : {})
+      }
     }
   }
   return { kind: 'completed', ...(executionId !== undefined ? { executionId } : {}), program, calls, result }
+}
+
+async function readBackSettlement(
+  governanceRuntime: GovernanceRuntime, executionId: string, reportFailure: PersistenceFailureReporter
+): Promise<ExecutionRecord | undefined> {
+  try {
+    return await governanceRuntime.executionManager.load(executionId)
+  } catch (error) {
+    reportFailure({
+      operation: PERSISTENCE_OPERATION.RUN_END, executionId,
+      intended: 'read execution status after an ambiguous settlement',
+      left: 'unknown',
+      recovery: 'restore persistence and inspect the execution before attempting a resume',
+      error: ensureError(error)
+    })
+    return undefined
+  }
 }
 
 function sandboxContext(

@@ -13,6 +13,17 @@ Requirement → test mapping: [`tests/REQUIREMENT_COVERAGE.md`](tests/REQUIREMEN
 | **Governance E2E** | `npm run test:governance` | **real MCP 2026-07-28 calls → real gateway (production image) → real rules → real V8 isolate → real HTTP → deterministic mock backend** (156 tests in 15 files), plus the Postman collection (15 folders, 118 requests, 224 assertions) | Docker (or `-- --local`) |
 | Demo smoke | `python3 tests/demo_e2e.py --start-services` | the five tools and the auth strategies against the demo services | Python 3.9+, Node 22 |
 
+Focused PR #8 follow-up regressions:
+
+```bash
+npx vitest run tests/integration/persistence-failures.test.ts tests/unit/governance-rules.test.ts tests/unit/url-utils.test.ts
+```
+
+These inject failures before/after a completion write and during lock release,
+check unreadable status reporting without repeating backend calls, exercise
+unusable claimed current bids in the example rules, and verify URL diagnostics
+redact every query value rather than relying on credential parameter names.
+
 ## The governance suite in one command
 
 ```bash

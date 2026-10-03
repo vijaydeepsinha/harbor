@@ -30,32 +30,24 @@ export function normalizeEndpointPath(path: string): string {
     .join('/')
 }
 
-/**
- * Query parameters that carry a credential, by name: tokens, keys,
- * signatures, passwords (`access_token`, `api_key`, `sig`, `X-Amz-Signature`,
- * `X-Amz-Credential`, …). Deliberately broad — a harmless parameter that
- * happens to match (`keyword`) only loses its value in a log line.
- */
-const CREDENTIAL_PARAM = /token|secret|passw|pwd|sig|key|auth|credential|jwt|bearer/i
-
 /** What stands in for a credential's value in a redacted URL. */
 export const REDACTED_VALUE = 'REDACTED'
 
 /**
  * A URL as it may appear in logs and error messages. The query string is
- * kept — it often says *which* document was asked for (`?ref=main`,
- * `?version=2`) and an operator needs that to diagnose a failed fetch — but
- * the userinfo is dropped and the value of every credential-like parameter
- * is replaced, so a presigned or token-bearing URL never reaches a log.
+ * kept as parameter names, but every value is replaced: credentials can
+ * travel under arbitrary names, not just `token` or `api_key`. Userinfo and
+ * fragments are removed too. The origin and path remain diagnostic context.
  */
 export function redactUrl(url: string): string {
   try {
     const u = new URL(url)
     u.username = ''
     u.password = ''
-    // Collected first: `set` rewrites the list being iterated (it also folds a repeated name into one).
-    const credentialParams = [...new Set(u.searchParams.keys())].filter(name => CREDENTIAL_PARAM.test(name))
-    for (const name of credentialParams) u.searchParams.set(name, REDACTED_VALUE)
+    u.hash = ''
+    const redacted = new URLSearchParams()
+    for (const name of u.searchParams.keys()) redacted.append(name, REDACTED_VALUE)
+    u.search = redacted.toString()
     return u.toString()
   } catch {
     return '(invalid URL)'

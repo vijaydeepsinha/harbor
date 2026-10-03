@@ -9,7 +9,7 @@
  * next run recovers from. Each test stops a write with a fault-injecting
  * store and then checks all three.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import type { Logger } from '../../src/core/types/logger.types.js'
 import type { MetricsRegistry } from '../../src/runtime/observability/metrics.js'
 import type { ExecutionRecord, ActivityRecord } from '../../src/core/types/execution.types.js'
@@ -67,7 +67,7 @@ describe('a run whose outcome the store cannot take', () => {
     await store.inner.releaseLock(executionId)
     expect(failureLogs()).toEqual([expect.objectContaining({
       level: 'error', operation: PERSISTENCE_OPERATION.RUN_END, executionId,
-      intended: EXECUTION_STATUS.COMPLETED, left: 'RUNNING, run lock released', error: 'store unavailable (updateExecution)'
+      intended: EXECUTION_STATUS.COMPLETED, left: EXECUTION_STATUS.RUNNING, error: 'store unavailable (updateExecution)'
     })])
     expect(counted).toContainEqual([METRIC.PERSISTENCE_FAILURES, { operation: PERSISTENCE_OPERATION.RUN_END }])
 
@@ -80,7 +80,87 @@ describe('a run whose outcome the store cannot take', () => {
     expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
   })
 
-  it('stopped: the client gets the original error, the failed write is reported, and a resume records the same outcome', async () => {
+  it.each(['completion acknowledgement', 'lock release before deletion', 'lock release after deletion'])(
+    'returns the persisted completed result when %s fails', async fault => {
+      const store = faultyStore()
+      const governanceRuntime = makeRuntime([], GOVERNANCE_DECISION.ALLOW, store.persistence)
+      const { connector, count } = makeConnector()
+      const { handler, failureLogs } = observedTool(governanceRuntime, connector)
+      if (fault === 'completion acknowledgement') {
+        store.fail({
+          method: 'updateExecution', timing: 'after',
+          when: r => (r as ExecutionRecord).status === EXECUTION_STATUS.COMPLETED
+        })
+      } else {
+        const update = store.persistence.updateExecution.bind(store.persistence)
+        const spy = vi.spyOn(store.persistence, 'updateExecution').mockImplementation(async record => {
+          await update(record)
+          if (record.status === EXECUTION_STATUS.COMPLETED) {
+            store.fail({ method: 'releaseLock', timing: fault === 'lock release after deletion' ? 'after' : 'before' })
+          }
+        })
+        // Keep the spy local to this tool invocation; do not affect later cases.
+        try {
+          await verify()
+        } finally {
+          spy.mockRestore()
+        }
+        return
+      }
+      await verify()
+
+      async function verify() {
+        const first = await handler({ service: 'trafficking', code: PROGRAM }, makeCtx())
+        const executionId = metaOf(first)[EXECUTION_ID_META_KEY]!
+        expect(first['isError']).toBeUndefined()
+        expect(parseContent(first)).toEqual({ did: 'POST /campaigns/C1/finalize' })
+        expect(metaOf(first)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
+        expect((await store.inner.getExecution(executionId))?.status).toBe(EXECUTION_STATUS.COMPLETED)
+        expect(failureLogs()).toEqual([expect.objectContaining({
+          operation: PERSISTENCE_OPERATION.RUN_END, intended: EXECUTION_STATUS.COMPLETED,
+          left: EXECUTION_STATUS.COMPLETED, executionId
+        })])
+        const retry = await handler({ service: 'trafficking', code: PROGRAM }, makeCtx({ executionIdMeta: executionId }))
+        expect(parseContent(retry)).toMatchObject({ code: ERR.EXECUTION_NOT_RESUMABLE })
+        expect(metaOf(retry)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
+        expect(count('GET', '/campaigns')).toBe(1)
+        expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
+        await store.inner.releaseLock(executionId)
+      }
+    }
+  )
+
+  it.each(['before', 'after'] as const)('omits unknown status when completion fails %s applying and read-back also fails', async timing => {
+    const store = faultyStore()
+    const governanceRuntime = makeRuntime([], GOVERNANCE_DECISION.ALLOW, store.persistence)
+    const { connector, count } = makeConnector()
+    const { handler, failureLogs } = observedTool(governanceRuntime, connector)
+    store.fail({
+      method: 'updateExecution',
+      timing,
+      when: r => {
+        if ((r as ExecutionRecord).status !== EXECUTION_STATUS.COMPLETED) return false
+        store.fail({ method: 'getExecution' })
+        return true
+      }
+    })
+    const first = await handler({ service: 'trafficking', code: PROGRAM }, makeCtx())
+    const executionId = metaOf(first)[EXECUTION_ID_META_KEY]!
+    expect(parseContent(first)).toMatchObject({ code: ERR.RUN_OUTCOME_NOT_RECORDED, retryable: true })
+    expect(metaOf(first)[EXECUTION_STATUS_META_KEY]).toBeUndefined()
+    expect(failureLogs()).toHaveLength(2)
+    expect(failureLogs().every(log => log['left'] === 'unknown')).toBe(true)
+    const resumed = await handler({ service: 'trafficking', code: PROGRAM }, makeCtx({ executionIdMeta: executionId }))
+    if (timing === 'before') {
+      expect(resumed['isError']).toBeUndefined()
+    } else {
+      expect(parseContent(resumed)).toMatchObject({ code: ERR.EXECUTION_NOT_RESUMABLE })
+    }
+    expect(metaOf(resumed)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(1)
+  })
+
+  it('stopped: the original error stands, metadata reports the stored status, and a resume records the same outcome', async () => {
     const store = faultyStore()
     const deny = { name: 'no-finalize', match: { operation: 'finalizeCampaign' }, action: { type: 'DENY', reason: 'frozen' } }
     const governanceRuntime = makeRuntime([deny], GOVERNANCE_DECISION.ALLOW, store.persistence)
@@ -91,7 +171,7 @@ describe('a run whose outcome the store cannot take', () => {
     const first = await handler({ service: 'trafficking', code: PROGRAM }, makeCtx())
     const executionId = metaOf(first)[EXECUTION_ID_META_KEY]!
     expect(parseContent(first)).toMatchObject({ code: ERR.GOVERNANCE_DENIED }) // preserved, not replaced by the store's error
-    expect(metaOf(first)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.DENIED)
+    expect(metaOf(first)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.RUNNING)
     expect(failureLogs()).toEqual([expect.objectContaining({ operation: PERSISTENCE_OPERATION.RUN_END, intended: EXECUTION_STATUS.DENIED, executionId })])
     expect((await store.inner.getExecution(executionId))?.status).toBe(EXECUTION_STATUS.RUNNING)
 
@@ -100,6 +180,28 @@ describe('a run whose outcome the store cannot take', () => {
     expect((await store.inner.getExecution(executionId))?.status).toBe(EXECUTION_STATUS.DENIED)
     expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
     expect(count('GET', '/campaigns')).toBe(1) // replayed on the resume
+  })
+
+  it('stopped: unreadable settlement omits status without replacing the governance error', async () => {
+    const store = faultyStore()
+    const deny = { name: 'no-finalize', match: { operation: 'finalizeCampaign' }, action: { type: 'DENY', reason: 'frozen' } }
+    const governanceRuntime = makeRuntime([deny], GOVERNANCE_DECISION.ALLOW, store.persistence)
+    const { connector, count } = makeConnector()
+    const { handler, failureLogs } = observedTool(governanceRuntime, connector)
+    store.fail({
+      method: 'updateExecution',
+      when: record => {
+        if ((record as ExecutionRecord).status !== EXECUTION_STATUS.DENIED) return false
+        store.fail({ method: 'getExecution' })
+        return true
+      }
+    })
+    const first = await handler({ service: 'trafficking', code: PROGRAM }, makeCtx())
+    expect(parseContent(first)).toMatchObject({ code: ERR.GOVERNANCE_DENIED, retryable: false })
+    expect(metaOf(first)[EXECUTION_STATUS_META_KEY]).toBeUndefined()
+    expect(failureLogs()).toHaveLength(2)
+    expect(failureLogs().every(log => log['left'] === 'unknown')).toBe(true)
+    expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
   })
 })
 

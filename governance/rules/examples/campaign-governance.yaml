@@ -44,11 +44,11 @@ rules:
   # up the campaign's current bid. So this compares two fields of the same
   # request, and works only because this API's update carries both: the new
   # `bid` and the `currentBid` it replaces. The program writes that request, so
-  # `currentBid` is its claim — a bid change that does not state it is
-  # reviewed too (else leaving it out would skip the rule), and `bid-ceiling`
+  # `currentBid` is its claim — a bid change without a usable positive value is
+  # reviewed too (else an invalid denominator would skip the rule), and `bid-ceiling`
   # holds whatever it says.
   - name: bid-jump
-    description: Raising a bid by more than 30% over the current bid the request states — or not stating it — is reviewed
+    description: Raising a bid by more than 30% over the claimed current bid — or supplying no usable positive current bid — is reviewed
     match: { service: trafficking, operation: updateCampaign }
     conditions:
       allOf:
@@ -56,8 +56,10 @@ rules:
         - anyOf:
             - ratio: { numerator: body.bid, denominator: body.currentBid }
               greater_than: 1.3
-            - { field: body.currentBid, exists: false }
-    action: { type: REQUIRE_APPROVAL, reason: 'Bid raised by more than 30% at once, or the current bid was not stated' }
+            - ratio: { numerator: body.bid, denominator: body.currentBid }
+              exists: false
+            - not: { field: body.currentBid, greater_than: 0 }
+    action: { type: REQUIRE_APPROVAL, reason: 'Bid raised by more than 30% at once, or the current bid is not a usable positive number' }
 
   - name: bid-ceiling
     description: An absolute ceiling no claimed current bid can move

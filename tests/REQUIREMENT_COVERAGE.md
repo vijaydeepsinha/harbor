@@ -10,6 +10,14 @@ Status reflects the last full run (`npm run test:governance`, Docker Compose mod
 at commit `035a261`: E2E 156/156 (15 files), Postman 118 requests / 224 assertions, 380 passed in
 total; `npm test` 66 files, 743 passed + 1 skipped.
 
+PR #8 follow-up regressions: `tests/integration/persistence-failures.test.ts`
+covers RG-003/RG-005 settlement failures before and after completion writes,
+failed lock release, unreadable read-back, truthful status metadata and no
+repeated backend side effects. `tests/unit/governance-rules.test.ts` covers
+RG-009 with missing, non-numeric, zero and negative claimed current bids in
+the example policy. `tests/unit/url-utils.test.ts` verifies that arbitrary
+query values and fragments do not appear in diagnostic URLs.
+
 | Requirement | Expected behaviour | Existing unit / integration test | E2E test (file › test) | Postman folder | CI | Status |
 |---|---|---|---|---|---|---|
 | RG-001 durable `executionId` in `_meta` | one program ⇒ one id across every round trip | `execution-manager.test.ts`, `execute-api.tool.codemode.test.ts` | protocol › should_stamp_server_info_and_execution_metadata…; lifecycle › should_keep_one_execution_id_across_every_round_trip… | 03, 06, 08 | governance-e2e | PASS |

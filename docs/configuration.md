@@ -468,7 +468,7 @@ Local disk — `spec.json` / `spec.yaml` / `spec.yml` in the service folder. Rel
 
 ### `url`
 
-Fetched from an HTTP/HTTPS URL on each refresh (only when `serviceRefreshIntervalMs` > 0; the URL is not fetched at boot). A failed fetch keeps the current spec and skills. Internal `#/…` references are resolved; external `$ref`s in a fetched document are not, a response over 20 MB is refused, and the URL is logged without credentials or query string.
+Fetched from an HTTP/HTTPS URL on each refresh (only when `serviceRefreshIntervalMs` > 0; the URL is not fetched at boot). A failed fetch keeps the current spec and skills. Internal `#/…` references are resolved; external `$ref`s in a fetched document are not, a response over 20 MB is refused, and logged URLs omit userinfo and fragments. Query parameter names remain, but every value is `REDACTED`. The origin and path remain visible: keep credentials out of paths and parameter names.
 
 ```json
 {

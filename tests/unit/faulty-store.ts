@@ -18,6 +18,8 @@ export interface Fault {
   when?: (...args: unknown[]) => boolean
   /** How many matching calls fail before the store works again; default 1. */
   times?: number
+  /** `after` simulates an applied write whose acknowledgement was lost. */
+  timing?: 'before' | 'after'
 }
 
 export class StoreDownError extends Error {
@@ -52,16 +54,21 @@ export function faultyStore(): FaultyStore {
       return async (...args: unknown[]) => {
         const fault = faults.find(f => f.method === prop && f.times > 0 && f.when(...args))
         if (WRITES.has(prop)) writes.push({ method: prop as Method, failed: fault !== undefined })
+        if (fault?.timing === 'before') {
+          fault.times--
+          throw new StoreDownError(prop)
+        }
+        const result: unknown = await (value as (...a: unknown[]) => unknown).apply(target, args)
         if (fault) {
           fault.times--
           throw new StoreDownError(prop)
         }
-        return (value as (...a: unknown[]) => unknown).apply(target, args)
+        return result
       }
     }
   }) as ExecutionPersistence
   return {
     persistence, inner, writes,
-    fail: fault => { faults.push({ when: () => true, times: 1, ...fault }) }
+    fail: fault => { faults.push({ when: () => true, times: 1, timing: 'before', ...fault }) }
   }
 }

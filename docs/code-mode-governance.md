@@ -426,7 +426,7 @@ Agent                Harbor (api_execute)          V8 #1              Backend   
 | Resume before the approval is decided | the pause is returned again with the same approval id and `_meta["harbor/execution-status"] = WAITING_APPROVAL`; nothing runs, the execution is untouched |
 | Store write failure before a call | the call is refused to the program and never sent: nothing is executed without its journal entry |
 | Store write failure after the outcome was decided (an activity's `FAILED`, a run's end) | the outcome stands and reaches the client unchanged; the failed write is reported (`event: persistence_failure`, `execution_persistence_failures_total`) and recovered by the next run (§12 *Persistence guarantees*) |
-| The program completed but its completion could not be recorded | `RUN_OUTCOME_NOT_RECORDED` (retryable), execution left `RUNNING`; resuming with `_meta["harbor/execution-id"]` replays every call (none is sent again) and records the result — it is never recorded `FAILED` |
+| The program completed but settlement threw | Read back the execution: confirmed `COMPLETED` returns its recorded result, even if only the acknowledgement or lock release failed. Otherwise `RUN_OUTCOME_NOT_RECORDED` (retryable) reports the observed status, or omits it if unreadable. Inspect persistence and the lock before resuming with `_meta["harbor/execution-id"]`; completed calls replay without being sent again. Never mark completed work `FAILED` or submit a fresh execution to repeat it |
 | A decision cut short between its writes | completed by the next decide or resume (§12 *Persistence guarantees*) |
 | Replay mismatch | `REPLAY_DIVERGED`, execution `FAILED` (§4) |
 | Two resumes at once | second gets `EXECUTION_LOCKED` (retryable) |
@@ -563,7 +563,7 @@ What a cut leaves, per operation, and how it recovers (tests:
 | | | the approval | approval decided, activity still `WAITING_APPROVAL` | the next decide (refused as already decided) or the next resume completes it first (`completeDecisions`): the approved call runs once, a rejection or cancellation ends the execution. Before this, every resume paused on the old question and every answer was refused — the execution was stuck |
 | | | the activity | execution still `WAITING_APPROVAL` | as above; a resume would also stop at the `DENIED` / `CANCELLED` activity |
 | A call (bridge) | **activity `EXECUTING`** → the call → `COMPLETED` or `FAILED` | `EXECUTING` | the call may or may not have reached the backend | the next run sends a `GET` again and stops on anything else (`ACTIVITY_OUTCOME_UNKNOWN`) — never a silent repeat. A failed `FAILED` write is reported (below) and leaves exactly this |
-| Ending a run (`endRun`) | **execution status** → lock released (always, even when the write fails) | — | execution `RUNNING`, lock free | a resume (`_meta["harbor/execution-id"]`, or the same MRTR retry) replays the journal — nothing completed is sent again — and records the outcome. A completed run whose completion was not recorded is reported to the client as `RUN_OUTCOME_NOT_RECORDED` (retryable), never as a failure |
+| Ending a run (`endRun`) | **execution status** → lock release attempted in `finally` | before or after the status write, or at lock release | the previous status or the new status; the lock may remain held if release fails | read back the status, never infer it from a rejected write. Confirmed `COMPLETED` returns the persisted result. Otherwise a completed program gets `RUN_OUTCOME_NOT_RECORDED` with the observed status (omitted if unreadable); stopped runs preserve their primary error but also report the observed status. Restore persistence and inspect any retained lock before resuming; the journal replays completed calls without sending them again |
 | Starting a run (`beginRun`) | lock → **execution `RUNNING`** | the lock | lock held, record unchanged | the lock is released when the write fails; after a crash it dies with the process (or expires, memcache) |
 | A new activity's decision (gate) | decision record → approval → **activity `WAITING_APPROVAL` / `DENIED`** | before the activity | a decision record, perhaps a `PENDING` approval nothing waits on | the call is refused to the program and never sent; an orphan approval cannot be decided once its execution is finished (`ApprovalStaleError`) |
 
@@ -575,7 +575,11 @@ reported once: an error log line with `event: "persistence_failure"`,
 activity, what the write `intended`, what the store was `left` holding and
 the `recovery` above; and `execution_persistence_failures_total{operation}`
 (`src/runtime/execution/persistence-failure.ts`). Alert on the metric: every
-count is an execution a client may have to resume.
+count needs investigation, not necessarily a resume: the result may already
+be recorded. A failed read-back emits a separate diagnostic with `left:
+"unknown"`; Harbor does not claim that the write was unapplied or the lock
+was released. A file store read-back reflects its current in-memory state,
+not a new guarantee that a failed disk write survived a restart.
 
 ## 13. Configuration
 

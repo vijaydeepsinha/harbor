@@ -570,7 +570,7 @@ Additional error codes:
 | `EXECUTION_NOT_RESUMABLE` | No | Finished, owned by another principal, or bound to another service |
 | `EXECUTION_CANCELLED` | No | The human cancelled the approval |
 | `ACTIVITY_OUTCOME_UNKNOWN` | No | A previous run's call to this activity failed or was cut off; Harbor will not repeat it |
-| `RUN_OUTCOME_NOT_RECORDED` | Yes | The program completed but the store could not record it; resume with `_meta["harbor/execution-id"]` — every call is replayed, none sent again |
+| `RUN_OUTCOME_NOT_RECORDED` | Yes | The program completed but read-back could not confirm completion. Inspect persistence and any retained lock; if resumable, resume with `_meta["harbor/execution-id"]` to replay journaled calls, not a fresh execution. Metadata reports observed status or omits it if unreadable. Confirmed `COMPLETED` instead returns the recorded result |
 | `APPROVAL_NOT_FOUND` | No | Unknown approval, or one of another execution |
 | `APPROVAL_ALREADY_DECIDED` | No | A different answer was already recorded |
 

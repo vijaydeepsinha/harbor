@@ -146,9 +146,12 @@ Evaluation is a pure function of the rule and the request — no I/O, no clock:
   value, no rule can see the change — compare against a fixed threshold, or
   leave the relative check to the backend, which holds the current state.
   The program writes the request, so such a value is its claim: also cover
-  the request that omits it (`{ field: body.currentBid, exists: false }`
-  under an `anyOf` — otherwise the ratio does not compute and the rule does
-  not fire), and keep an absolute limit the claim cannot move.
+  requests where the ratio cannot compute (`ratio: { numerator: body.bid,
+  denominator: body.currentBid }` with `exists: false` under an `anyOf`),
+  not just an omitted field: `null`, zero and non-numbers also invalidate
+  the ratio. Require a positive claimed current bid too (`not: { field:
+  body.currentBid, greater_than: 0 }`), so a negative denominator cannot
+  hide an increase. Keep an absolute limit the claim cannot move.
   `governance/rules/examples/campaign-governance.yaml` (`bid-jump`,
   `bid-ceiling`) shows both.
 - Dates are `YYYY-MM-DD` or date-times **with a zone** (`2026-03-01T09:00:00Z`,

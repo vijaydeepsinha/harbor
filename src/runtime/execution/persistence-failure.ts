@@ -19,7 +19,7 @@ export interface PersistenceFailure {
   sequence?: number
   /** What the write would have recorded. */
   intended: string
-  /** What the store holds instead. */
+  /** Observed store state, or `unknown` when it could not be read. */
   left: string
   /** How a later run recovers from `left`. */
   recovery: string
