@@ -6,15 +6,14 @@ import { join, basename, extname } from 'node:path'
 import matter from 'gray-matter'
 import SwaggerParser from '@apidevtools/swagger-parser'
 import type { OpenAPISpec } from '../../core/types/spec.types.js'
-import type { AuthStrategy } from '../../core/types/auth.types.js'
-import type { CircuitBreakerStrategy } from '../../core/types/circuit-breaker.types.js'
+import type { AuthStrategy } from '../../spi/auth/auth-strategy.js'
+import type { CircuitBreakerStrategy } from '../../spi/resilience/circuit-breaker.js'
 import type { IdempotencyBackendConfig, SandboxOverride, ServiceAuthConfig, ServiceCircuitBreakerConfig } from '../../core/types/config.types.js'
-import type { PermissionGuard } from '../../core/types/permission.types.js'
-import { forwardTokenPermissionGuard } from '../../spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import type { PermissionGuard } from '../../spi/permissions/permission-guard.js'
 import type { Logger } from '../observability/logger.js'
 import { STORE_TYPE } from '../../core/constants.js'
 import { errorMessage } from '../../core/utils/errors.js'
-import { resolveAuth, resolveCircuitBreaker } from '../../wiring/service-wiring.js'
+import { resolveAuth, resolveCircuitBreaker, resolvePermissionGuard } from '../../wiring/service-wiring.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -172,7 +171,7 @@ async function scanSingleService(
   // ── 5. Build strategies from config ──────────────────────────────────────
   const auth = resolveAuth(config.auth, logger)
   const circuitBreaker = resolveCircuitBreaker(config.circuitBreaker)
-  const permissionGuard = forwardTokenPermissionGuard()
+  const permissionGuard = resolvePermissionGuard()
   const idempotencyBackend = resolveIdempotencyBackend(config)
   const idempotencyKeyTtlMs = config.idempotency?.idempotencyKeyTtlMs ?? 600_000
 

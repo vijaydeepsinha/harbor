@@ -6,8 +6,8 @@ import { createServer, type Server, type IncomingHttpHeaders } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import pino from 'pino'
 import { ApiClient } from '../../src/runtime/api-client/api-client.js'
-import { noopIdempotency } from '../../src/spi/idempotency/strategies/noop-idempotency.strategy.js'
-import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { noopIdempotency } from '../../src/adapters/idempotency/strategies/noop-idempotency.strategy.js'
+import { noopCircuitBreaker } from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
 import type { ExecuteRequestContext } from '../../src/spi/connector/connector-api.js'
 
 interface Seen { method: string; url: string; headers: IncomingHttpHeaders }

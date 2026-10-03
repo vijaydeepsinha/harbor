@@ -24,9 +24,9 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 | `registerSearchCodeTool` | `src/tools/search-code.tool.ts` | Defines what happens when `search_code()` is called |
 | `registerExecuteApiTool` | `src/tools/execute-api.tool.ts` | Defines what happens when `api_execute()` is called |
 | `toolHelpers` | `src/tools/tool-helpers.ts` | Shared utilities — `mcpError`, `mcpSuccess`, `resolveService`, `validateAuth`, `extractCorrelationId`, `runSandboxTool` |
-| `AuthMiddleware` | `src/spi/auth/auth-middleware.ts` | Parses the bearer, cache-first validation via the service's auth strategy, proactive refresh, session expiry detection |
-| `extractBearerFromHeader` | `src/spi/auth/bearer-authorization.ts` | One `Authorization` header, `Bearer` scheme, a JWT or ≥ 32 base64url characters |
-| `AbstractTokenCache` | `src/spi/auth/abstract-token-cache.ts` | Base class for all token cache backends — hash, entry expiry, get/validate/update orchestration |
+| `AuthMiddleware` | `src/runtime/auth/auth-middleware.ts` | Parses the bearer, cache-first validation via the service's auth strategy, proactive refresh, session expiry detection |
+| `extractBearerFromHeader` | `src/runtime/auth/bearer-authorization.ts` | One `Authorization` header, `Bearer` scheme, a JWT or ≥ 32 base64url characters |
+| `AbstractTokenCache` | `src/adapters/auth/abstract-token-cache.ts` | Base class for all token cache backends — hash, entry expiry, get/validate/update orchestration |
 | `InMemoryTokenCache` | `src/adapters/auth/strategies/in-memory-token-cache.strategy.ts` | Default in-memory implementation of `AbstractTokenCache` |
 | `MemcacheTokenCache` | `src/adapters/auth/strategies/memcache-token-cache.strategy.ts` | Memcache-backed implementation of `AbstractTokenCache` |
 | `CouchbaseTokenCache` | `src/adapters/auth/strategies/couchbase-token-cache.strategy.ts` | Couchbase-backed implementation of `AbstractTokenCache` |
@@ -46,8 +46,8 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 | `evaluateGovernance` | `src/runtime/governance/rule-evaluator.ts` | Pure function: Governance Rules → ALLOW / DENY / REQUIRE_APPROVAL |
 | `CallLog` / `ActivityJournal` | `src/runtime/execution/activity-journal.ts` | The single record of each call's outcome (the durable activity record when governed) |
 | `ApiClient` | `src/runtime/api-client/api-client.ts` | Implements `ConnectorAPI`: headers, idempotency, the HTTP call, retries, breaker failures |
-| `CircuitBreakerStrategy` | `src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.ts`, `src/spi/resilience/strategies/noop-circuit-breaker.strategy.ts` | Tracks failures per endpoint and opens/closes the circuit |
-| `IdempotencyStrategy` | `src/adapters/idempotency/strategies/`, `src/spi/idempotency/strategies/noop-idempotency.strategy.ts` | Returns the stored result for a repeated idempotency key |
+| `CircuitBreakerStrategy` | `src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.ts`, `src/adapters/resilience/strategies/noop-circuit-breaker.strategy.ts` | Tracks failures per endpoint and opens/closes the circuit |
+| `IdempotencyStrategy` | `src/adapters/idempotency/strategies/`, `src/adapters/idempotency/strategies/noop-idempotency.strategy.ts` | Returns the stored result for a repeated idempotency key |
 | `AuditCollector` | `src/runtime/observability/audit.ts` | Projection of the run's call log: which endpoints were called during a request |
 | `ProgressCollector` | `src/runtime/observability/progress.ts` | Projection of the run's call log: per-call status and created ids, returned on failure |
 | `writeAuditRecord` / `AuditPipeline` | `src/runtime/observability/audit.ts`, `audit-pipeline.ts` | Delivers the audit record (and execution-state events) to every `AUDIT_SINKS` sink |
@@ -269,7 +269,7 @@ the registry is fixed at boot, so the same name fails every time.
 
 #### Step 2 — Auth validation
 
-**File: `src/spi/auth/auth-middleware.ts`**
+**File: `src/runtime/auth/auth-middleware.ts`**
 
 ```typescript
 const { payload: tokenPayload, invalidate } =

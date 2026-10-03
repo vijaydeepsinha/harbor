@@ -9,7 +9,7 @@ import { InMemoryIdempotencyStrategy } from '../../src/adapters/idempotency/stra
 import { runApiInSandbox, type SandboxExecutionContext } from '../../src/runtime/sandbox/execute-api-in-sandbox.js'
 import { AuditCollector } from '../../src/runtime/observability/audit.js'
 import { CallLog } from '../../src/runtime/execution/activity-journal.js'
-import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import { forwardTokenPermissionGuard } from '../../src/adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
 import type { TokenPayload } from '../../src/core/types/auth.types.js'
 import pino from 'pino'
 

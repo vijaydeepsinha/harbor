@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { SpecLoaderStrategy, OpenAPISpec } from '../../../core/types/spec.types.js'
+import type { OpenAPISpec } from '../../../core/types/spec.types.js'
+import type { SpecLoaderStrategy } from '../../../spi/spec/spec-loader.js'
 import { SpecLoadError } from '../../../core/types/spec.types.js'
 import type { Logger } from '../../../core/types/logger.types.js'
 import { errorMessage } from '../../../core/utils/errors.js'

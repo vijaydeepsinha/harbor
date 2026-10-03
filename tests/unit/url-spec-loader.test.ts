@@ -6,7 +6,7 @@ import axios from 'axios'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { UrlSpecLoaderStrategy, urlSpec } from '../../src/spi/spec/strategies/url-spec-loader.strategy.js'
+import { UrlSpecLoaderStrategy, urlSpec } from '../../src/adapters/spec/strategies/url-spec-loader.strategy.js'
 import { SpecLoadError } from '../../src/core/types/spec.types.js'
 import type { Logger } from '../../src/runtime/observability/logger.js'
 

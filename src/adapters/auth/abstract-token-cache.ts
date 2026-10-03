@@ -2,7 +2,8 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import { createHash } from 'node:crypto'
-import type { TokenPayload, TokenCacheStrategy } from '../../core/types/auth.types.js'
+import type { TokenPayload } from '../../core/types/auth.types.js'
+import type { TokenCacheStrategy } from '../../spi/auth/token-cache.js'
 import type { Logger } from '../../core/types/logger.types.js'
 
 export interface CacheEntry {

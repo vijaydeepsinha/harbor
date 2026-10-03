@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CountBasedCircuitBreakerStrategy } from '../../src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
-import { NoopCircuitBreakerStrategy } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { NoopCircuitBreakerStrategy } from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
 import { CircuitOpenError } from '../../src/core/types/circuit-breaker.types.js'
 
 describe('CountBasedCircuitBreakerStrategy', () => {

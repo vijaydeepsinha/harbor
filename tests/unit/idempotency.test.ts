@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { InMemoryIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
-import { NoopIdempotencyStrategy } from '../../src/spi/idempotency/strategies/noop-idempotency.strategy.js'
+import { NoopIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/noop-idempotency.strategy.js'
 import { MemcacheIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/memcache-idempotency.strategy.js'
 import { CouchbaseIdempotencyStrategy } from '../../src/adapters/idempotency/strategies/couchbase-idempotency.strategy.js'
 import axios from 'axios'

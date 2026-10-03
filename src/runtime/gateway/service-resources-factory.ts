@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import type { GlobalConfig, SandboxLimits } from '../../core/types/config.types.js'
-import type { TokenCacheStrategy } from '../../core/types/auth.types.js'
+import type { TokenCacheStrategy } from '../../spi/auth/token-cache.js'
 import type { ServiceResources } from '../registry/service-registry.js'
 import type { ServiceDefinition } from '../registry/filesystem-scanner.js'
 type ApiConfig = ServiceDefinition['apiConfig']
@@ -11,9 +11,9 @@ import { MetricsRegistry } from '../observability/metrics.js'
 import { SpecStore } from '../spec/spec-store.js'
 import { SkillStore } from '../registry/skill-store.js'
 import { ServiceRefresher } from '../spec/service-refresher.js'
-import { AuthMiddleware } from '../../spi/auth/auth-middleware.js'
+import { AuthMiddleware } from '../auth/auth-middleware.js'
 import { ApiClient } from '../api-client/api-client.js'
-import { buildIdempotencyStrategy, buildSpecLoader } from './strategy-builders.js'
+import { buildIdempotencyStrategy, buildSpecLoader } from '../../wiring/strategy-builders.js'
 import { joinUrl } from '../../core/utils/url.js'
 
 /**

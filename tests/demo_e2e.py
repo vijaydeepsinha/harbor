@@ -79,7 +79,7 @@ INTROSPECTION_PORT      = 3008
 
 # Fixed test fixtures known to examples/demo/mock-introspection-server.js.
 # All >=32 chars so Harbor's bearer-format pre-check lets them through to the
-# introspection strategy itself (see src/spi/auth/bearer-authorization.ts).
+# introspection strategy itself (see src/runtime/auth/bearer-authorization.ts).
 INTROSPECT_TOKEN_VALID      = "introspection-valid-token-abc123"
 INTROSPECT_TOKEN_WRONG_AUD  = "introspection-wrong-aud-token-xyz789"
 INTROSPECT_TOKEN_REVOKED    = "introspection-revoked-token-00000000"

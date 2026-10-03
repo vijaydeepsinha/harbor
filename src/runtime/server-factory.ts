@@ -6,7 +6,7 @@ import { createLogger } from './observability/logger.js'
 import { MetricsRegistry } from './observability/metrics.js'
 import { ServiceRegistry } from './registry/service-registry.js'
 import { scanServicesDirectory } from './registry/filesystem-scanner.js'
-import { buildTokenCacheStrategy, buildAuditSinks } from './gateway/strategy-builders.js'
+import { buildTokenCacheStrategy, buildAuditSinks } from '../wiring/strategy-builders.js'
 import { buildServiceResources } from './gateway/service-resources-factory.js'
 import { startHttpGateway } from './http/http-gateway.js'
 import { buildMcpServerFactory } from './http/mcp-server-factory.js'
@@ -15,7 +15,7 @@ import { AuditPipeline } from './observability/audit-pipeline.js'
 import { startStdioGateway } from './transport/stdio-gateway.js'
 import { GATEWAY_NAME, STORE_TYPE } from '../core/constants.js'
 import { errorMessage } from '../core/utils/errors.js'
-import { extractBearerFromHeader } from '../spi/auth/bearer-authorization.js'
+import { extractBearerFromHeader } from './auth/bearer-authorization.js'
 
 /**
  * Boots a single MCP gateway by auto-scanning the services directory.

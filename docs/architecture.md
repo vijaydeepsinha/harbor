@@ -68,19 +68,18 @@ Every other layer imports from here; nothing here imports from another Harbor la
 |------|----------------|
 | `constants.ts` | String literals and enums — tool names, `ERR` codes, `OUTCOME`, `EXECUTION_STATUS`, `ACTIVITY_STATUS`, `GOVERNANCE_DECISION`/`GOVERNANCE_REASON`, HTTP routes and headers, `harbor/*` `_meta` keys, store type ids, metric names, log prefixes. Env var names are not here; they are the Zod keys in `config/config.ts` |
 | `config/config.ts` | Zod validation of `process.env`; `MCP_CONFIG_FILE` loader (K8s ConfigMap, `KEY: value` lines); produces the typed `GlobalConfig`; exits on misconfiguration |
-| `types/auth.types.ts` | `AuthStrategy`, `TokenCacheStrategy`, `TokenPayload`, `AuthResult`, the `AuthError` hierarchy |
+| `types/auth.types.ts` | `TokenPayload`, `AuthResult`, the `AuthError` hierarchy |
 | `types/audit.types.ts` | `AuditRecord` — one `api_execute` call in the audit trail |
-| `types/circuit-breaker.types.ts` | `CircuitBreakerStrategy`, `CircuitState`, `CircuitOpenError` |
+| `types/circuit-breaker.types.ts` | `CircuitState`, `CircuitOpenError` |
 | `types/config.types.ts` | `GlobalConfig`, `ExecutionConfig`, `SandboxLimits`, `SandboxOverride`, `ServiceAuthConfig`, token-cache / idempotency / execution-store backend configs |
 | `types/connector.types.ts` | `ApiRequest`, `ApiResponse`, `ExecuteRequestContext` — the transport contract types |
 | `types/execution.types.ts` | `ExecutionRecord`, `ActivityRecord`, `ApprovalRecord`, `GovernanceDecisionRecord`; the `ExecutionError` hierarchy (`ApprovalRequiredError`, `GovernanceDeniedError`, `ReplayDivergedError`, `ExecutionLockedError`, …) |
-| `types/idempotency.types.ts` | `IdempotencyStrategy` |
 | `types/logger.types.ts` | `Logger` (pino) |
 | `types/metrics.types.ts` | `MetricsCollector` |
 | `types/oauth.types.ts` | `OAuthResourceConfig`, `ProtectedResourceMetadata` (RFC 9728) |
-| `types/permission.types.ts` | `PermissionGuard`, `PermissionDeniedError` |
+| `types/permission.types.ts` | `PermissionDeniedError` |
 | `types/sandbox-error.types.ts` | `SandboxError` hierarchy — timeout, memory, syntax, runtime, call limit, concurrency limit, invalid `api.request`, internal |
-| `types/spec.types.ts` | `OpenAPISpec`, `SpecLoaderStrategy`, `SpecLoadError` |
+| `types/spec.types.ts` | `OpenAPISpec`, `SpecLoadError` |
 | `utils/errors.ts` | `ensureError`, `errorCode`, `errorRetryable`, `errorMessage` |
 | `utils/header-value.ts` | `SAFE_HEADER_VALUE`, `safeHeaderValue` — what may be forwarded as `X-Harbor-*` |
 | `utils/url.ts` | `joinUrl`, `normalizeEndpointPath`, `redactUrl` |
@@ -90,22 +89,22 @@ Every other layer imports from here; nothing here imports from another Harbor la
 
 ### `src/spi/` — Extension Contracts   ✅ Stable / 🟡 Experimental (execution, governance)
 
-SPI = _Service Provider Interface_. Defines what the framework calls; `src/adapters/` (or third-party code) implements it. Several interfaces are declared in `src/core/types/` and have their default implementation here. `ExecutionPersistence` and `GovernanceRuleSource` belong to the Code Mode governance layer, new in 1.0.0, and may still gain members in a minor release (`API_STABILITY.md`).
+SPI = _Service Provider Interface_. Defines what the framework calls; `src/adapters/` (or third-party code) implements it. All provider interfaces live here, with declarative contracts only: no loaders, middleware or default strategies. Core holds shared data types, errors and configuration, not provider interfaces. `ExecutionPersistence` and `GovernanceRuleSource` belong to the Code Mode governance layer, new in 1.0.0, and may still gain members in a minor release (`API_STABILITY.md`).
+
+This is a greenfield pre-release cleanup: former implementation and core-contract paths were removed, not kept as compatibility shims. `tests/unit/layer-boundaries.test.ts` checks declarative SPI files, unique contract declarations and dependency boundaries; lint rejects direct runtime/tool adapter imports.
 
 | Contract | Interface | Default |
 |----------|-----------|---------|
-| `src/core/types/auth.types.ts` | `AuthStrategy` | — (chosen per service by `config.json` `auth.type`) |
-| `src/spi/auth/abstract-token-cache.ts` | `AbstractTokenCache` (implements `TokenCacheStrategy`) | in-memory adapter |
-| `src/spi/auth/auth-middleware.ts` | `AuthMiddleware` — token cache, validation, proactive refresh | — |
-| `src/spi/auth/bearer-authorization.ts`, `bearer-header-parser.ts` | Bearer header parsing: one header, `Bearer` scheme, a JWT or ≥ 32 base64url characters | — |
+| `src/spi/auth/auth-strategy.ts` | `AuthStrategy` | — (chosen per service by `config.json` `auth.type`) |
+| `src/spi/auth/token-cache.ts` | `TokenCacheStrategy` | in-memory adapter; shared base in `src/adapters/auth/abstract-token-cache.ts` |
 | `src/spi/connector/connector-api.ts` | `ConnectorAPI` | `ApiClient` (HTTP/axios) |
 | `src/spi/execution/execution-store.ts` | `ExecutionPersistence` — executions, activities, approvals, decisions, run lock | in-memory adapter |
-| `src/spi/governance/rule-source.ts` | `GovernanceRuleSource` | `DirectoryRuleSourceStrategy` (`dir`); `UrlRuleSourceStrategy` (`url`) — both in `src/spi/governance/strategies/` |
+| `src/spi/governance/rule-source.ts` | `GovernanceRuleSource` | `DirectoryRuleSourceStrategy` (`dir`); `UrlRuleSourceStrategy` (`url`) — both in `src/adapters/governance/strategies/` |
 | `src/spi/observability/audit-sink.ts` | `AuditSink`, `AuditEvent`, `ExecutionStateSnapshot` | `ConsoleAuditSink` (adapter) |
-| `src/spi/idempotency/strategies/` | `IdempotencyStrategy` | `NoopIdempotencyStrategy` |
-| `src/spi/permissions/strategies/` | `PermissionGuard` | `ForwardTokenPermissionGuardStrategy` (admits everything) |
-| `src/spi/resilience/strategies/` | `CircuitBreakerStrategy` | `NoopCircuitBreakerStrategy` |
-| `src/spi/spec/strategies/` | `SpecLoaderStrategy` | file loader; `url` and `url-with-fallback` loaders |
+| `src/spi/idempotency/idempotency-strategy.ts` | `IdempotencyStrategy` | `NoopIdempotencyStrategy` in `src/adapters/idempotency/strategies/` |
+| `src/spi/permissions/permission-guard.ts` | `PermissionGuard` | `ForwardTokenPermissionGuardStrategy` in `src/adapters/permissions/strategies/` (admits everything) |
+| `src/spi/resilience/circuit-breaker.ts` | `CircuitBreakerStrategy` | `NoopCircuitBreakerStrategy` in `src/adapters/resilience/strategies/` |
+| `src/spi/spec/spec-loader.ts` | `SpecLoaderStrategy` | file, URL and fallback loaders in `src/adapters/spec/strategies/` |
 
 **`ConnectorAPI`**:
 ```typescript
@@ -125,6 +124,8 @@ export interface ConnectorAPI {
 ### `src/adapters/` — Built-in Implementations   ✅ Stable
 
 Concrete implementations of `src/spi/` contracts, selected by env or `config.json`.
+No-op and default strategies are implementations too: they belong here, not in SPI.
+Adapter code depends only on core, contracts and other adapter support, never runtime, tools or wiring.
 
 ```
 src/adapters/
@@ -143,7 +144,11 @@ src/adapters/
 │   ├── in-memory-execution-store.ts       ExecutionPersistence in process memory (default); process-local lock
 │   ├── file-execution-store.ts            in-memory store persisted to EXECUTION_STORE_DIR
 │   └── memcache-execution-store.ts        shared across pods: records + run lock (add + TTL) in memcache
+├── governance/strategies/
+│   ├── directory-rule-source.strategy.ts filesystem rule documents
+│   └── url-rule-source.strategy.ts       HTTP rule documents
 ├── idempotency/strategies/
+│   ├── noop-idempotency.strategy.ts      pass-through, no deduplication
 │   ├── in-memory-idempotency.strategy.ts  Map<key, result> dedup for the key TTL
 │   ├── memcache-idempotency.strategy.ts
 │   ├── couchbase-idempotency.strategy.ts
@@ -153,16 +158,27 @@ src/adapters/
 │   └── memcache-client.ts                 memjs client factory
 ├── observability/
 │   └── console-audit-sink.ts              AUDIT_SINKS=console: `audit` and `execution-state` log lines
-└── resilience/strategies/
-    └── count-based-circuit-breaker.strategy.ts   OPEN after N failed calls per endpoint; one HALF_OPEN probe
+├── permissions/strategies/
+│   └── forward-token-permission-guard.strategy.ts delegates authorization to the backend
+├── resilience/strategies/
+│   ├── noop-circuit-breaker.strategy.ts  no circuit blocking
+│   └── count-based-circuit-breaker.strategy.ts   OPEN after N failed calls per endpoint; one HALF_OPEN probe
+└── spec/strategies/
+    ├── file-spec-loader.strategy.ts
+    ├── url-spec-loader.strategy.ts
+    └── url-with-fallback-spec-loader.strategy.ts
 ```
+
+Shared token-cache implementation is in `src/adapters/auth/abstract-token-cache.ts`.
+Authentication orchestration and bearer parsing are in `src/runtime/auth/`:
+`auth-middleware.ts` validates and refreshes through provider contracts;
+`bearer-authorization.ts` and `bearer-header-parser.ts` handle inbound credentials.
 
 `keygen.ts` backs `IdempotencyStrategy.generateKey`, which nothing in the request path calls; the key a backend call actually carries is built by the tool and the bridge — see [Idempotency keys](#idempotency-keys).
 
 **External registration** — plug in custom backends without forking, then select them by name:
 ```typescript
 // An entry point in src/, like src/index.ts. The register functions are in src/wiring/strategy-builders.ts
-// (src/runtime/gateway/strategy-builders.ts re-exports them).
 import {
   registerTokenCacheBackend, registerIdempotencyBackend, registerExecutionStoreBackend,
   registerAuditSinkBackend, registerGovernanceRuleSourceBackend
@@ -188,7 +204,6 @@ src/runtime/
 │                                  routing ones), idempotency, retries for GET/PUT/DELETE, breaker recordFailure
 ├── gateway/
 │   ├── service-resources-factory.ts   wires ServiceDefinition → ServiceResources
-│   └── strategy-builders.ts           thin re-export of src/wiring/strategy-builders.ts
 ├── execution/                     Code Mode governance layer (see docs/code-mode-governance.md)
 │   ├── execution-manager.ts       create / load / beginRun (run lock) / endRun / inspect / history
 │   ├── activity-gate.ts           per call of a governed run: replay | execute | stop; governance for new activities
@@ -241,12 +256,16 @@ src/runtime/
 
 ### `src/wiring/` — Composition Root   ✅ Stable
 
-The only layer that imports concrete classes from `src/adapters/`. `src/runtime/` reaches adapters only through it (directly, or via the `src/runtime/gateway/strategy-builders.ts` re-export).
+The composition layer selects concrete implementations from `src/adapters/`.
+`src/runtime/` reaches adapters only through wiring. The default permission
+guard is selected here too. Synchronous rule-directory loading and its
+missing-directory error are exposed here for the existing runtime convenience
+API. No legacy path re-exports remain.
 
 | File | Responsibility |
 |------|----------------|
 | `strategy-builders.ts` | Builders: `buildTokenCacheStrategy`, `buildIdempotencyStrategy`, `buildExecutionStore`, `buildAuditSinks`, `buildGovernanceRuleSource`, `buildSpecLoader`. Registration points: `registerTokenCacheBackend`, `registerIdempotencyBackend`, `registerExecutionStoreBackend`, `registerAuditSinkBackend`, `registerGovernanceRuleSourceBackend` |
-| `service-wiring.ts` | `resolveAuth` — the `AuthStrategy` for a `ServiceAuthConfig` (no `auth` ⇒ the service is skipped; `audience` required for `jwt-validation` and `oauth-2.1`); `resolveCircuitBreaker` — noop unless `count-based` is configured |
+| `service-wiring.ts` | `resolveAuth` — the `AuthStrategy` for a `ServiceAuthConfig` (no `auth` ⇒ the service is skipped; `audience` required for `jwt-validation` and `oauth-2.1`); `resolveCircuitBreaker` — noop unless `count-based` is configured; `resolvePermissionGuard` — the forward-token default |
 
 ---
 
@@ -571,7 +590,7 @@ The governance-specific limitations (untargeted calls are ungoverned, rule targe
 |--------|--------|-------|
 | `src/core/constants.ts` | ✅ Stable | Tool names, `ERR` codes and HTTP routes are public API; `META_PREFIX` (`harbor/`) is a placeholder |
 | `src/core/config/config.ts` | ✅ Stable | The Zod schema (env var names and defaults) is the config contract |
-| `src/core/types/` | ✅ Stable | Most SPI interfaces are declared here |
+| `src/core/types/` | ✅ Stable | Shared data types, errors and configuration; provider interfaces are in SPI |
 | `src/tools/` | ✅ Stable | Tool names + input schemas are public API and frozen |
 | `src/spi/` | ✅ Stable | Interfaces frozen; adding a required member is breaking |
 | `src/spi/execution/`, `src/spi/governance/` | 🟡 Experimental | `ExecutionPersistence`, `GovernanceRuleSource` — may gain members in a minor release |
@@ -583,7 +602,7 @@ The governance-specific limitations (untargeted calls are ungoverned, rule targe
 | `src/runtime/spec/service-refresher.ts` | ✅ Stable | Per-service interval from `config.json`; `0` = disabled |
 | `src/runtime/observability/` | ✅ Stable | Audit record, execution-state event, metrics, logger, progress shapes established |
 | `src/runtime/api-client/api-client.ts` | ✅ Stable | Implements `ConnectorAPI`; re-exports types for backwards compat |
-| `src/runtime/gateway/strategy-builders.ts` | ✅ Stable | Thin re-export of `src/wiring/strategy-builders.ts` |
+| `src/wiring/strategy-builders.ts` | ✅ Stable | Provider builders and registration functions |
 | `src/wiring/strategy-builders.ts` | ✅ Stable | Canonical builders; built-in switch + external registration |
 | `src/wiring/service-wiring.ts` | ✅ Stable | Auth + circuit-breaker resolver; accepts config descriptors, returns strategy instances |
 | `src/runtime/registry/filesystem-scanner.ts` | ✅ Stable | Returns config descriptors; strategy instantiation delegated to `src/wiring/service-wiring.ts` |

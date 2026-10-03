@@ -43,20 +43,27 @@ What an `api_execute` program sees is stable: `api.request({ method, path, param
 
 ---
 
-### `src/spi/` and `src/core/types/` — Extension Contracts
+### `src/spi/` — Extension Contracts
 
 Adding a required member to any of these is a breaking change for every downstream implementor.
+
+Before the first 1.0.0 release, the greenfield source layout was cleaned up:
+provider interfaces moved from core to SPI, concrete strategies to adapters,
+auth orchestration/parsing to `src/runtime/auth/`, and the shared cache base
+to `src/adapters/auth/abstract-token-cache.ts`. Former source/deep-import paths
+were removed, not re-exported. Consumers of development builds must update
+imports; interface members and runtime behaviour did not change.
 
 | Interface | File | Members | Status |
 |-----------|------|---------|--------|
 | `ConnectorAPI` | `src/spi/connector/connector-api.ts` | `request(apiRequest, ctx): Promise<ApiResponse>` | ✅ |
-| `AuthStrategy` | `src/core/types/auth.types.ts` | `name`, `validate(token)`, `refresh?(refreshToken, currentAccessToken?)`, `tokenRefreshBufferSec?` | ✅ |
-| `TokenCacheStrategy` | `src/core/types/auth.types.ts` | `name`, `hashToken`, `getOrValidate`, `get`, `update`, `invalidate`, `destroy` | ✅ |
-| `AbstractTokenCache` | `src/spi/auth/abstract-token-cache.ts` | Base class — implement `name`, `readEntry`, `writeEntry`, `deleteEntry`, `destroy` | ✅ |
-| `IdempotencyStrategy` | `src/core/types/idempotency.types.ts` | `name`, `checkAndExecute(key, fn, ttlMs)`, `generateKey(userIdHash)` | ✅ |
-| `CircuitBreakerStrategy` | `src/core/types/circuit-breaker.types.ts` | `name`, `check(endpoint)`, `recordSuccess`, `recordFailure`, `getState` | ✅ |
-| `PermissionGuard` | `src/core/types/permission.types.ts` | `filterSpec(spec, token)`, `canExecute(endpoint, method, token)` | ✅ |
-| `SpecLoaderStrategy` | `src/core/types/spec.types.ts` | `name`, `load(): Promise<OpenAPISpec>` | ✅ |
+| `AuthStrategy` | `src/spi/auth/auth-strategy.ts` | `name`, `validate(token)`, `refresh?(refreshToken, currentAccessToken?)`, `tokenRefreshBufferSec?` | ✅ |
+| `TokenCacheStrategy` | `src/spi/auth/token-cache.ts` | `name`, `hashToken`, `getOrValidate`, `get`, `update`, `invalidate`, `destroy` | ✅ |
+| `AbstractTokenCache` | `src/adapters/auth/abstract-token-cache.ts` | Base class — implement `name`, `readEntry`, `writeEntry`, `deleteEntry`, `destroy` | ✅ |
+| `IdempotencyStrategy` | `src/spi/idempotency/idempotency-strategy.ts` | `name`, `checkAndExecute(key, fn, ttlMs)`, `generateKey(userIdHash)` | ✅ |
+| `CircuitBreakerStrategy` | `src/spi/resilience/circuit-breaker.ts` | `name`, `check(endpoint)`, `recordSuccess`, `recordFailure`, `getState` | ✅ |
+| `PermissionGuard` | `src/spi/permissions/permission-guard.ts` | `filterSpec(spec, token)`, `canExecute(endpoint, method, token)` | ✅ |
+| `SpecLoaderStrategy` | `src/spi/spec/spec-loader.ts` | `name`, `load(): Promise<OpenAPISpec>` | ✅ |
 | `AuditSink` | `src/spi/observability/audit-sink.ts` | `name`, `write(event)`, `close?()` | ✅ |
 | `ExecutionPersistence` | `src/spi/execution/execution-store.ts` | `name`, `destroy?` plus the execution, activity, approval, decision and lock stores it extends | 🟡 |
 | `GovernanceRuleSource` | `src/spi/governance/rule-source.ts` | `name`, `load(): Promise<GovernanceRuleDocument[]>` (throws rather than return part of a set) | 🟡 |
@@ -83,7 +90,7 @@ Env var names are not constants: they are the keys of the Zod schema in `src/cor
 ### External Registration API
 
 ```typescript
-// src/wiring/strategy-builders.ts (re-exported by src/runtime/gateway/strategy-builders.ts)
+// src/wiring/strategy-builders.ts
 registerTokenCacheBackend(type: string, factory: TokenCacheFactory): void            // ✅
 registerIdempotencyBackend(type: string, factory: IdempotencyFactory): void          // ✅
 registerAuditSinkBackend(type: string, factory: AuditSinkFactory): void              // ✅

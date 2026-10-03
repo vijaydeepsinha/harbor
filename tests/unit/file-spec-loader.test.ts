@@ -5,7 +5,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { FileSpecLoaderStrategy } from '../../src/spi/spec/strategies/file-spec-loader.strategy.js'
+import { FileSpecLoaderStrategy } from '../../src/adapters/spec/strategies/file-spec-loader.strategy.js'
 
 describe('FileSpecLoaderStrategy', () => {
   let dir: string | undefined

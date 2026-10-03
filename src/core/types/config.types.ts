@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { AuthStrategy, TokenCacheStrategy } from './auth.types.js'
-import type { CircuitBreakerStrategy } from './circuit-breaker.types.js'
-import type { IdempotencyStrategy } from './idempotency.types.js'
-import type { PermissionGuard } from './permission.types.js'
-import type { SpecLoaderStrategy } from './spec.types.js'
 import type { Environment, GovernanceDecisionType, ExecutionCodeRetention } from '../constants.js'
 import type { OAuthResourceConfig } from './oauth.types.js'
 
@@ -135,4 +130,4 @@ export interface GlobalConfig {
   execution: ExecutionConfig
 }
 
-export type { AuthStrategy, TokenCacheStrategy, CircuitBreakerStrategy, IdempotencyStrategy, PermissionGuard, SpecLoaderStrategy, OAuthResourceConfig }
+export type { OAuthResourceConfig }

@@ -7,6 +7,12 @@ Requirement → test mapping: [`tests/REQUIREMENT_COVERAGE.md`](tests/REQUIREMEN
 
 ## Layers
 
+The structural regression suite `tests/unit/layer-boundaries.test.ts` runs
+with `npm test`. It prevents implementations or compatibility shims in SPI,
+outward core/adapter dependencies and direct runtime/tool imports of adapters.
+Every provider interface must have exactly one declaration, in SPI, not core.
+Documentation paths and anchors are checked by `tests/unit/doc-paths.test.ts`.
+
 | Layer | Command | What it exercises | Needs |
 |---|---|---|---|
 | Unit + integration | `npm test` | evaluator, journal, store contracts, tool handler, sandbox bridge, API client, request-path canonicalisation (fake connectors or local listeners) — 66 files, 743 passed + 1 skipped | nothing |

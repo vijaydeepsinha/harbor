@@ -3,7 +3,7 @@
 
 import axios from 'axios'
 import { redactUrl } from '../../../core/utils/url.js'
-import type { GovernanceRuleDocument, GovernanceRuleSource } from '../rule-source.js'
+import type { GovernanceRuleDocument, GovernanceRuleSource } from '../../../spi/governance/rule-source.js'
 
 /**
  * `GOVERNANCE_RULES_SOURCE=url`: one document (`{ rules: [...] }`, a list, or
@@ -33,5 +33,3 @@ export class UrlRuleSourceStrategy implements GovernanceRuleSource {
     return [{ name: redactUrl(this.url), format: json ? 'json' : 'yaml', text: response.data }]
   }
 }
-
-/** The URL as logs and decision records may show it: no user-info, no query (either may carry a secret). */

@@ -38,13 +38,14 @@ src/           all gateway source (tsconfig rootDir; builds to dist/)
   core/        constants (ERR, OUTCOME, EXECUTION_STATUS, …), types, config loader (core/config/config.ts), utils
   spi/         contracts: connector (ConnectorAPI), auth, idempotency, permissions, resilience, spec,
                execution (ExecutionPersistence), governance (GovernanceRuleSource), observability (AuditSink)
-  adapters/    pluggable implementations (auth strategies, idempotency, resilience, execution stores, console audit sink)
+  adapters/    all concrete strategies (auth/cache, idempotency, permissions, resilience, spec loaders, rule sources),
+               execution stores, console audit sink; shared token-cache base
   wiring/      env → strategy builders and backend registries (registerExecutionStoreBackend, …)
   runtime/     gateway boot (server-factory.ts), http (http-gateway.ts, execution-routes.ts, mcp-server-factory.ts),
                sandbox (runner, bridge-request-handler, request-path), execution (manager, activity-gate, journal,
                approvals, request-state, governance-runtime, retention),
                governance (operation-resolver, rule-schema, rule-loader, rule-store, rule-evaluator, rule-refresher),
-               registry, spec, observability, transport (stdio)
+               auth (middleware + bearer parsing), registry, spec, observability, transport (stdio)
   tools/       the five MCP tools + tool-helpers (response _meta, request _meta reader); api_execute is split into
                the tool (boundary → auth → responder), mcp-request-view (the SDK boundary), execute-api-run
                (the run orchestrator) and execute-api-outcome (failure → audit outcome / status / metrics)
@@ -80,6 +81,10 @@ plus `npm run test:governance` when anything on the governance path changed
 
 ## 4. Conventions (match them exactly)
 
+- SPI contains all provider contracts, not concrete strategies or middleware.
+  Core holds shared data types, errors and configuration; adapters hold implementations;
+  runtime holds orchestration; wiring selects providers. There are no legacy path
+  re-exports. `tests/unit/layer-boundaries.test.ts` guards this separation.
 - Every `.ts` file starts with the two SPDX/copyright lines.
 - Gateway code goes under `src/`, tests under `tests/`. Docs cite repository
   paths from the repo root (`src/runtime/…`, not `runtime/…`);

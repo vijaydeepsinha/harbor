@@ -9,19 +9,23 @@ Adapters are concrete implementations of Harbor's extension contracts. This guid
 The framework uses a layered architecture:
 
 ```
-src/runtime/ ──► src/spi/, src/core/types/   (contracts)
+src/runtime/ ──► src/spi/   (provider contracts), src/core/   (data/errors/config)
      │
      └──► src/wiring/   (type name → implementation) ──► src/adapters/   (implementations)
 ```
 
-`src/runtime/` imports from `src/core/`, `src/spi/` and `src/wiring/` — never from `src/adapters/`. `src/wiring/strategy-builders.ts` is the one place that turns a configured type name into an implementation: the built-in adapters, plus whatever you registered. This means you can swap an adapter without touching the gateway.
+Runtime orchestration uses provider contracts from `src/spi/` and shared data/errors from `src/core/`; concrete provider selection belongs in `src/wiring/strategy-builders.ts` and `src/wiring/service-wiring.ts`, including the default permission guard. The wiring layer also exposes synchronous directory loading and its missing-directory error for the existing runtime convenience API. Runtime and tools do not import adapter modules directly.
+
+All concrete strategies (including no-op defaults, file/HTTP spec loaders and rule sources) live in `src/adapters/`. Auth orchestration and bearer parsing live in `src/runtime/auth/`. All provider interfaces live in `src/spi/`. Old implementation/core-contract paths are removed, not re-exported: use the canonical locations.
+
+`tests/unit/layer-boundaries.test.ts` enforces declarative SPI files, inward core/adapter dependencies, no direct runtime/tool adapter imports and exactly one SPI declaration per provider interface.
 
 **Six extension points:**
 
 | Extension point | Contract | Selected by | Register with |
 |----------------|----------|-------------|---------------|
-| Token cache | `src/core/types/auth.types.ts → TokenCacheStrategy` (base class: `src/spi/auth/abstract-token-cache.ts`) | `TOKEN_CACHE_TYPE` — one cache for the whole gateway | `registerTokenCacheBackend` |
-| Idempotency | `src/core/types/idempotency.types.ts → IdempotencyStrategy` | `idempotency.type` in a service's `config.json`; `IDEMPOTENCY_TYPE` for services without an `idempotency` block | `registerIdempotencyBackend` |
+| Token cache | `src/spi/auth/token-cache.ts → TokenCacheStrategy` (base class: `src/adapters/auth/abstract-token-cache.ts`) | `TOKEN_CACHE_TYPE` — one cache for the whole gateway | `registerTokenCacheBackend` |
+| Idempotency | `src/spi/idempotency/idempotency-strategy.ts → IdempotencyStrategy` | `idempotency.type` in a service's `config.json`; `IDEMPOTENCY_TYPE` for services without an `idempotency` block | `registerIdempotencyBackend` |
 | Execution store | `src/spi/execution/execution-store.ts → ExecutionPersistence` | `EXECUTION_STORE_TYPE` | `registerExecutionStoreBackend` |
 | Audit sink | `src/spi/observability/audit-sink.ts → AuditSink` | `AUDIT_SINKS` — a comma list; every sink receives every event | `registerAuditSinkBackend` |
 | Governance Rule source | `src/spi/governance/rule-source.ts → GovernanceRuleSource` | `GOVERNANCE_RULES_SOURCE` | `registerGovernanceRuleSourceBackend` |
@@ -94,10 +98,10 @@ or, for idempotency, per service in `config.json`:
 
 **File location:** `src/adapters/auth/strategies/<name>-token-cache.strategy.ts`
 
-Extend `AbstractTokenCache` from `src/spi/auth/abstract-token-cache.ts`. The base class implements every `TokenCacheStrategy` method (`hashToken`, `getOrValidate`, `get`, `update`, `invalidate`); you implement the storage:
+Extend `AbstractTokenCache` from `src/adapters/auth/abstract-token-cache.ts`. The base class implements every `TokenCacheStrategy` method (`hashToken`, `getOrValidate`, `get`, `update`, `invalidate`); you implement the storage:
 
 ```typescript
-// src/spi/auth/abstract-token-cache.ts
+// src/adapters/auth/abstract-token-cache.ts
 export abstract class AbstractTokenCache implements TokenCacheStrategy {
   abstract readonly name: string
 
@@ -130,10 +134,10 @@ See `src/adapters/auth/strategies/memcache-token-cache.strategy.ts` for a comple
 
 **File location:** `src/adapters/idempotency/strategies/<name>-idempotency.strategy.ts`
 
-Implement `IdempotencyStrategy` from `src/core/types/idempotency.types.ts` directly — no base class required:
+Implement `IdempotencyStrategy` from `src/spi/idempotency/idempotency-strategy.ts` directly — no base class required:
 
 ```typescript
-// src/core/types/idempotency.types.ts
+// src/spi/idempotency/idempotency-strategy.ts
 export interface IdempotencyStrategy {
   readonly name: string
   checkAndExecute<T>(key: string, fn: () => Promise<T>, idempotencyKeyTtlMs: number): Promise<T>
@@ -215,7 +219,7 @@ A sink may throw: the pipeline logs the failure and still delivers the event to 
 
 ## Writing a Governance Rule Source
 
-**File location:** `src/spi/governance/strategies/<name>-rule-source.strategy.ts`, next to the built-ins, or under `src/adapters/`
+**File location:** `src/adapters/governance/strategies/<name>-rule-source.strategy.ts`, next to the built-ins, or under `src/adapters/`
 
 ```typescript
 // src/spi/governance/rule-source.ts
@@ -230,7 +234,7 @@ export interface GovernanceRuleSource {
 - Document order breaks precedence ties (file order for the directory source).
 - At boot a throw stops the gateway (the built-in directory source's missing directory is the one tolerated case). On a refresh (`GOVERNANCE_RULES_REFRESH_SEC` > 0) a throw keeps the last valid set, and a set that would replace non-empty rules with none is refused.
 
-References: `src/spi/governance/strategies/directory-rule-source.strategy.ts`, `src/spi/governance/strategies/url-rule-source.strategy.ts`; tests: `tests/unit/governance-rule-sources.test.ts`.
+References: `src/adapters/governance/strategies/directory-rule-source.strategy.ts`, `src/adapters/governance/strategies/url-rule-source.strategy.ts`; tests: `tests/unit/governance-rule-sources.test.ts`.
 
 ---
 
@@ -290,7 +294,7 @@ npx vitest run tests/unit/token-cache.test.ts
 | In-memory token cache | `src/adapters/auth/strategies/in-memory-token-cache.strategy.ts` | `in-memory` |
 | Memcache token cache | `src/adapters/auth/strategies/memcache-token-cache.strategy.ts` | `memcache` |
 | Couchbase token cache | `src/adapters/auth/strategies/couchbase-token-cache.strategy.ts` | `couchbase` |
-| No-op idempotency | `src/spi/idempotency/strategies/noop-idempotency.strategy.ts` | `noop` |
+| No-op idempotency | `src/adapters/idempotency/strategies/noop-idempotency.strategy.ts` | `noop` |
 | In-memory idempotency | `src/adapters/idempotency/strategies/in-memory-idempotency.strategy.ts` | `in-memory` |
 | Memcache idempotency | `src/adapters/idempotency/strategies/memcache-idempotency.strategy.ts` | `memcache` |
 | Couchbase idempotency | `src/adapters/idempotency/strategies/couchbase-idempotency.strategy.ts` | `couchbase` |
@@ -298,9 +302,9 @@ npx vitest run tests/unit/token-cache.test.ts
 | File execution store | `src/adapters/execution/file-execution-store.ts` | `file` |
 | Memcache execution store | `src/adapters/execution/memcache-execution-store.ts` | `memcache` |
 | Console audit sink | `src/adapters/observability/console-audit-sink.ts` | `console` |
-| Directory rule source | `src/spi/governance/strategies/directory-rule-source.strategy.ts` | `dir` |
-| URL rule source | `src/spi/governance/strategies/url-rule-source.strategy.ts` | `url` |
-| No-op circuit breaker | `src/spi/resilience/strategies/noop-circuit-breaker.strategy.ts` | `noop` |
+| Directory rule source | `src/adapters/governance/strategies/directory-rule-source.strategy.ts` | `dir` |
+| URL rule source | `src/adapters/governance/strategies/url-rule-source.strategy.ts` | `url` |
+| No-op circuit breaker | `src/adapters/resilience/strategies/noop-circuit-breaker.strategy.ts` | `noop` |
 | Count-based circuit breaker | `src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.ts` | `count-based` |
 | Static token auth | `src/adapters/auth/strategies/static-token.strategy.ts` | `static-token` |
 | OAuth introspection auth | `src/adapters/auth/strategies/oauth-introspection.strategy.ts` | `oauth-introspection` |
@@ -308,7 +312,7 @@ npx vitest run tests/unit/token-cache.test.ts
 | OAuth 2.1 discovery auth | `src/adapters/auth/strategies/oauth-discovery.strategy.ts` | `oauth-2.1` |
 | HTTP connector | `src/runtime/api-client/api-client.ts` | — |
 
-The token-cache, idempotency, circuit-breaker, auth and permission contracts are in `src/core/types/`; `ConnectorAPI`, `ExecutionPersistence`, `GovernanceRuleSource` and `AuditSink` are in `src/spi/`. Follow the same pattern for your custom adapters.
+All provider contracts are in `src/spi/`; shared payloads, records and errors are in `src/core/types/`. Follow the same separation for custom adapters.
 
 ---
 

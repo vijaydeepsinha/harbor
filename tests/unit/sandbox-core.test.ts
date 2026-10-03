@@ -8,8 +8,8 @@ import {
   SandboxTimeoutError, SandboxMemoryError, SandboxRuntimeError
 } from '../../src/core/types/sandbox-error.types.js'
 import { CallLog } from '../../src/runtime/execution/activity-journal.js'
-import { noopCircuitBreaker } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
-import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import { noopCircuitBreaker } from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { forwardTokenPermissionGuard } from '../../src/adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
 
 const run = (code: string, opts: { memoryLimitMb?: number; timeoutMs?: number } = {}) =>
   runInSandbox(code, { memoryLimitMb: opts.memoryLimitMb ?? 32, timeoutMs: opts.timeoutMs ?? 2000 }, async () => {})

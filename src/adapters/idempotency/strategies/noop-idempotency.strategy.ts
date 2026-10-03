@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { IdempotencyStrategy } from '../../../core/types/idempotency.types.js'
+import type { IdempotencyStrategy } from '../../../spi/idempotency/idempotency-strategy.js'
 import { STORE_TYPE } from '../../../core/constants.js'
 
 export class NoopIdempotencyStrategy implements IdempotencyStrategy {

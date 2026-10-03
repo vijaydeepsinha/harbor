@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest'
 import { resolveAuth, resolveCircuitBreaker } from '../../src/wiring/service-wiring.js'
 import { AUTH_TYPE, CB_TYPE } from '../../src/core/constants.js'
 import { StaticTokenAuthStrategy } from '../../src/adapters/auth/strategies/static-token.strategy.js'
-import { NoopCircuitBreakerStrategy } from '../../src/spi/resilience/strategies/noop-circuit-breaker.strategy.js'
+import { NoopCircuitBreakerStrategy } from '../../src/adapters/resilience/strategies/noop-circuit-breaker.strategy.js'
 import { CountBasedCircuitBreakerStrategy } from '../../src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.js'
 
 describe('resolveAuth', () => {

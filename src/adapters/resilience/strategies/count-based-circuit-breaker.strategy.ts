@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { CircuitBreakerStrategy, CircuitState } from '../../../core/types/circuit-breaker.types.js'
+import type { CircuitState } from '../../../core/types/circuit-breaker.types.js'
+import type { CircuitBreakerStrategy } from '../../../spi/resilience/circuit-breaker.js'
 import { CircuitOpenError } from '../../../core/types/circuit-breaker.types.js'
 import { CB_TYPE } from '../../../core/constants.js'
 import { normalizeEndpointPath } from '../../../core/utils/url.js'

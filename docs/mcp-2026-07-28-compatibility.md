@@ -223,7 +223,7 @@ Application-facing changes owned by Harbor:
   request-identity logging, the bounded body read; `/health` advertises the
   supported protocol version.
 - `src/runtime/transport/stdio-gateway.ts` — SDK v2 `serveStdio`, `legacy: 'reject'`.
-- `src/spi/auth/bearer-authorization.ts`, `src/runtime/http/oauth-metadata-handler.ts`,
+- `src/runtime/auth/bearer-authorization.ts`, `src/runtime/http/oauth-metadata-handler.ts`,
   `src/core/types/oauth.types.ts` — `WWW-Authenticate` + RFC 9728 PRM.
 - `src/adapters/auth/strategies/oauth-discovery.strategy.ts`,
   `src/adapters/auth/strategies/jwt-validation.strategy.ts`,

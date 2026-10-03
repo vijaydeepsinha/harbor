@@ -19,11 +19,6 @@ export interface OpenAPISpec {
   [k: string]: unknown
 }
 
-export interface SpecLoaderStrategy {
-  readonly name: string
-  load(): Promise<OpenAPISpec>
-}
-
 export class SpecLoadError extends Error {
   constructor(message: string, readonly cause?: unknown) {
     super(message)

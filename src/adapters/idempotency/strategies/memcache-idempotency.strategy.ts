@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import type memjs from 'memjs'
-import type { IdempotencyStrategy } from '../../../core/types/idempotency.types.js'
+import type { IdempotencyStrategy } from '../../../spi/idempotency/idempotency-strategy.js'
 import type { MemcacheConnectionConfig } from '../../../core/types/config.types.js'
 import type { Logger } from '../../../core/types/logger.types.js'
 import { createMemcacheClient } from '../../infra/memcache-client.js'

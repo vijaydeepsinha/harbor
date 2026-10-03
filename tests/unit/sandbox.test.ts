@@ -15,9 +15,9 @@ import {
 import type { SandboxLimits } from '../../src/core/types/config.types.js'
 import type { TokenPayload } from '../../src/core/types/auth.types.js'
 import type { ApiClient } from '../../src/runtime/api-client/api-client.js'
-import type { CircuitBreakerStrategy } from '../../src/core/types/circuit-breaker.types.js'
+import type { CircuitBreakerStrategy } from '../../src/spi/resilience/circuit-breaker.js'
 import type { SandboxExecutionContext } from '../../src/runtime/sandbox/execute-api-in-sandbox.js'
-import { forwardTokenPermissionGuard } from '../../src/spi/permissions/strategies/forward-token-permission-guard.strategy.js'
+import { forwardTokenPermissionGuard } from '../../src/adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
 
 const testSandboxLimits: SandboxLimits = {
   memoryLimitMb: 64,

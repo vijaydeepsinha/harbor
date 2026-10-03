@@ -7,7 +7,7 @@ import {
   extractBearerFromHeader,
   extractBearerFromRequest,
   bearerFailureToHttpResponse
-} from '../../src/spi/auth/bearer-authorization.js'
+} from '../../src/runtime/auth/bearer-authorization.js'
 import {
   MissingTokenError,
   TokenInvalidError

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { TokenCacheStrategy } from '../core/types/auth.types.js'
-import type { IdempotencyStrategy } from '../core/types/idempotency.types.js'
-import type { SpecLoaderStrategy } from '../core/types/spec.types.js'
+import type { TokenCacheStrategy } from '../spi/auth/token-cache.js'
+import type { IdempotencyStrategy } from '../spi/idempotency/idempotency-strategy.js'
+import type { SpecLoaderStrategy } from '../spi/spec/spec-loader.js'
 import type { IdempotencyBackendConfig, TokenCacheBackendConfig, ExecutionStoreBackendConfig, ExecutionConfig } from '../core/types/config.types.js'
 import type { ExecutionPersistence } from '../spi/execution/execution-store.js'
 import { inMemoryExecutionStore } from '../adapters/execution/in-memory-execution-store.js'
@@ -13,19 +13,23 @@ import type { Logger } from '../core/types/logger.types.js'
 import { inMemoryTokenCache } from '../adapters/auth/strategies/in-memory-token-cache.strategy.js'
 import { memcacheTokenCache } from '../adapters/auth/strategies/memcache-token-cache.strategy.js'
 import { couchbaseTokenCache } from '../adapters/auth/strategies/couchbase-token-cache.strategy.js'
-import { noopIdempotency } from '../spi/idempotency/strategies/noop-idempotency.strategy.js'
+import { noopIdempotency } from '../adapters/idempotency/strategies/noop-idempotency.strategy.js'
 import { inMemoryIdempotency } from '../adapters/idempotency/strategies/in-memory-idempotency.strategy.js'
 import { memcacheIdempotency } from '../adapters/idempotency/strategies/memcache-idempotency.strategy.js'
 import { couchbaseIdempotency } from '../adapters/idempotency/strategies/couchbase-idempotency.strategy.js'
-import { fileSpec } from '../spi/spec/strategies/file-spec-loader.strategy.js'
-import { urlSpec } from '../spi/spec/strategies/url-spec-loader.strategy.js'
-import { urlWithFallback } from '../spi/spec/strategies/url-with-fallback-spec-loader.strategy.js'
+import { fileSpec } from '../adapters/spec/strategies/file-spec-loader.strategy.js'
+import { urlSpec } from '../adapters/spec/strategies/url-spec-loader.strategy.js'
+import { urlWithFallback } from '../adapters/spec/strategies/url-with-fallback-spec-loader.strategy.js'
 import type { GovernanceRuleSource } from '../spi/governance/rule-source.js'
 import type { AuditSink } from '../spi/observability/audit-sink.js'
 import { ConsoleAuditSink, CONSOLE_AUDIT_SINK } from '../adapters/observability/console-audit-sink.js'
-import { DirectoryRuleSourceStrategy } from '../spi/governance/strategies/directory-rule-source.strategy.js'
-import { UrlRuleSourceStrategy } from '../spi/governance/strategies/url-rule-source.strategy.js'
+import { DirectoryRuleSourceStrategy } from '../adapters/governance/strategies/directory-rule-source.strategy.js'
+import { UrlRuleSourceStrategy } from '../adapters/governance/strategies/url-rule-source.strategy.js'
 import { STORE_TYPE, EXECUTION_STORE_TYPE, GOVERNANCE_RULE_SOURCE_TYPE } from '../core/constants.js'
+
+// Synchronous directory loading and its boot error remain available to runtime
+// conveniences, without runtime importing a concrete adapter module.
+export { readRuleDirectory, GovernanceRulesDirectoryAbsentError } from '../adapters/governance/strategies/directory-rule-source.strategy.js'
 
 // ── External backend registration ────────────────────────────────────────────
 //
