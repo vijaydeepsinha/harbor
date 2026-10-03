@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, extname } from 'node:path'
-import type { Logger } from '../../../core/types/logger.types.js'
-import type { GovernanceRuleDocument, GovernanceRuleSource } from '../../../spi/governance/rule-source.js'
+import {existsSync, readdirSync, readFileSync, statSync} from 'node:fs'
+import {extname, join} from 'node:path'
+import type {Logger} from '../../../core/types/logger.types.js'
+import type {GovernanceRuleDocument, GovernanceRuleSource} from '../../../spi/governance/rule-source.js'
 
 const RULE_FILE_EXTENSIONS: ReadonlyArray<string> = ['.yaml', '.yml', '.json']
 
@@ -16,26 +16,26 @@ const RULE_FILE_EXTENSIONS: ReadonlyArray<string> = ['.yaml', '.yml', '.json']
  * it too.
  */
 export function readRuleDirectory(dir: string, logger?: Logger): GovernanceRuleDocument[] {
-  if (!existsSync(dir)) {
-    logger?.info({ dir }, 'Governance rules directory absent — no rules loaded')
-    return []
-  }
-  return readdirSync(dir)
-    .filter(f => RULE_FILE_EXTENSIONS.includes(extname(f)) && statSync(join(dir, f)).isFile())
-    .sort()
-    .map((file): GovernanceRuleDocument => ({
-      name: file,
-      format: extname(file) === '.json' ? 'json' : 'yaml',
-      text: readFileSync(join(dir, file), 'utf8')
-    }))
+    if (!existsSync(dir)) {
+        logger?.info({dir}, 'Governance rules directory absent — no rules loaded')
+        return []
+    }
+    return readdirSync(dir)
+        .filter(f => RULE_FILE_EXTENSIONS.includes(extname(f)) && statSync(join(dir, f)).isFile())
+        .sort()
+        .map((file): GovernanceRuleDocument => ({
+            name: file,
+            format: extname(file) === '.json' ? 'json' : 'yaml',
+            text: readFileSync(join(dir, file), 'utf8')
+        }))
 }
 
 /** The rules directory does not exist. Boot may treat that as "no rules yet"; a refresh must not. */
 export class GovernanceRulesDirectoryAbsentError extends Error {
-  constructor(readonly dir: string) {
-    super(`Governance rules directory ${dir} does not exist`)
-    this.name = 'GovernanceRulesDirectoryAbsentError'
-  }
+    constructor(readonly dir: string) {
+        super(`Governance rules directory ${dir} does not exist`)
+        this.name = 'GovernanceRulesDirectoryAbsentError'
+    }
 }
 
 /**
@@ -46,14 +46,14 @@ export class GovernanceRulesDirectoryAbsentError extends Error {
  * leaves the last valid set in force instead of turning governance off.
  */
 export class DirectoryRuleSourceStrategy implements GovernanceRuleSource {
-  readonly name: string
+    readonly name: string
 
-  constructor(private readonly dir: string, private readonly logger?: Logger) {
-    this.name = `dir:${dir}`
-  }
+    constructor(private readonly dir: string, private readonly logger?: Logger) {
+        this.name = `dir:${dir}`
+    }
 
-  async load(): Promise<GovernanceRuleDocument[]> {
-    if (!existsSync(this.dir)) throw new GovernanceRulesDirectoryAbsentError(this.dir)
-    return readRuleDirectory(this.dir, this.logger)
-  }
+    async load(): Promise<GovernanceRuleDocument[]> {
+        if (!existsSync(this.dir)) throw new GovernanceRulesDirectoryAbsentError(this.dir)
+        return readRuleDirectory(this.dir, this.logger)
+    }
 }

@@ -2,6 +2,7 @@
 title: Place and pay for an order
 tags: [orders, payments]
 ---
+
 # Place and pay for an order
 
 1. Read the customer with `GET /customers/{customerId}`.

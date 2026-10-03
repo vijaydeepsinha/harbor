@@ -16,20 +16,30 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["active", "paused", "archived", "draft"]
+              "enum": [
+                "active",
+                "paused",
+                "archived",
+                "draft"
+              ]
             }
           },
           {
             "name": "advertiser_id",
             "in": "query",
             "required": true,
-            "schema": { "type": "integer" }
+            "schema": {
+              "type": "integer"
+            }
           },
           {
             "name": "limit",
             "in": "query",
             "required": false,
-            "schema": { "type": "integer", "default": 100 }
+            "schema": {
+              "type": "integer",
+              "default": 100
+            }
           }
         ],
         "responses": {
@@ -42,10 +52,16 @@
                   "properties": {
                     "items": {
                       "type": "array",
-                      "items": { "$ref": "#/components/schemas/Campaign" }
+                      "items": {
+                        "$ref": "#/components/schemas/Campaign"
+                      }
                     },
-                    "hasNextPage": { "type": "boolean" },
-                    "total": { "type": "integer" }
+                    "hasNextPage": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
                   }
                 }
               }
@@ -62,44 +78,83 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["name", "advertiser_id", "budget"],
+                "required": [
+                  "name",
+                  "advertiser_id",
+                  "budget"
+                ],
                 "properties": {
-                  "name": { "type": "string" },
-                  "advertiser_id": { "type": "integer" },
+                  "name": {
+                    "type": "string"
+                  },
+                  "advertiser_id": {
+                    "type": "integer"
+                  },
                   "budget": {
                     "type": "object",
-                    "required": ["amount", "currency", "type"],
+                    "required": [
+                      "amount",
+                      "currency",
+                      "type"
+                    ],
                     "properties": {
-                      "amount": { "type": "number" },
+                      "amount": {
+                        "type": "number"
+                      },
                       "currency": {
                         "type": "string",
-                        "enum": ["USD", "EUR", "GBP", "CAD"]
+                        "enum": [
+                          "USD",
+                          "EUR",
+                          "GBP",
+                          "CAD"
+                        ]
                       },
                       "type": {
                         "type": "string",
-                        "enum": ["daily", "lifetime", "flight"]
+                        "enum": [
+                          "daily",
+                          "lifetime",
+                          "flight"
+                        ]
                       },
                       "pacing": {
                         "type": "object",
                         "properties": {
                           "strategy": {
                             "type": "string",
-                            "enum": ["even", "accelerated", "frontloaded"]
+                            "enum": [
+                              "even",
+                              "accelerated",
+                              "frontloaded"
+                            ]
                           },
-                          "catchup_enabled": { "type": "boolean" },
+                          "catchup_enabled": {
+                            "type": "boolean"
+                          },
                           "override": {
                             "type": "object",
                             "properties": {
-                              "multiplier": { "type": "number" },
-                              "window_hours": { "type": "integer" }
+                              "multiplier": {
+                                "type": "number"
+                              },
+                              "window_hours": {
+                                "type": "integer"
+                              }
                             }
                           }
                         }
                       }
                     }
                   },
-                  "start_date": { "type": "string", "format": "date" },
-                  "end_date": { "type": "string", "format": "date" }
+                  "start_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "end_date": {
+                    "type": "string",
+                    "format": "date"
+                  }
                 }
               }
             }
@@ -110,7 +165,9 @@
             "description": "Campaign created",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Campaign" }
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
               }
             }
           }
@@ -126,7 +183,9 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": { "type": "integer" }
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -134,7 +193,9 @@
             "description": "Campaign details",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Campaign" }
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
               }
             }
           }
@@ -148,7 +209,9 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": { "type": "integer" }
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "requestBody": {
@@ -157,18 +220,30 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string" },
+                  "name": {
+                    "type": "string"
+                  },
                   "status": {
                     "type": "string",
-                    "enum": ["active", "paused", "archived"]
+                    "enum": [
+                      "active",
+                      "paused",
+                      "archived"
+                    ]
                   },
                   "budget": {
                     "type": "object",
                     "properties": {
-                      "amount": { "type": "number" },
+                      "amount": {
+                        "type": "number"
+                      },
                       "type": {
                         "type": "string",
-                        "enum": ["daily", "lifetime", "flight"]
+                        "enum": [
+                          "daily",
+                          "lifetime",
+                          "flight"
+                        ]
                       }
                     }
                   }
@@ -182,7 +257,9 @@
             "description": "Updated campaign",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Campaign" }
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
               }
             }
           }
@@ -196,11 +273,15 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": { "type": "integer" }
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
-          "204": { "description": "Deleted" }
+          "204": {
+            "description": "Deleted"
+          }
         }
       }
     },
@@ -213,7 +294,9 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": { "type": "integer" }
+            "schema": {
+              "type": "integer"
+            }
           },
           {
             "name": "status",
@@ -221,7 +304,12 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["active", "paused", "completed", "draft"]
+              "enum": [
+                "active",
+                "paused",
+                "completed",
+                "draft"
+              ]
             }
           }
         ],
@@ -239,7 +327,9 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": { "type": "integer" }
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "requestBody": {
@@ -248,23 +338,54 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["name", "targeting", "bid"],
+                "required": [
+                  "name",
+                  "targeting",
+                  "bid"
+                ],
                 "properties": {
-                  "name": { "type": "string" },
+                  "name": {
+                    "type": "string"
+                  },
                   "targeting": {
                     "type": "object",
                     "properties": {
                       "geo": {
                         "type": "object",
                         "properties": {
-                          "countries": { "type": "array", "items": { "type": "string" } },
-                          "regions": { "type": "array", "items": { "type": "string" } },
-                          "dma_codes": { "type": "array", "items": { "type": "integer" } },
+                          "countries": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "regions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "dma_codes": {
+                            "type": "array",
+                            "items": {
+                              "type": "integer"
+                            }
+                          },
                           "exclusions": {
                             "type": "object",
                             "properties": {
-                              "countries": { "type": "array", "items": { "type": "string" } },
-                              "postal_codes": { "type": "array", "items": { "type": "string" } }
+                              "countries": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "postal_codes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
                             }
                           }
                         }
@@ -272,13 +393,29 @@
                       "audience": {
                         "type": "object",
                         "properties": {
-                          "segment_ids": { "type": "array", "items": { "type": "integer" } },
-                          "lookalike_enabled": { "type": "boolean" },
+                          "segment_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "integer"
+                            }
+                          },
+                          "lookalike_enabled": {
+                            "type": "boolean"
+                          },
                           "frequency_cap": {
                             "type": "object",
                             "properties": {
-                              "impressions": { "type": "integer" },
-                              "window": { "type": "string", "enum": ["hour", "day", "week"] }
+                              "impressions": {
+                                "type": "integer"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": [
+                                  "hour",
+                                  "day",
+                                  "week"
+                                ]
+                              }
                             }
                           }
                         }
@@ -287,10 +424,23 @@
                   },
                   "bid": {
                     "type": "object",
-                    "required": ["type", "amount"],
+                    "required": [
+                      "type",
+                      "amount"
+                    ],
                     "properties": {
-                      "type": { "type": "string", "enum": ["cpm", "cpc", "cpa", "vcpm"] },
-                      "amount": { "type": "number" }
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "cpm",
+                          "cpc",
+                          "cpa",
+                          "vcpm"
+                        ]
+                      },
+                      "amount": {
+                        "type": "number"
+                      }
                     }
                   }
                 }
@@ -299,7 +449,9 @@
           }
         },
         "responses": {
-          "201": { "description": "Line item created" }
+          "201": {
+            "description": "Line item created"
+          }
         }
       }
     },
@@ -314,20 +466,32 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["pending", "processing", "completed", "cancelled", "refunded"]
+              "enum": [
+                "pending",
+                "processing",
+                "completed",
+                "cancelled",
+                "refunded"
+              ]
             }
           },
           {
             "name": "page",
             "in": "query",
             "required": false,
-            "schema": { "type": "integer", "default": 1 }
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
           },
           {
             "name": "limit",
             "in": "query",
             "required": false,
-            "schema": { "type": "integer", "default": 50 }
+            "schema": {
+              "type": "integer",
+              "default": 50
+            }
           }
         ],
         "responses": {
@@ -345,18 +509,29 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["product_id", "quantity"],
+                "required": [
+                  "product_id",
+                  "quantity"
+                ],
                 "properties": {
-                  "product_id": { "type": "integer" },
-                  "quantity": { "type": "integer" },
-                  "discount_code": { "type": "string" }
+                  "product_id": {
+                    "type": "integer"
+                  },
+                  "quantity": {
+                    "type": "integer"
+                  },
+                  "discount_code": {
+                    "type": "string"
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": { "description": "Order created" }
+          "201": {
+            "description": "Order created"
+          }
         }
       }
     },
@@ -369,7 +544,9 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": { "type": "integer" }
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "requestBody": {
@@ -380,16 +557,24 @@
                 "properties": {
                   "status": {
                     "type": "string",
-                    "enum": ["processing", "completed", "cancelled"]
+                    "enum": [
+                      "processing",
+                      "completed",
+                      "cancelled"
+                    ]
                   },
-                  "notes": { "type": "string" }
+                  "notes": {
+                    "type": "string"
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Order updated" }
+          "200": {
+            "description": "Order updated"
+          }
         }
       }
     },
@@ -404,18 +589,28 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["display", "video", "native", "audio", "ctv"]
+              "enum": [
+                "display",
+                "video",
+                "native",
+                "audio",
+                "ctv"
+              ]
             }
           },
           {
             "name": "available",
             "in": "query",
             "required": false,
-            "schema": { "type": "boolean" }
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
-          "200": { "description": "Products list" }
+          "200": {
+            "description": "Products list"
+          }
         }
       }
     },
@@ -428,11 +623,15 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": { "type": "integer" }
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
-          "200": { "description": "Product details" }
+          "200": {
+            "description": "Product details"
+          }
         }
       }
     }
@@ -442,24 +641,50 @@
       "Campaign": {
         "type": "object",
         "properties": {
-          "id": { "type": "integer" },
-          "name": { "type": "string" },
-          "advertiser_id": { "type": "integer" },
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "advertiser_id": {
+            "type": "integer"
+          },
           "status": {
             "type": "string",
-            "enum": ["active", "paused", "archived", "draft"]
+            "enum": [
+              "active",
+              "paused",
+              "archived",
+              "draft"
+            ]
           },
           "budget": {
             "type": "object",
             "properties": {
-              "amount": { "type": "number" },
-              "currency": { "type": "string" },
-              "type": { "type": "string" }
+              "amount": {
+                "type": "number"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
             }
           },
-          "start_date": { "type": "string", "format": "date" },
-          "end_date": { "type": "string", "format": "date" },
-          "created_at": { "type": "string", "format": "date-time" }
+          "start_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       }
     }

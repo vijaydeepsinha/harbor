@@ -3,11 +3,11 @@
 
 /** One document of Governance Rules as a source returns it, before validation. */
 export interface GovernanceRuleDocument {
-  /** File name or URL — names the document in load errors and in `LoadedRule.source`. */
-  name: string
-  /** `json` is parsed as JSON, `yaml` as YAML. */
-  format: 'yaml' | 'json'
-  text: string
+    /** File name or URL — names the document in load errors and in `LoadedRule.source`. */
+    name: string
+    /** `json` is parsed as JSON, `yaml` as YAML. */
+    format: 'yaml' | 'json'
+    text: string
 }
 
 /**
@@ -20,7 +20,8 @@ export interface GovernanceRuleDocument {
  * set: a missing document must never read as "that rule no longer exists".
  */
 export interface GovernanceRuleSource {
-  readonly name: string
-  /** Every rule document, in the order that breaks precedence ties (file order for a directory). */
-  load(): Promise<GovernanceRuleDocument[]>
+    readonly name: string
+
+    /** Every rule document, in the order that breaks precedence ties (file order for a directory). */
+    load(): Promise<GovernanceRuleDocument[]>
 }

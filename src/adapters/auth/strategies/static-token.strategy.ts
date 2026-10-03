@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { TokenPayload } from '../../../core/types/auth.types.js'
-import type { AuthStrategy } from '../../../spi/auth/auth-strategy.js'
-import { AUTH_TYPE } from '../../../core/constants.js';
+import type {TokenPayload} from '../../../core/types/auth.types.js'
+import type {AuthStrategy} from '../../../spi/auth/auth-strategy.js'
+import {AUTH_TYPE} from '../../../core/constants.js';
 
 /**
  * Auth strategy that prefers the client-supplied token (from the MCP
@@ -14,20 +14,21 @@ import { AUTH_TYPE } from '../../../core/constants.js';
  * in every outbound API request.
  */
 export class StaticTokenAuthStrategy implements AuthStrategy {
-  readonly name = AUTH_TYPE.STATIC_TOKEN;
+    readonly name = AUTH_TYPE.STATIC_TOKEN;
 
-  constructor(private readonly fallbackToken: string) {}
+    constructor(private readonly fallbackToken: string) {
+    }
 
-  async validate(rawToken: string): Promise<TokenPayload> {
-    const effectiveToken = rawToken || this.fallbackToken;
-    return {
-      access_token: effectiveToken,
-      token_type: 'bearer',
-      expires_in: 43200,
-      refresh_token: '',
-      scope: 'login_mode:self',
-    };
-  }
+    async validate(rawToken: string): Promise<TokenPayload> {
+        const effectiveToken = rawToken || this.fallbackToken;
+        return {
+            access_token: effectiveToken,
+            token_type: 'bearer',
+            expires_in: 43200,
+            refresh_token: '',
+            scope: 'login_mode:self',
+        };
+    }
 }
 
 /**
@@ -38,5 +39,5 @@ export class StaticTokenAuthStrategy implements AuthStrategy {
  * Example:  auth: staticToken('my-dev-token')
  */
 export function staticToken(token: string): AuthStrategy {
-  return new StaticTokenAuthStrategy(token);
+    return new StaticTokenAuthStrategy(token);
 }

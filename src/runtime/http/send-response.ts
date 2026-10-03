@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { ServerResponse } from 'node:http'
-import { CONTENT_TYPE_JSON } from '../../core/constants.js'
+import type {ServerResponse} from 'node:http'
+import {CONTENT_TYPE_JSON} from '../../core/constants.js'
 
 /**
  * Writes a JSON-encoded response with the correct Content-Type header.
@@ -10,8 +10,8 @@ import { CONTENT_TYPE_JSON } from '../../core/constants.js'
  * success and error envelopes stay consistent.
  */
 export function sendJson(res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>): void {
-  res.writeHead(status, { 'Content-Type': CONTENT_TYPE_JSON, ...(headers ?? {}) })
-  res.end(JSON.stringify(body))
+    res.writeHead(status, {'Content-Type': CONTENT_TYPE_JSON, ...(headers ?? {})})
+    res.end(JSON.stringify(body))
 }
 
 /**
@@ -23,10 +23,10 @@ export function sendJson(res: ServerResponse, status: number, body: unknown, hea
  * the generic helper so the common envelope stays minimal.
  */
 export function sendGatewayError(
-  res: ServerResponse,
-  status: number,
-  code: string,
-  error: string
+    res: ServerResponse,
+    status: number,
+    code: string,
+    error: string
 ): void {
-  sendJson(res, status, { error, code })
+    sendJson(res, status, {error, code})
 }

@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { ERR } from '../constants.js'
+import {ERR} from '../constants.js'
 
 /** Extracts a human-readable message from any thrown value. */
 export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+    return err instanceof Error ? err.message : String(err)
 }
 
 /** Coerces any thrown value into a real `Error` instance. */
 export function ensureError(err: unknown): Error {
-  return err instanceof Error ? err : new Error(String(err))
+    return err instanceof Error ? err : new Error(String(err))
 }
 
 /**
@@ -18,10 +18,10 @@ export function ensureError(err: unknown): Error {
  * attach, falling back to a caller-supplied code (defaulting to `ERR.UNKNOWN`).
  */
 export function errorCode(err: unknown, fallback: string = ERR.UNKNOWN): string {
-  return (err as { code?: string } | null | undefined)?.code ?? fallback
+    return (err as { code?: string } | null | undefined)?.code ?? fallback
 }
 
 /** Reads the optional `retryable` flag attached to our domain errors. */
 export function errorRetryable(err: unknown): boolean {
-  return (err as { retryable?: boolean } | null | undefined)?.retryable ?? false
+    return (err as { retryable?: boolean } | null | undefined)?.retryable ?? false
 }

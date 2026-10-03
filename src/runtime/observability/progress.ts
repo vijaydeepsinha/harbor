@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { CallLogSource, JournalEntry } from '../execution/activity-journal.js'
-import { CALL_OUTCOME } from '../../core/constants.js'
+import type {CallLogSource, JournalEntry} from '../execution/activity-journal.js'
+import {CALL_OUTCOME} from '../../core/constants.js'
 
 /**
  * Per-tool-invocation progress for `api_execute`: a read-only projection of
@@ -29,50 +29,51 @@ const MAX_ID_KEYS = 20
 const MAX_ID_VALUE_LENGTH = 128
 
 export interface ProgressCallEntry {
-  /** 1-based completion-order index. */
-  i: number
-  method: string
-  /** Normalized path (path-template form, same identity used by audit + CB). */
-  endpoint: string
-  /** HTTP status code when the request returned. Absent when the request
-   *  threw before a response was received (network error, abort). */
-  status?: number
-  /** True when status is 2xx/3xx. */
-  ok?: boolean
-  /** Top-level id-like fields extracted from a successful create response.
-   *  Only populated when the call was a create (`POST` + ok === true). */
-  ids?: Record<string, string>
-  /** Truncated error message if the request threw. */
-  error?: string
-  /** True when the failure was caused by sandbox abort (timeout / dispose). */
-  aborted?: boolean
+    /** 1-based completion-order index. */
+    i: number
+    method: string
+    /** Normalized path (path-template form, same identity used by audit + CB). */
+    endpoint: string
+    /** HTTP status code when the request returned. Absent when the request
+     *  threw before a response was received (network error, abort). */
+    status?: number
+    /** True when status is 2xx/3xx. */
+    ok?: boolean
+    /** Top-level id-like fields extracted from a successful create response.
+     *  Only populated when the call was a create (`POST` + ok === true). */
+    ids?: Record<string, string>
+    /** Truncated error message if the request threw. */
+    error?: string
+    /** True when the failure was caused by sandbox abort (timeout / dispose). */
+    aborted?: boolean
 }
 
 export interface ProgressSummary {
-  /** Number of calls where the HTTP request returned a response (any status). */
-  completedCalls: number
-  calls: ProgressCallEntry[]
+    /** Number of calls where the HTTP request returned a response (any status). */
+    completedCalls: number
+    calls: ProgressCallEntry[]
 }
 
 export class ProgressCollector {
-  /**
-   * @param calls — the run's call outcomes (see CallLog).
-   * @param maxEntries — upper bound on reported rows; must match the same
-   *   `maxApiCalls` limit enforced for this `api_execute` run (global default
-   *   ∪ per-service `config.json` override) so progress cannot outlive the
-   *   sandbox call budget.
-   */
-  constructor(private readonly calls: CallLogSource, private readonly maxEntries: number) {}
+    /**
+     * @param calls — the run's call outcomes (see CallLog).
+     * @param maxEntries — upper bound on reported rows; must match the same
+     *   `maxApiCalls` limit enforced for this `api_execute` run (global default
+     *   ∪ per-service `config.json` override) so progress cannot outlive the
+     *   sandbox call budget.
+     */
+    constructor(private readonly calls: CallLogSource, private readonly maxEntries: number) {
+    }
 
-  summary(): ProgressSummary {
-    const calls = this.calls.entries().slice(0, this.maxEntries).map((e, index) => toProgressEntry(e, index + 1))
-    const completedCalls = calls.reduce((n, e) => n + (e.status !== undefined ? 1 : 0), 0)
-    return { completedCalls, calls }
-  }
+    summary(): ProgressSummary {
+        const calls = this.calls.entries().slice(0, this.maxEntries).map((e, index) => toProgressEntry(e, index + 1))
+        const completedCalls = calls.reduce((n, e) => n + (e.status !== undefined ? 1 : 0), 0)
+        return {completedCalls, calls}
+    }
 
-  hasAny(): boolean {
-    return this.maxEntries > 0 && this.calls.entries().length > 0
-  }
+    hasAny(): boolean {
+        return this.maxEntries > 0 && this.calls.entries().length > 0
+    }
 }
 
 /**
@@ -82,13 +83,25 @@ export class ProgressCollector {
  * matches the v1 scope.
  */
 function toProgressEntry(e: JournalEntry, i: number): ProgressCallEntry {
-  if (e.outcome === CALL_OUTCOME.FAILED) {
-    return { i, method: e.method, endpoint: e.endpoint, error: truncate(e.error, MAX_ERROR_MESSAGE_LENGTH), aborted: e.aborted }
-  }
-  const entry: ProgressCallEntry = { i, method: e.method, endpoint: e.endpoint, status: e.response.status, ok: e.response.ok }
-  const ids = e.method === 'POST' && e.response.ok ? extractTopLevelIds(e.response.data) : undefined
-  if (ids) entry.ids = ids
-  return entry
+    if (e.outcome === CALL_OUTCOME.FAILED) {
+        return {
+            i,
+            method: e.method,
+            endpoint: e.endpoint,
+            error: truncate(e.error, MAX_ERROR_MESSAGE_LENGTH),
+            aborted: e.aborted
+        }
+    }
+    const entry: ProgressCallEntry = {
+        i,
+        method: e.method,
+        endpoint: e.endpoint,
+        status: e.response.status,
+        ok: e.response.ok
+    }
+    const ids = e.method === 'POST' && e.response.ok ? extractTopLevelIds(e.response.data) : undefined
+    if (ids) entry.ids = ids
+    return entry
 }
 
 /**
@@ -105,18 +118,18 @@ function toProgressEntry(e: JournalEntry, i: number): ProgressCallEntry {
  * so callers can omit the field entirely.
  */
 export function extractTopLevelIds(data: unknown): Record<string, string> | undefined {
-  if (data === null || typeof data !== 'object' || Array.isArray(data)) return undefined
+    if (data === null || typeof data !== 'object' || Array.isArray(data)) return undefined
 
-  const result: Record<string, string> = {}
-  let kept = 0
-  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-    if (kept >= MAX_ID_KEYS) break
-    if (!isIdLikeKey(key)) continue
-    if (typeof value !== 'string' && typeof value !== 'number') continue
-    result[key] = truncate(String(value), MAX_ID_VALUE_LENGTH)
-    kept++
-  }
-  return kept > 0 ? result : undefined
+    const result: Record<string, string> = {}
+    let kept = 0
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+        if (kept >= MAX_ID_KEYS) break
+        if (!isIdLikeKey(key)) continue
+        if (typeof value !== 'string' && typeof value !== 'number') continue
+        result[key] = truncate(String(value), MAX_ID_VALUE_LENGTH)
+        kept++
+    }
+    return kept > 0 ? result : undefined
 }
 
 /** Whole-key identifiers — test on lowercased key (case-insensitive). */
@@ -129,13 +142,13 @@ const SNAKE_ID_SUFFIX = /_(?:id|uid|uuid)$/
 const CAMEL_ID_SUFFIX = /[a-z0-9_](?:Id|ID|Uid|UID|Uuid|UUID)$/
 
 function isIdLikeKey(key: string): boolean {
-  if (key.length === 0) return false
-  const k = key.toLowerCase()
-  if (WHOLE_ID_KEY.test(k)) return true
-  if (SNAKE_ID_SUFFIX.test(k)) return true
-  return CAMEL_ID_SUFFIX.test(key)
+    if (key.length === 0) return false
+    const k = key.toLowerCase()
+    if (WHOLE_ID_KEY.test(k)) return true
+    if (SNAKE_ID_SUFFIX.test(k)) return true
+    return CAMEL_ID_SUFFIX.test(key)
 }
 
 function truncate(s: string, max: number): string {
-  return s.length <= max ? s : s.slice(0, max)
+    return s.length <= max ? s : s.slice(0, max)
 }

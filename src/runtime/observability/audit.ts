@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { Logger } from './logger.js'
-import type { GlobalConfig } from '../../core/types/config.types.js'
-import type { AuditRecord } from '../../core/types/audit.types.js'
-import type { CallLogSource, JournalEntry } from '../execution/activity-journal.js'
-import type { AuditPipeline } from './audit-pipeline.js'
-import { CALL_OUTCOME } from '../../core/constants.js'
+import type {Logger} from './logger.js'
+import type {GlobalConfig} from '../../core/types/config.types.js'
+import type {AuditRecord} from '../../core/types/audit.types.js'
+import type {CallLogSource, JournalEntry} from '../execution/activity-journal.js'
+import type {AuditPipeline} from './audit-pipeline.js'
+import {CALL_OUTCOME} from '../../core/constants.js'
 
-export type { AuditRecord } from '../../core/types/audit.types.js'
+export type {AuditRecord} from '../../core/types/audit.types.js'
 
 /**
  * The endpoints one execute() call actually called — a read-only projection
@@ -18,19 +18,20 @@ export type { AuditRecord } from '../../core/types/audit.types.js'
  * state of its own.
  */
 export class AuditCollector {
-  constructor(private readonly calls: CallLogSource) {}
+    constructor(private readonly calls: CallLogSource) {
+    }
 
-  getEndpoints(): string[] {
-    return this.executed().map(e => `${e.method} ${e.endpoint}`)
-  }
+    getEndpoints(): string[] {
+        return this.executed().map(e => `${e.method} ${e.endpoint}`)
+    }
 
-  getCallCount(): number {
-    return this.executed().length
-  }
+    getCallCount(): number {
+        return this.executed().length
+    }
 
-  private executed(): JournalEntry[] {
-    return this.calls.entries().filter(e => e.outcome === CALL_OUTCOME.EXECUTED)
-  }
+    private executed(): JournalEntry[] {
+        return this.calls.entries().filter(e => e.outcome === CALL_OUTCOME.EXECUTED)
+    }
 }
 
 /**
@@ -38,15 +39,15 @@ export class AuditCollector {
  * one is wired (AUDIT_SINKS), or straight to `logger` otherwise.
  */
 export function writeAuditRecord(
-  record: AuditRecord,
-  logger: Logger,
-  globalConfig: GlobalConfig,
-  pipeline?: AuditPipeline
+    record: AuditRecord,
+    logger: Logger,
+    globalConfig: GlobalConfig,
+    pipeline?: AuditPipeline
 ): void {
-  if (!globalConfig.observability.enableAudit) return
-  if (pipeline) {
-    void pipeline.publish({ kind: 'audit', record })
-    return
-  }
-  logger.info(record, 'audit')
+    if (!globalConfig.observability.enableAudit) return
+    if (pipeline) {
+        void pipeline.publish({kind: 'audit', record})
+        return
+    }
+    logger.info(record, 'audit')
 }

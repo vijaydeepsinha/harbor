@@ -9,19 +9,20 @@
  * don't lock ourselves to a specific OpenAPI minor version.
  */
 export interface OpenAPISpec {
-  openapi: string
-  info: {
-    title: string
-    version: string
-    description?: string
+    openapi: string
+    info: {
+        title: string
+        version: string
+        description?: string
+        [k: string]: unknown
+    }
+
     [k: string]: unknown
-  }
-  [k: string]: unknown
 }
 
 export class SpecLoadError extends Error {
-  constructor(message: string, readonly cause?: unknown) {
-    super(message)
-    this.name = 'SpecLoadError'
-  }
+    constructor(message: string, readonly cause?: unknown) {
+        super(message)
+        this.name = 'SpecLoadError'
+    }
 }

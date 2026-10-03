@@ -37,7 +37,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [customerId, amount]
+              required: [ customerId, amount ]
               properties:
                 customerId: { type: string }
                 amount: { type: number }
@@ -84,7 +84,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [amount]
+              required: [ amount ]
               properties:
                 orderId: { type: string }
                 amount: { type: number }

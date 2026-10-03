@@ -13,10 +13,16 @@
     "type": "static-token",
     "token": "e2e-fallback-token-never-used-0123456789abcdef"
   },
-  "spec": { "source": "file" },
+  "spec": {
+    "source": "file"
+  },
   "serviceRefreshIntervalMs": 0,
-  "circuitBreaker": { "type": "noop" },
-  "idempotency": { "type": "noop" },
+  "circuitBreaker": {
+    "type": "noop"
+  },
+  "idempotency": {
+    "type": "noop"
+  },
   "sandbox": {
     "executeTimeoutMs": 8000,
     "maxApiCalls": 12,

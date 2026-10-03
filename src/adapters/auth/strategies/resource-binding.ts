@@ -10,10 +10,10 @@
  * fail-closed condition can't drift between call sites.
  */
 export function requireResourceBindingAudience(
-  audience: string | undefined,
-  message: string
+    audience: string | undefined,
+    message: string
 ): asserts audience is string {
-  if (!audience || audience.trim() === '') {
-    throw new Error(message)
-  }
+    if (!audience || audience.trim() === '') {
+        throw new Error(message)
+    }
 }

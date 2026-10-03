@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import type { Logger } from '../../core/types/logger.types.js'
-import type { ExecutionPersistence } from '../../spi/execution/execution-store.js'
-import { EXECUTION_STORE_TYPE } from '../../core/constants.js'
-import { errorMessage } from '../../core/utils/errors.js'
-import { InMemoryExecutionStore, type ExecutionSnapshot } from './in-memory-execution-store.js'
+import {mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs'
+import {join} from 'node:path'
+import type {Logger} from '../../core/types/logger.types.js'
+import type {ExecutionPersistence} from '../../spi/execution/execution-store.js'
+import {EXECUTION_STORE_TYPE} from '../../core/constants.js'
+import {errorMessage} from '../../core/utils/errors.js'
+import {type ExecutionSnapshot, InMemoryExecutionStore} from './in-memory-execution-store.js'
 
 /**
  * File-backed store: one JSON document per execution under `dir`, written
@@ -19,57 +19,57 @@ import { InMemoryExecutionStore, type ExecutionSnapshot } from './in-memory-exec
  * multi-instance deployments; see docs/code-mode-governance.md.
  */
 export class FileExecutionStore extends InMemoryExecutionStore {
-  override readonly name: string = EXECUTION_STORE_TYPE.FILE
+    override readonly name: string = EXECUTION_STORE_TYPE.FILE
 
-  constructor(private readonly dir: string, private readonly logger?: Logger) {
-    super()
-    mkdirSync(dir, { recursive: true })
-    this.loadAll()
-  }
-
-  protected override async persist(executionId: string): Promise<void> {
-    const snap = this.snapshot(executionId)
-    if (!snap) return
-    const file = this.fileFor(executionId)
-    const tmp = `${file}.tmp`
-    writeFileSync(tmp, JSON.stringify(snap, null, 2), 'utf8')
-    renameSync(tmp, file)
-  }
-
-  override async deleteExecution(executionId: string): Promise<void> {
-    await super.deleteExecution(executionId)
-    rmSync(this.fileFor(executionId), { force: true })
-  }
-
-  private loadAll(): void {
-    let files: string[]
-    try {
-      files = readdirSync(this.dir).filter(f => f.endsWith('.json'))
-    } catch (err) {
-      this.logger?.warn({ dir: this.dir, error: errorMessage(err) }, 'Execution store directory unreadable')
-      return
+    constructor(private readonly dir: string, private readonly logger?: Logger) {
+        super()
+        mkdirSync(dir, {recursive: true})
+        this.loadAll()
     }
-    let loaded = 0
-    for (const f of files) {
-      try {
-        const snap = JSON.parse(readFileSync(join(this.dir, f), 'utf8')) as ExecutionSnapshot
-        if (!snap?.execution?.executionId) continue
-        this.restore(snap)
-        loaded++
-      } catch (err) {
-        this.logger?.warn({ file: f, error: errorMessage(err) }, 'Skipping unreadable execution document')
-      }
-    }
-    if (loaded > 0) this.logger?.info({ dir: this.dir, executions: loaded }, 'Execution store loaded from disk')
-  }
 
-  private fileFor(executionId: string): string {
-    // executionIds are UUIDs minted by Harbor; guard anyway so a bad id can't escape the directory.
-    if (!/^[A-Za-z0-9-]+$/.test(executionId)) throw new Error(`Invalid executionId for file store: ${executionId}`)
-    return join(this.dir, `${executionId}.json`)
-  }
+    override async deleteExecution(executionId: string): Promise<void> {
+        await super.deleteExecution(executionId)
+        rmSync(this.fileFor(executionId), {force: true})
+    }
+
+    protected override async persist(executionId: string): Promise<void> {
+        const snap = this.snapshot(executionId)
+        if (!snap) return
+        const file = this.fileFor(executionId)
+        const tmp = `${file}.tmp`
+        writeFileSync(tmp, JSON.stringify(snap, null, 2), 'utf8')
+        renameSync(tmp, file)
+    }
+
+    private loadAll(): void {
+        let files: string[]
+        try {
+            files = readdirSync(this.dir).filter(f => f.endsWith('.json'))
+        } catch (err) {
+            this.logger?.warn({dir: this.dir, error: errorMessage(err)}, 'Execution store directory unreadable')
+            return
+        }
+        let loaded = 0
+        for (const f of files) {
+            try {
+                const snap = JSON.parse(readFileSync(join(this.dir, f), 'utf8')) as ExecutionSnapshot
+                if (!snap?.execution?.executionId) continue
+                this.restore(snap)
+                loaded++
+            } catch (err) {
+                this.logger?.warn({file: f, error: errorMessage(err)}, 'Skipping unreadable execution document')
+            }
+        }
+        if (loaded > 0) this.logger?.info({dir: this.dir, executions: loaded}, 'Execution store loaded from disk')
+    }
+
+    private fileFor(executionId: string): string {
+        // executionIds are UUIDs minted by Harbor; guard anyway so a bad id can't escape the directory.
+        if (!/^[A-Za-z0-9-]+$/.test(executionId)) throw new Error(`Invalid executionId for file store: ${executionId}`)
+        return join(this.dir, `${executionId}.json`)
+    }
 }
 
 export function fileExecutionStore(dir: string, logger?: Logger): ExecutionPersistence {
-  return new FileExecutionStore(dir, logger)
+    return new FileExecutionStore(dir, logger)
 }

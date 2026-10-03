@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { Logger } from '../../core/types/logger.types.js'
-import type { AuditEvent, AuditSink } from '../../spi/observability/audit-sink.js'
+import type {Logger} from '../../core/types/logger.types.js'
+import type {AuditEvent, AuditSink} from '../../spi/observability/audit-sink.js'
 
 export const CONSOLE_AUDIT_SINK = 'console'
 
@@ -13,16 +13,17 @@ export const CONSOLE_AUDIT_SINK = 'console'
  * shippers pick both up from the gateway's output.
  */
 export class ConsoleAuditSink implements AuditSink {
-  readonly name = CONSOLE_AUDIT_SINK
+    readonly name = CONSOLE_AUDIT_SINK
 
-  /** @param loggerFor the logger of the service an event belongs to (its base fields shape the line). */
-  constructor(private readonly loggerFor: (service: string) => Logger) {}
-
-  write(event: AuditEvent): void {
-    if (event.kind === 'audit') {
-      this.loggerFor(event.record.service).info(event.record, 'audit')
-    } else {
-      this.loggerFor(event.state.service).info({ execution: event.state }, 'execution-state')
+    /** @param loggerFor the logger of the service an event belongs to (its base fields shape the line). */
+    constructor(private readonly loggerFor: (service: string) => Logger) {
     }
-  }
+
+    write(event: AuditEvent): void {
+        if (event.kind === 'audit') {
+            this.loggerFor(event.record.service).info(event.record, 'audit')
+        } else {
+            this.loggerFor(event.state.service).info({execution: event.state}, 'execution-state')
+        }
+    }
 }

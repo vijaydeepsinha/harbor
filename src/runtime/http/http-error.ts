@@ -19,15 +19,15 @@
  *    without leaking it to clients.
  */
 export class HttpError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly code: string,
-    message: string,
-    public readonly body?: Record<string, unknown>,
-    public readonly logContext?: Record<string, unknown>,
-    public readonly headers?: Record<string, string>
-  ) {
-    super(message)
-    this.name = 'HttpError'
-  }
+    constructor(
+        public readonly status: number,
+        public readonly code: string,
+        message: string,
+        public readonly body?: Record<string, unknown>,
+        public readonly logContext?: Record<string, unknown>,
+        public readonly headers?: Record<string, string>
+    ) {
+        super(message)
+        this.name = 'HttpError'
+    }
 }

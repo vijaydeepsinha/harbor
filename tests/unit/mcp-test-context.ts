@@ -3,6 +3,6 @@
 
 /** Minimal ServerContext stub for unit-testing tool handlers. */
 export function makeServerCtx(correlationId?: string): Record<string, unknown> {
-  if (correlationId === undefined) return {}
-  return { mcpReq: { id: correlationId } }
+    if (correlationId === undefined) return {}
+    return {mcpReq: {id: correlationId}}
 }

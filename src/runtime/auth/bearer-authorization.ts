@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import type { IncomingMessage } from 'node:http'
+import type {IncomingMessage} from 'node:http'
 import {
-  parseBearerAuthorizationHeader,
-  BearerParseFailure,
-  type BearerTokenParseFailureReason
+    BearerParseFailure,
+    type BearerTokenParseFailureReason,
+    parseBearerAuthorizationHeader
 } from './bearer-header-parser.js'
-import {
-  AuthError,
-  MissingTokenError,
-  TokenInvalidError
-} from '../../core/types/auth.types.js'
+import {AuthError, MissingTokenError, TokenInvalidError} from '../../core/types/auth.types.js'
 
 /**
  * Outcome of extracting a bearer token from an `Authorization` header.
@@ -27,8 +23,8 @@ import {
  * get a stable enum value to switch on.
  */
 export type BearerExtractionResult =
-  | { ok: true; token: string }
-  | { ok: false; error: AuthError; reason: BearerTokenParseFailureReason }
+    | { ok: true; token: string }
+    | { ok: false; error: AuthError; reason: BearerTokenParseFailureReason }
 
 /**
  * Parses an `Authorization` header value into a token or a typed `AuthError`.
@@ -39,73 +35,73 @@ export type BearerExtractionResult =
  * be wired in here.
  */
 export function extractBearerFromHeader(
-  authorization: string | string[] | undefined
+    authorization: string | string[] | undefined
 ): BearerExtractionResult {
-  const parsed = parseBearerAuthorizationHeader(authorization)
-  if (parsed.ok) return { ok: true, token: parsed.token }
+    const parsed = parseBearerAuthorizationHeader(authorization)
+    if (parsed.ok) return {ok: true, token: parsed.token}
 
-  const context = missingTokenContext(parsed.reason)
-  const error = isBearerCredentialFormatFailure(parsed.reason)
-    ? new TokenInvalidError(context)
-    : new MissingTokenError(context)
+    const context = missingTokenContext(parsed.reason)
+    const error = isBearerCredentialFormatFailure(parsed.reason)
+        ? new TokenInvalidError(context)
+        : new MissingTokenError(context)
 
-  return { ok: false, error, reason: parsed.reason }
+    return {ok: false, error, reason: parsed.reason}
 }
 
 /** Convenience wrapper that reads the `Authorization` header off a Node request. */
 export function extractBearerFromRequest(req: IncomingMessage): BearerExtractionResult {
-  // Node keeps only the first Authorization header and silently drops the
-  // rest, so the parser's duplicate check never sees them. A proxy that
-  // honours the last one would authenticate a different credential than
-  // Harbor does — count them on the raw header list instead.
-  const raw = req.rawHeaders ?? []
-  let count = 0
-  for (let i = 0; i < raw.length; i += 2) if (raw[i]?.toLowerCase() === 'authorization') count++
-  if (count > 1) return extractBearerFromHeader(raw.filter((_, i) => i % 2 === 1 && raw[i - 1]?.toLowerCase() === 'authorization'))
-  return extractBearerFromHeader(req.headers['authorization'])
+    // Node keeps only the first Authorization header and silently drops the
+    // rest, so the parser's duplicate check never sees them. A proxy that
+    // honours the last one would authenticate a different credential than
+    // Harbor does — count them on the raw header list instead.
+    const raw = req.rawHeaders ?? []
+    let count = 0
+    for (let i = 0; i < raw.length; i += 2) if (raw[i]?.toLowerCase() === 'authorization') count++
+    if (count > 1) return extractBearerFromHeader(raw.filter((_, i) => i % 2 === 1 && raw[i - 1]?.toLowerCase() === 'authorization'))
+    return extractBearerFromHeader(req.headers['authorization'])
 }
 
 /** Serialized HTTP 401 body produced from a bearer-authorization failure. */
 export interface BearerHttpErrorResponse {
-  status: 401
-  body: {
-    error: string
-    code: string
-    reason: BearerTokenParseFailureReason
-  }
-  headers?: Record<string, string>
+    status: 401
+    body: {
+        error: string
+        code: string
+        reason: BearerTokenParseFailureReason
+    }
+    headers?: Record<string, string>
 }
 
 export function bearerFailureToHttpResponse(
-  error: AuthError,
-  reason: BearerTokenParseFailureReason,
-  resourceMetadataUrl?: string
+    error: AuthError,
+    reason: BearerTokenParseFailureReason,
+    resourceMetadataUrl?: string
 ): BearerHttpErrorResponse {
-  const headers: Record<string, string> | undefined = resourceMetadataUrl
-    ? { 'WWW-Authenticate': `Bearer resource_metadata="${resourceMetadataUrl}"` }
-    : undefined
+    const headers: Record<string, string> | undefined = resourceMetadataUrl
+        ? {'WWW-Authenticate': `Bearer resource_metadata="${resourceMetadataUrl}"`}
+        : undefined
 
-  return {
-    status: 401,
-    body: { error: error.message, code: error.code, reason },
-    ...(headers ? { headers } : {})
-  }
+    return {
+        status: 401,
+        body: {error: error.message, code: error.code, reason},
+        ...(headers ? {headers} : {})
+    }
 }
 
 const MISSING_TOKEN_CONTEXT: Partial<Record<BearerTokenParseFailureReason, string>> = {
-  [BearerParseFailure.MissingHeader]: 'header absent',
-  [BearerParseFailure.DuplicateHeader]: 'duplicate Authorization header',
-  [BearerParseFailure.MalformedScheme]: 'malformed Bearer scheme',
-  [BearerParseFailure.EmptyCredentials]: 'empty bearer credentials',
-  [BearerParseFailure.WeakCredentials]: 'token must be a JWT (header.payload.sig) or a high-entropy opaque token (>=32 base64url chars)'
+    [BearerParseFailure.MissingHeader]: 'header absent',
+    [BearerParseFailure.DuplicateHeader]: 'duplicate Authorization header',
+    [BearerParseFailure.MalformedScheme]: 'malformed Bearer scheme',
+    [BearerParseFailure.EmptyCredentials]: 'empty bearer credentials',
+    [BearerParseFailure.WeakCredentials]: 'token must be a JWT (header.payload.sig) or a high-entropy opaque token (>=32 base64url chars)'
 }
 
 function missingTokenContext(reason: BearerTokenParseFailureReason): string {
-  return MISSING_TOKEN_CONTEXT[reason] ?? reason
+    return MISSING_TOKEN_CONTEXT[reason] ?? reason
 }
 
 function isBearerCredentialFormatFailure(reason: BearerTokenParseFailureReason): boolean {
-  return reason === BearerParseFailure.CredentialsTooLong
-    || reason === BearerParseFailure.InvalidCredentials
-    || reason === BearerParseFailure.WeakCredentials
+    return reason === BearerParseFailure.CredentialsTooLong
+        || reason === BearerParseFailure.InvalidCredentials
+        || reason === BearerParseFailure.WeakCredentials
 }
