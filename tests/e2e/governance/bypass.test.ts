@@ -153,7 +153,7 @@ describe('bypass attempts', () => {
                 s().track(out.meta.executionId)
                 expect(await s().mock.requests()).toHaveLength(0)
                 const insp = await s().admin.inspect(out.meta.executionId!)
-                expect(insp.decisions[0]).toMatchObject({decision: 'DENY', decidingRule: 'deny-delete-order'})
+                expect(insp.decisions[0]).toMatchObject({decision: 'DENY', decidingRule: 'commerce/deny-delete-order'})
             })
 
         it.each(['/orders/./order-001', '/orders/x/../order-001', '/orders/%2e%2e/orders/order-001', '/orders%2Forder-001', '/orders//order-001', '/orders\\order-001', '/orders/order-001#x'])(

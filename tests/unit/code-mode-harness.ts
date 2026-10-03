@@ -148,7 +148,8 @@ export function makeRuntime(
     rules: Array<Record<string, unknown>> = [],
     defaultDecision: GovernanceDecisionType = GOVERNANCE_DECISION.ALLOW,
     persistence: ExecutionPersistence = new InMemoryExecutionStore(),
-    managerOptions: ExecutionManagerOptions = {}
+    managerOptions: ExecutionManagerOptions = {},
+    gatewayRules: Array<Record<string, unknown>> = []
 ): GovernanceRuntime {
     const manager = new ExecutionManager(persistence, undefined, undefined, managerOptions)
     const approvals = new ApprovalService(persistence, manager)
@@ -158,8 +159,15 @@ export function makeRuntime(
         source: `rule-${i}.yaml`,
         contentHash: 'deadbeefcafe0000'
     })))
+    const gatewayRuleStore = new GovernanceRuleStore()
+    gatewayRuleStore.swap(gatewayRules.map((r, i): LoadedRule => ({
+        rule: governanceRuleSchema.parse(r),
+        source: `gateway-rule-${i}.yaml`,
+        contentHash: 'deadbeefcafe0000'
+    })))
     return {
         persistence, executionManager: manager, approvals,
+        gatewayRules: () => gatewayRuleStore.getRules(),
         rulesForService: () => ruleStore.getRules(),
         requestState: createResumeStateCodec({key: REQUEST_STATE_KEY, ttlSeconds: 600}),
         executionConfig: {

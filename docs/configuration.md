@@ -33,7 +33,7 @@ Read only when the matching backend is active:
 | `EXECUTION_STORE_TYPE=file` | optional `EXECUTION_STORE_DIR` |
 Connection ports must be positive integers ≤ 65535 and `*_TIMEOUT_MS` values positive integers; anything else stops boot.
 
-**Kubernetes/other orchestrators:** ConfigMaps or environment files may contain extra keys for other tooling. The gateway ignores unrelated env vars not listed above. The removed gateway-wide `GOVERNANCE_RULES_SOURCE`, `GOVERNANCE_RULES_DIR`, `GOVERNANCE_RULES_URL`, `GOVERNANCE_RULES_URL_TIMEOUT_MS` and `GOVERNANCE_RULES_REFRESH_SEC` variables are explicitly rejected with a migration message; configure each service's `governance` block instead.
+**Kubernetes/other orchestrators:** ConfigMaps or environment files may contain extra keys for other tooling. The gateway ignores unrelated env vars not listed above. The former gateway-wide `GOVERNANCE_RULES_SOURCE`, `GOVERNANCE_RULES_DIR`, `GOVERNANCE_RULES_URL`, `GOVERNANCE_RULES_URL_TIMEOUT_MS` and `GOVERNANCE_RULES_REFRESH_SEC` variables are explicitly rejected with a migration message. Use `GATEWAY_GOVERNANCE_RULES_DIR` for gateway-owned file rules, and each service's `governance` block for service-owned sources.
 
 ### Registered backends
 
@@ -182,10 +182,15 @@ When `HARBOR_RESOURCE_URI` is not set the metadata endpoints return 404 and 401 
 | `EXECUTION_CODE_RETENTION` | `DROP` | `DROP`: remove a terminal execution's program text · `KEEP`: keep it stored against the `executionId` |
 | `EXECUTION_RETENTION_SEC` | `86400` | Seconds a finished execution and all its records (activities, approvals, decisions) are kept before deletion; `0` = keep forever. Paused and interrupted executions are never deleted |
 | `GOVERNANCE_DEFAULT_DECISION` | `DENY` | Decision for a call that some rule targets but no rule matches: `ALLOW`, `DENY`, `REQUIRE_APPROVAL`. A call no rule targets is always allowed (`NO_GOVERNANCE`) — including a path the spec does not describe, unless a `*` or `/**` rule covers it |
+| `GATEWAY_GOVERNANCE_RULES_DIR` | `./governance/rules` | Gateway-owned, file-only policy directory; top-level YAML/YML/JSON files apply across enabled services. Relative paths resolve from the process working directory |
+| `GATEWAY_GOVERNANCE_RULES_REFRESH_SEC` | `0` | Refresh gateway-owned rules every N seconds; `0` loads once at startup. Failed or invalid refreshes retain last-known-good rules |
 | `GOVERNANCE_REQUEST_STATE_KEY` | *(random per process)* | ≥32-character HMAC key sealing the MRTR `requestState`. Unset, a restart invalidates every outstanding `requestState`; set one shared key for multi-instance deployments |
 | `GOVERNANCE_APPROVAL_TTL_SEC` | `600` | Seconds a paused execution's `requestState` stays redeemable. Stored approvals themselves do not expire |
 
-Governance Rule source and refresh settings are **per service**, not process-level:
+Governance Rules have two ownership scopes. Gateway rules are loaded once from
+the file directory above and are evaluated for calls to every enabled service.
+Gateway rules are file-only; there is no gateway URL/custom-source selector.
+Service-owned rule source and refresh settings remain per service:
 
 | `config.json` field | Default | Description |
 |---|---|---|
@@ -208,9 +213,9 @@ Example:
 }
 ```
 
-Each enabled and successfully registered service gets an isolated ruleset and refresher; the central runtime still evaluates rules and controls approvals/execution. Disabled services are skipped before their governance config is validated or their source is constructed. Invalid URL/refresh config found during scanning skips that service (and startup exits if no services remain); after registration, an unknown source type, unreadable initial source, or invalid initial rules stop gateway boot. The URL source is fetched and validated once before startup completes, so the gateway starts with the latest available rules rather than waiting for the first timer tick. A missing default file-source directory starts that service with no rules and a warning; failed refreshes, invalid updates, and empty refreshes replacing active rules retain that service's last-known-good set.
+Each enabled and successfully registered service gets an isolated ruleset and refresher; the central runtime also owns the shared gateway rules and evaluates both scopes. Disabled services are skipped before their governance config is validated or their source is constructed. Invalid URL/refresh config found during scanning skips that service (and startup exits if no services remain); after registration, an unknown source type, unreadable initial source, or invalid initial rules stop gateway boot. The URL source is fetched and validated once before startup completes, so the gateway starts with the latest available rules rather than waiting for the first timer tick. A missing default service file-source directory starts that service with no rules and a warning; failed refreshes, invalid updates, and empty refreshes replacing active rules retain the corresponding last-known-good set. A missing or unreadable gateway rule directory, or an invalid initial gateway rule, fails startup; an existing empty gateway directory is allowed.
 
-**No active rules ship with the demo services.** The repository's root `governance/rules/` contains the authoring reference and examples and is not loaded as a global ruleset. Put a service's local policy under `services/<name>/governance/rules/`, mount the configured directory, or configure a URL/custom source. The production Docker image includes service directories; no policy documents ship in them by default.
+**No active policy files ship by default.** The root `governance/rules/` is the live gateway-owned file directory (the README and nested `examples/` are not loaded). Put cross-service guardrails there. Put a service's local policy under `services/<name>/governance/rules/`, mount the configured service directory, or configure a service URL/custom source. The production Docker image includes both the gateway directory and service directories; no policy rule files ship in them by default.
 
 **Several pods:** use `EXECUTION_STORE_TYPE=memcache`, one shared `GOVERNANCE_REQUEST_STATE_KEY`, and the same rule set on every pod.
 

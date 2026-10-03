@@ -64,7 +64,7 @@ describe('approval required', () => {
         expect(insp.decisions[0]).toMatchObject({
             activitySequence: 1,
             decision: DECISION.REQUIRE_APPROVAL,
-            decidingRule: 'high-value-order-requires-approval'
+            decidingRule: 'commerce/high-value-order-requires-approval'
         })
         expect(insp.approvals).toEqual([expect.objectContaining({
             approvalId: paused.approvalId,
@@ -228,7 +228,7 @@ describe('approval required', () => {
         expect(activity.approvalId).toBe(approval.approvalId)
         expect(approval.summary.operationId).toBe(activity.request.operationId)
         expect(approval.summary.body).toEqual(activity.request.body)
-        expect(approval.summary.matchedRules).toEqual(['high-value-order-requires-approval'])
+        expect(approval.summary.matchedRules).toEqual(['commerce/high-value-order-requires-approval'])
     })
 
     describe('client without elicitation (HTTP fallback channel)', () => {

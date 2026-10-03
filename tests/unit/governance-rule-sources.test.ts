@@ -17,7 +17,11 @@ import type {GovernanceRuleDocument, GovernanceRuleSource} from '../../src/spi/g
 import {GovernanceRuleLoadError, parseRuleDocuments} from '../../src/runtime/governance/rule-loader.js'
 import {GovernanceRuleStore} from '../../src/runtime/governance/rule-store.js'
 import {GovernanceRuleRefresher} from '../../src/runtime/governance/rule-refresher.js'
-import {buildGovernanceRuleSource, registerGovernanceRuleSourceBackend} from '../../src/wiring/strategy-builders.js'
+import {
+    buildGovernanceRuleSource,
+    buildGatewayGovernanceRuleSource,
+    registerGovernanceRuleSourceBackend
+} from '../../src/wiring/strategy-builders.js'
 import {buildGovernanceRuntime} from '../../src/runtime/execution/governance-runtime.js'
 import type {ExecutionConfig} from '../../src/core/types/config.types.js'
 import type {Logger} from '../../src/core/types/logger.types.js'
@@ -26,6 +30,10 @@ import {evaluateGovernance} from '../../src/runtime/governance/rule-evaluator.js
 
 const silent = pino({level: 'silent'}) as unknown as Logger
 const ruleYaml = (name: string, type = 'DENY') => `name: ${name}\nmatch: { service: s }\naction: { type: ${type} }\n`
+const runtimeConfig = (): ExecutionConfig => ({
+    store: {type: 'in-memory'},
+    governance: {defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600}
+})
 
 /** A logger that remembers what was logged at error level. */
 function recordingLogger() {
@@ -336,6 +344,7 @@ describe('Governance Rule sources', () => {
 
         it('builds file by default, url when configured (URL required), a registered type, and refuses an unknown one', () => {
             expect(buildGovernanceRuleSource(governance({})).name).toBe('file:/nonexistent')
+            expect(buildGatewayGovernanceRuleSource('/gateway-rules').name).toBe('file:/gateway-rules')
             expect(buildGovernanceRuleSource(governance({
                 rulesSource: 'url',
                 rulesUrl: 'https://rules.example/set.yaml'
@@ -429,6 +438,110 @@ describe('Governance Rule sources', () => {
                 await vi.advanceTimersByTimeAsync(5_000)
                 expect(evaluateGovernance(runtime.rulesForService('b'), request('b'), GOVERNANCE_DECISION.DENY).decision)
                     .toBe(GOVERNANCE_DECISION.DENY)
+                await runtime.shutdown()
+            } finally {
+                vi.useRealTimers()
+            }
+        })
+
+        it('loads gateway-owned file rules once and evaluates them with only the selected service rules', async () => {
+            dir = mkdtempSync(join(tmpdir(), 'harbor-gateway-rules-'))
+            const gatewayDir = join(dir, 'gateway-rules')
+            const serviceADir = join(dir, 'service-a-rules')
+            const serviceBDir = join(dir, 'service-b-rules')
+            for (const path of [gatewayDir, serviceADir, serviceBDir]) mkdirSync(path)
+            writeFileSync(join(gatewayDir, 'global.yaml'), [
+                'name: no-deletes-anywhere',
+                'match: { method: DELETE }',
+                'final: true',
+                'action: { type: DENY }',
+                ''
+            ].join('\n'))
+            for (const [service, serviceDir] of [['a', serviceADir], ['b', serviceBDir]]) {
+                writeFileSync(join(serviceDir, 'service.yaml'), [
+                    `name: ${service}-delete-allowed`,
+                    `match: { service: ${service}, method: DELETE }`,
+                    'final: true',
+                    'action: { type: ALLOW }',
+                    ''
+                ].join('\n'))
+            }
+            const configuredRuntime = runtimeConfig()
+            configuredRuntime.governance.gatewayRulesDir = gatewayDir
+            const runtime = await buildGovernanceRuntime(configuredRuntime, [
+                {
+                    name: 'a',
+                    governance: {rulesDir: serviceADir, rulesSource: 'file', rulesUrlTimeoutMs: 5000, rulesRefreshSec: 0}
+                },
+                {
+                    name: 'b',
+                    governance: {rulesDir: serviceBDir, rulesSource: 'file', rulesUrlTimeoutMs: 5000, rulesRefreshSec: 0}
+                }
+            ], silent)
+            try {
+                expect(runtime.gatewayRules().map(loaded => loaded.rule.name)).toEqual(['no-deletes-anywhere'])
+                const request = (service: string) => ({
+                    executionId: 'exec',
+                    activitySequence: 1,
+                    service,
+                    method: 'DELETE' as const,
+                    specPath: '/records/{id}'
+                })
+                for (const service of ['a', 'b']) {
+                    expect(evaluateGovernance({
+                        gatewayRules: runtime.gatewayRules(),
+                        serviceRules: runtime.rulesForService(service)
+                    }, request(service), GOVERNANCE_DECISION.ALLOW)).toMatchObject({
+                        decision: GOVERNANCE_DECISION.DENY,
+                        decidingRule: 'gateway/no-deletes-anywhere',
+                        matchedRules: ['gateway/no-deletes-anywhere', `${service}/${service}-delete-allowed`]
+                    })
+                }
+            } finally {
+                await runtime.shutdown()
+            }
+        })
+
+        it('fails startup when the gateway rule directory or its initial rule set is invalid', async () => {
+            dir = mkdtempSync(join(tmpdir(), 'harbor-gateway-rules-invalid-'))
+            const missingDirConfig = runtimeConfig()
+            missingDirConfig.governance.gatewayRulesDir = join(dir, 'missing')
+            await expect(buildGovernanceRuntime(missingDirConfig, [], silent))
+                .rejects.toThrow(GovernanceRulesDirectoryAbsentError)
+
+            const invalidDir = join(dir, 'invalid')
+            mkdirSync(invalidDir)
+            writeFileSync(join(invalidDir, 'invalid.yaml'), 'name: invalid\nmatch: {method: DELETE}\naction: {type: MAYBE}\n')
+            const invalidConfig = runtimeConfig()
+            invalidConfig.governance.gatewayRulesDir = invalidDir
+            await expect(buildGovernanceRuntime(invalidConfig, [], silent)).rejects.toThrow(GovernanceRuleLoadError)
+        })
+
+        it('refreshes gateway rules and retains the last-known-good set on invalid or empty updates', async () => {
+            dir = mkdtempSync(join(tmpdir(), 'harbor-gateway-rules-refresh-'))
+            const gatewayDir = join(dir, 'gateway-rules')
+            mkdirSync(gatewayDir)
+            const file = join(gatewayDir, 'policy.yaml')
+            writeFileSync(file, ruleYaml('initial'))
+            const configuredRuntime = runtimeConfig()
+            configuredRuntime.governance.gatewayRulesDir = gatewayDir
+            configuredRuntime.governance.gatewayRulesRefreshSec = 1
+            vi.useFakeTimers()
+            try {
+                const runtime = await buildGovernanceRuntime(configuredRuntime, [], silent)
+                expect(runtime.gatewayRules().map(loaded => loaded.rule.name)).toEqual(['initial'])
+
+                writeFileSync(file, ruleYaml('updated'))
+                await vi.advanceTimersByTimeAsync(1000)
+                expect(runtime.gatewayRules().map(loaded => loaded.rule.name)).toEqual(['updated'])
+
+                writeFileSync(file, 'invalid: [')
+                await vi.advanceTimersByTimeAsync(1000)
+                expect(runtime.gatewayRules().map(loaded => loaded.rule.name)).toEqual(['updated'])
+
+                rmSync(file)
+                await vi.advanceTimersByTimeAsync(1000)
+                expect(runtime.gatewayRules().map(loaded => loaded.rule.name)).toEqual(['updated'])
                 await runtime.shutdown()
             } finally {
                 vi.useRealTimers()

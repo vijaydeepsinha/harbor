@@ -49,8 +49,8 @@ src/           all gateway source (tsconfig rootDir; builds to dist/)
   tools/       the five MCP tools + tool-helpers (response _meta, request _meta reader); api_execute is split into
                the tool (boundary → auth → responder), mcp-request-view (the SDK boundary), execute-api-run
                (the run orchestrator) and execute-api-outcome (failure → audit outcome / status / metrics)
-governance/    Governance Rule directory: rules/ ships no rule files (every call is NO_GOVERNANCE until you add
-               one); rules/examples/ is documentation
+governance/    Gateway-owned Governance Rule directory: top-level YAML/YML/JSON files in rules/ apply across enabled services;
+               rules/README.md and nested rules/examples/ are documentation
 services/      demo services (product, order, tasks, irctc enabled; billing, billing-jwt, billing-introspection disabled)
 examples/demo/ mock backends + start.sh
 tests/unit, tests/integration (vitest) · tests/demo_e2e.py (Python, live gateway)
@@ -120,9 +120,10 @@ plus `npm run test:governance` when anything on the governance path changed
    SDK codec and re-checked against the authenticated principal. Keep it so.
 6. **Transport stays stateless.** Execution state lives in `ExecutionPersistence`,
    never in an MCP session or a module-level map keyed by connection.
-7. **Skills and Governance Rules are distinct service-owned resources.**
-   Skills tell the agent *how*; rules decide *whether*. Keep their formats,
-   audiences, and evaluation paths separate.
+7. **Skills and Governance Rules are distinct resources.** Skills are
+   service-owned guidance that tells the agent *how*; Governance Rules may be
+   gateway-owned guardrails or service-owned policy that decides *whether*.
+   Keep their formats, audiences, and evaluation paths separate.
 8. **No LLM inside the governance path.** The evaluator is a pure function.
 9. **Fail closed.** Evaluation errors deny; invalid rule files stop boot;
    replay divergence stops the run.
@@ -132,12 +133,12 @@ plus `npm run test:governance` when anything on the governance path changed
 
 ## 6. How to add things
 
-- **A Governance Rule:** use the format in `governance/rules/README.md` and
-  place active policy under
-  `services/<name>/governance/rules/` and the service's optional `governance`
-  config selects its source and refresh interval; boot validates rule shape,
-  not whether targets exist in a spec. Test with the evaluator directly
-  (`tests/unit/governance-rules.test.ts` shows the shape).
+- **A Governance Rule:** use the format in `governance/rules/README.md`.
+  Gateway-wide policy goes in top-level files under `governance/rules/`;
+  service-only policy goes under `services/<name>/governance/rules/` or the
+  source selected in that service's optional `governance` config. Boot
+  validates rule shape, not whether targets exist in a spec. Test with the
+  evaluator directly (`tests/unit/governance-rules.test.ts` shows the shape).
 - **A rule source:** implement `GovernanceRuleSource` (`src/spi/governance/rule-source.ts`;
   `load()` throws rather than return part of a set) and register it with
   `registerGovernanceRuleSourceBackend`; a service's `config.json`

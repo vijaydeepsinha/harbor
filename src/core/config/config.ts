@@ -2,6 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import {readFileSync} from 'node:fs'
+import {resolve} from 'node:path'
 import {z} from 'zod'
 import type {
     CouchbaseConnectionConfig,
@@ -225,6 +226,9 @@ const GlobalConfigSchema = z.object({
     HARBOR_AUTH_SERVERS: z.string().optional(),
     HARBOR_SCOPES_SUPPORTED: z.string().optional(),
     // ── Code Mode governance layer ──
+    // Gateway-owned file rules are separate from per-service governance source settings.
+    GATEWAY_GOVERNANCE_RULES_DIR: z.string().min(1).default('./governance/rules'),
+    GATEWAY_GOVERNANCE_RULES_REFRESH_SEC: z.coerce.number().int().min(0).max(Math.floor(2_147_483_647 / 1000)).default(0),
     // in-memory | file | memcache, or the name of a backend registered with registerExecutionStoreBackend.
     EXECUTION_STORE_TYPE: z.string().regex(REGISTERED_TYPE_NAME, 'a store type name (in-memory, file, memcache, or a registered backend)').default(EXECUTION_STORE_TYPE.IN_MEMORY),
     // memcache store only (EXECUTION_STORE_MEMCACHE_HOST / _PORT are required with it, _TIMEOUT_MS optional — same shape as TOKEN_CACHE_MEMCACHE_*).
@@ -254,7 +258,7 @@ const GlobalConfigSchema = z.object({
             ctx.addIssue({
                 code: 'custom',
                 path: [key],
-                message: 'rule source and refresh settings are per-service; configure them in each service config.json under "governance"'
+                message: 'legacy Governance Rule setting; use GATEWAY_GOVERNANCE_RULES_DIR and GATEWAY_GOVERNANCE_RULES_REFRESH_SEC for gateway file rules, or the service config.json "governance" block for service rules'
             })
         }
     }
@@ -348,6 +352,8 @@ export function validateGlobalConfig(): GlobalConfig {
             store: resolveExecutionStoreConfig(env),
             retention: {code: env.EXECUTION_CODE_RETENTION, executionSec: env.EXECUTION_RETENTION_SEC},
             governance: {
+                gatewayRulesDir: resolve(process.cwd(), env.GATEWAY_GOVERNANCE_RULES_DIR),
+                gatewayRulesRefreshSec: env.GATEWAY_GOVERNANCE_RULES_REFRESH_SEC,
                 defaultDecision: env.GOVERNANCE_DEFAULT_DECISION,
                 ...(env.GOVERNANCE_REQUEST_STATE_KEY ? {requestStateKey: env.GOVERNANCE_REQUEST_STATE_KEY} : {}),
                 approvalTtlSec: env.GOVERNANCE_APPROVAL_TTL_SEC

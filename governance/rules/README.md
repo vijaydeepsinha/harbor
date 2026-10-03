@@ -5,18 +5,25 @@ attempt. Rules answer *"is Harbor allowed to execute this operation, and under
 what conditions?"* — they are **not** Skills (which tell the agent *how* to
 accomplish a task and live under `services/<name>/skills/`).
 
-Governance Rules are **service-owned policy**, alongside each service's
-OpenAPI spec and agent-facing Skills. Skills explain *how* an agent should use
-the API; Governance Rules decide *whether* a backend operation may execute,
-and can require human approval. They share service ownership and lifecycle,
-but have different formats, audiences, and enforcement roles.
+Governance Rules may be **gateway-owned** or **service-owned**. Skills explain
+*how* an agent should use an API; Governance Rules decide *whether* a backend
+operation may execute, and can require human approval.
 
-For each service, the default rule directory is
+The gateway-owned, file-only source defaults to the root `governance/rules/`
+directory. Set `GATEWAY_GOVERNANCE_RULES_DIR` to another directory if needed;
+`GATEWAY_GOVERNANCE_RULES_REFRESH_SEC` controls periodic reload (`0` means
+load once). Every top-level `*.yaml` / `*.yml` / `*.json` file is loaded;
+nested folders and other file types are ignored. The README and nested
+`examples/` directory are documentation, not active rule files. The gateway
+source is loaded once and evaluated across all enabled services.
+
+Each service may also own its own rule source, selected in that service's
+`config.json`. Its default directory is
 `<serviceDir>/governance/rules/` (where `serviceDir` is that service's
-directory under `SERVICES_DIR`). Every `*.yaml` / `*.yml` / `*.json` file
-directly in that folder is loaded; nested folders are not. This repository's
-root `governance/rules/` contains documentation and examples only and is not a
-live rule source. **No active rule files ship with the demo services.**
+directory under `SERVICES_DIR`). Every top-level `*.yaml` / `*.yml` / `*.json`
+file is loaded; nested folders are not. Service sources may independently use
+`file`, `url`, or a registered source and refresh schedule. **No active rule
+files ship by default.**
 
 Each service may select its own source and refresh interval in its
 `config.json`:
@@ -215,33 +222,45 @@ any other key is a load error.
 A rule **targets** a call when its `match` fits it, and **matches** it when it
 targets it and its `conditions` hold.
 
-1. **The most specific level with a matching rule decides**: endpoint rules
-   override service rules, service rules override gateway rules. An endpoint
-   rule whose conditions are false does not match, so the service level
-   decides.
-2. **`final: true` pins a broader level**: when a `final` rule matches, the
-   decision is made at its level and more specific rules are not consulted
+1. **Ownership sets the broadest scope.** Every rule loaded from the gateway
+   directory belongs to the gateway tier, even if it names a service,
+   operation, or path. A rule loaded from a service's source belongs to that
+   service: operation/path-specific rules are endpoint-tier; other service
+   rules (including method-only rules) are service-tier. A service file can
+   never define a cross-service gateway rule.
+2. **The most specific matching tier decides**: endpoint rules override
+   service rules, and service rules override non-final gateway rules. An
+   endpoint rule whose conditions are false does not match, so the next
+   matching tier decides.
+3. **`final: true` pins a broader tier**: when a `final` rule matches, the
+   decision is made at its tier and more specific tiers are not consulted
    (with several, the broadest wins, whatever their actions — a gateway
-   `final` ALLOW beats a service `final` DENY) — e.g. a gateway "never
-   DELETE" that no service or endpoint rule can override.
-3. **Within the deciding level: DENY > REQUIRE_APPROVAL > ALLOW**; the first
+   `final` ALLOW beats a service `final` DENY).
+4. **Within the deciding tier: DENY > REQUIRE_APPROVAL > ALLOW**; the first
    rule in file order carrying the winning action is the deciding rule.
-4. **Nothing matches**:
+5. **Nothing matches**:
    - some rule targets the call ⇒ `GOVERNANCE_DEFAULT_DECISION` (default
      **`DENY`**, reason `NO_MATCHING_RULE`);
    - no rule targets it ⇒ the call is ungoverned and **allowed** (reason
      `NO_GOVERNANCE`) **whatever `GOVERNANCE_DEFAULT_DECISION` says**. A
      gateway with no rules behaves exactly as without governance.
 
+Gateway-owned rule file:
+
 ```yaml
-- name: no-deletes-anywhere          # gateway, final: nothing below can allow a DELETE
+- name: no-deletes-anywhere
   match: { method: DELETE }
   final: true
   action: { type: DENY }
-- name: trafficking-reads            # service: all trafficking reads are fine …
+```
+
+Service-owned rule file:
+
+```yaml
+- name: trafficking-reads
   match: { service: trafficking, method: GET }
   action: { type: ALLOW }
-- name: big-campaigns                # endpoint: … and large campaigns need a human
+- name: big-campaigns
   match: { service: trafficking, operation: createCampaign }
   conditions: { budget: { greater_than: 1000000 } }
   action: { type: REQUIRE_APPROVAL }
@@ -252,14 +271,14 @@ With these rules and the default `DENY`, a `POST /campaigns` with a budget of
 rule allows POSTs. Add a service- or endpoint-level `ALLOW` for what should
 pass.
 
-The same rules still **allow** a `PATCH /campaigns/C1`, or any call to
-another service: no rule targets it (step 4). Rules written for some
-operations leave every other call — and every path the spec does not have —
-ungoverned. To fail closed, add a gateway-level rule that targets every call;
-any service or endpoint rule that matches still decides first:
+The gateway DELETE rule does not target a `PATCH /campaigns/C1`, so other
+policies decide it (step 5). Rules written for some operations leave every
+other call — and every path the spec does not have — ungoverned. To target
+every call at gateway scope, add a gateway-owned catch-all; without `final`,
+more-specific service or endpoint rules can still decide:
 
 ```yaml
-- name: deny-everything-else         # service-local baseline for this source
+- name: deny-everything-else
   match: { service: '*' }
   action: { type: DENY, reason: No Governance Rule allows this operation }
 ```

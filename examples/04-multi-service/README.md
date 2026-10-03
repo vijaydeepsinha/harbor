@@ -23,4 +23,4 @@ The AI targets each service by name. The correct spec, auth token, circuit break
 
 ## Per-service independence
 
-Each service has its own strategy config. Changing the circuit breaker on `tasks` has no effect on `product` or `order`. See `services/*/config.json` for the demo values. The token cache (`TOKEN_CACHE_TYPE`) and Code Mode execution store are gateway-wide; Governance Rule sources and refresh intervals are configured per service, while evaluation and execution stay centrally controlled.
+Each service has its own strategy config. Changing the circuit breaker on `tasks` has no effect on `product` or `order`. See `services/*/config.json` for the demo values. The token cache (`TOKEN_CACHE_TYPE`), Code Mode execution store, and gateway-owned file Governance Rules are gateway-wide. A gateway `final` rule in `governance/rules/` can override policy for every enabled service. Service-owned Governance Rule sources and refresh intervals remain configured per service; evaluation and execution stay centrally controlled.

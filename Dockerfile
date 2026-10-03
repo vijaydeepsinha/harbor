@@ -40,6 +40,9 @@ COPY --from=builder --chown=harbor:harbor /app/package.json ./
 # Apache 2.0 requires LICENSE and NOTICE in all distributions
 COPY --chown=harbor:harbor LICENSE NOTICE ./
 
+# Gateway-owned Governance Rule directory; service policies remain with services.
+COPY --chown=harbor:harbor governance/rules/ ./governance/rules/
+
 # Demo services bundled — image works out of the box.
 # Mount your own services at runtime:
 #   docker run -v ./my-services:/app/services harbor-gateway

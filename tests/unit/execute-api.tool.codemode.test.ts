@@ -342,7 +342,7 @@ describe('api_execute under the Code Mode governance layer', () => {
         expect(count('GET', '/campaigns')).toBe(1)                // GET is not a POST: allowed
         expect(count('POST', '/campaigns/C1/finalize')).toBe(0)   // /campaigns/{id}/finalize is under /campaigns/**
         const executionId = (paused['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
-        expect((await governanceRuntime.persistence.listDecisions(executionId)).map(d => [d.decision, d.decidingRule])).toEqual([['ALLOW', undefined], ['REQUIRE_APPROVAL', 'campaign-writes']])
+        expect((await governanceRuntime.persistence.listDecisions(executionId)).map(d => [d.decision, d.decidingRule])).toEqual([['ALLOW', undefined], ['REQUIRE_APPROVAL', 'trafficking/campaign-writes']])
     })
 
     it('default DENY applies only where governance applies: untargeted calls run, a targeted unmatched call is denied', async () => {
@@ -428,10 +428,43 @@ describe('api_execute under the Code Mode governance layer', () => {
         const decisions = await governanceRuntime.persistence.listDecisions(executionId)
         expect(decisions[1]).toMatchObject({
             decision: 'DENY',
-            matchedRules: ['no-finalize'],
-            ruleVersions: ['no-finalize@1#deadbeefcafe']
+            matchedRules: ['trafficking/no-finalize'],
+            ruleVersions: ['trafficking/no-finalize@1#deadbeefcafe']
         })
         expect((await governanceRuntime.executionManager.load(executionId)).status).toBe(EXECUTION_STATUS.DENIED)
+    })
+
+    it('applies a gateway-owned final DELETE policy before connector calls across services', async () => {
+        const governanceRuntime = makeRuntime([{
+            name: 'service-delete-allow',
+            match: {service: 'trafficking'},
+            final: true,
+            action: {type: 'ALLOW'}
+        }], GOVERNANCE_DECISION.ALLOW, undefined, {}, [{
+            name: 'gateway-no-deletes',
+            match: {method: 'DELETE'},
+            final: true,
+            action: {type: 'DENY'}
+        }])
+        const {connector, count} = makeConnector()
+        const trafficking = registerGoverned(governanceRuntime, makeResources('trafficking', connector))
+        const billing = registerGoverned(governanceRuntime, makeResources('billing', connector))
+        const program = `async () => await api.request({ method: 'DELETE', path: '/unlisted-resource' })`
+
+        for (const [service, handler, matchedRules] of [
+            ['trafficking', trafficking, ['gateway/gateway-no-deletes', 'trafficking/service-delete-allow']],
+            ['billing', billing, ['gateway/gateway-no-deletes']]
+        ] as const) {
+            const result = await handler({service, code: program}, makeCtx())
+            expect((parseContent(result) as {code: string}).code).toBe(ERR.GOVERNANCE_DENIED)
+            const executionId = (result['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
+            expect(await governanceRuntime.persistence.listDecisions(executionId)).toMatchObject([{
+                decision: 'DENY',
+                decidingRule: 'gateway/gateway-no-deletes',
+                matchedRules
+            }])
+        }
+        expect(count('DELETE', '/unlisted-resource')).toBe(0)
     })
 
     it('refuses a resume by another principal and by another service', async () => {

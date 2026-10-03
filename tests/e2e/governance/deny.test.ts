@@ -38,7 +38,7 @@ describe('denied operations', () => {
             pathParams: {orderId: 'order-001'}
         })
         expect(insp.activities[1]).not.toHaveProperty('response')
-        expect(insp.decisions.map(d => [d.activitySequence, d.decision, d.decidingRule ?? null])).toEqual([[1, DECISION.ALLOW, null], [2, DECISION.DENY, 'deny-delete-order']])
+        expect(insp.decisions.map(d => [d.activitySequence, d.decision, d.decidingRule ?? null])).toEqual([[1, DECISION.ALLOW, null], [2, DECISION.DENY, 'commerce/deny-delete-order']])
         expect(insp.approvals).toEqual([])
         expect(await s().mock.calls()).toEqual(['POST /orders'])
         expect((await s().mock.state())['orders']).toHaveLength(1) // still there
@@ -50,10 +50,10 @@ describe('denied operations', () => {
         const insp = await s().admin.inspect(out.meta.executionId!)
         const d = insp.decisions[0]!
         expect(d.decision).toBe(DECISION.DENY)
-        expect(d.matchedRules.sort()).toEqual(['allow-read-customer', 'deny-restricted-customer'])
-        expect(d.decidingRule).toBe('deny-restricted-customer')
+        expect(d.matchedRules.sort()).toEqual(['commerce/allow-read-customer', 'commerce/deny-restricted-customer'])
+        expect(d.decidingRule).toBe('commerce/deny-restricted-customer')
         expect(d.reason).toBe('customer-002 is a restricted record')
-        expect(d.ruleVersions).toEqual(expect.arrayContaining([expect.stringMatching(/^deny-restricted-customer@2#/)]))
+        expect(d.ruleVersions).toEqual(expect.arrayContaining([expect.stringMatching(/^commerce\/deny-restricted-customer@2#/)]))
         expect(await s().mock.requests()).toHaveLength(0)
     })
 
@@ -67,7 +67,7 @@ describe('denied operations', () => {
         const out = expectToolError(await s().client('admin').apiExecute('ops', programs.createAdminUser('mallory')), ERR.GOVERNANCE_DENIED)
         s().track(out.meta.executionId)
         const insp = await s().adminAs('admin').inspect(out.meta.executionId!)
-        expect(insp.decisions[0]).toMatchObject({decision: DECISION.DENY, decidingRule: 'deny-admin-user-creation'})
+        expect(insp.decisions[0]).toMatchObject({decision: DECISION.DENY, decidingRule: 'ops/deny-admin-user-creation'})
         expect(await s().mock.requests()).toHaveLength(0)
         expect((await s().mock.state())['adminUsers']).toEqual([])
     })
@@ -77,8 +77,8 @@ describe('denied operations', () => {
         s().track(out.meta.executionId)
         const insp = await s().admin.inspect(out.meta.executionId!)
         const d = insp.decisions[1]!
-        expect(d.matchedRules.sort()).toEqual(['allow-update-order', 'deny-cancel-via-update'])
-        expect(d.decidingRule).toBe('deny-cancel-via-update')
+        expect(d.matchedRules.sort()).toEqual(['commerce/allow-update-order', 'commerce/deny-cancel-via-update'])
+        expect(d.decidingRule).toBe('commerce/deny-cancel-via-update')
         expect(await s().mock.calls()).toEqual(['POST /orders'])
     })
 
@@ -88,8 +88,8 @@ describe('denied operations', () => {
         const insp = await s().admin.inspect(paused.executionId)
         const d = insp.decisions[1]!
         expect(d.decision).toBe(DECISION.REQUIRE_APPROVAL)
-        expect(d.matchedRules.sort()).toEqual(['allow-update-order', 'expedite-requires-approval'])
-        expect(d.decidingRule).toBe('expedite-requires-approval')
+        expect(d.matchedRules.sort()).toEqual(['commerce/allow-update-order', 'commerce/expedite-requires-approval'])
+        expect(d.decidingRule).toBe('commerce/expedite-requires-approval')
         expect(await s().mock.calls()).toEqual(['POST /orders'])
     })
 

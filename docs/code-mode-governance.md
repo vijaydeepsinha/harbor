@@ -207,35 +207,40 @@ reported "no such operation" (ungoverned, allowed).
 
 ## 6. Governance Rules
 
-Rules come from the owning service's configured source
+For each new API activity, the central execution runtime evaluates two
+separate sources: the shared **gateway-owned** rule set and only the selected
+service's **service-owned** rule set. Gateway rules are loaded from top-level
+`*.yaml|yml|json` files in `GATEWAY_GOVERNANCE_RULES_DIR` (default
+`governance/rules/`). This source is file-only and independent of service
+folders and enablement. `GATEWAY_GOVERNANCE_RULES_REFRESH_SEC` controls its
+periodic refresh (`0` loads once). The initial directory and rules must be
+readable and valid before startup completes; an existing empty directory is
+allowed. Refreshes swap a complete validated set; failures or an empty set
+that would replace active rules retain the last-known-good set.
+
+Service rules continue to come from each enabled service's configured source
 (`src/spi/governance/rule-source.ts`). By default, the top-level
 `*.yaml|yml|json` files in `<serviceDir>/governance/rules/` are read through
 `governance.rulesSource: "file"`; a service may instead configure a URL
 (`"url"`) or a source registered with
-`registerGovernanceRuleSourceBackend`. The source and `rulesRefreshSec` are
+`registerGovernanceRuleSourceBackend`. Source and `rulesRefreshSec` are
 configured in each service's `config.json`; relative `rulesDir` paths resolve
 against that service's directory. Each active service has an isolated rule
-store/refresher, while evaluation, approvals, execution persistence, and
-activity journaling remain in one central runtime. Rules from one service are
-never evaluated for another. A disabled service is skipped before its source
-is constructed or loaded.
+store/refresher. Rules from one service are never evaluated for another. A
+disabled service is skipped before its source is constructed or loaded.
 
-With `rulesRefreshSec` above 0, only that service's source is re-read on its
-interval (`src/runtime/governance/rule-refresher.ts`): a changed set is
-swapped in atomically; an unreachable source, an invalid set, or an empty set
-that would replace a non-empty one keeps that service's last valid set
-(clearing all rules takes a restart). Invalid URL/refresh config discovered
-during service scanning skips that service; an unknown source type, unreadable
-initial source, or invalid initial ruleset after registration stops boot. A missing local
-directory is tolerated at boot: that service starts with no rules and logs a
-warning; a refresh that finds it missing keeps rules in force, and one that
-finds it created loads it. Format and operators are in
+With service `rulesRefreshSec` above 0, only that service's source is
+re-read on its interval (`src/runtime/governance/rule-refresher.ts`); the
+gateway file set has its own independent interval. A changed set is swapped
+in atomically; an unreachable source, invalid set, or empty set that would
+replace a non-empty one keeps that source's last valid set. Invalid service
+URL/refresh config discovered during scanning skips that service; an unknown
+service source type, unreadable initial source, or invalid initial ruleset
+after registration stops boot. A missing default service directory is
+tolerated at boot with a warning; the gateway-owned directory is not. The
+service URL source is fetched and validated once during startup, before the
+first periodic timer. Format and operators are in
 [`governance/rules/README.md`](../governance/rules/README.md).
-
-The source is loaded and validated once during startup. For `"url"`, Harbor
-fetches the endpoint before startup completes and uses that set immediately;
-the first fetch is not deferred until the periodic timer. A failed later
-refresh retains the active rules until a valid update arrives.
 
 Example service configuration:
 
@@ -280,10 +285,14 @@ Example service configuration:
 - **Actions are advisory**: `ALLOW`, `DENY` or `REQUIRE_APPROVAL` plus a
   reason. A rule never rewrites the request and has no side effects.
 - **Levels**: what `match` names sets a rule's level — an operation or path ⇒
-  endpoint, a service only ⇒ service, neither ⇒ gateway. The most specific
-  level with a matching rule decides (endpoint overrides service, service
-  overrides gateway); a matching `final: true` rule pins the decision to its
-  own, broader level.
+  endpoint, a service only ⇒ service, neither ⇒ gateway, within the rule's
+  source. Source ownership controls its broadest tier: a gateway-owned rule is
+  gateway-tier even when it names a service/operation/path; a service-owned
+  method-only or otherwise broad rule is service-tier, and an operation/path
+  rule is endpoint-tier. The most specific matching tier decides (endpoint
+  overrides service, service overrides non-final gateway); a matching
+  `final: true` rule pins the decision to its tier. A service-owned rule can
+  never become a cross-service gateway rule.
 - **Precedence** within the deciding level: `DENY > REQUIRE_APPROVAL >
   ALLOW`; the first rule (file order) carrying the winning action is the
   deciding rule. `matchedRules` on the decision lists every matched rule.
@@ -294,11 +303,13 @@ Example service configuration:
   gateway without rules behaves as before. To fail closed for everything
   else — paths the spec does not have included — add a gateway-level rule
   that targets every call, e.g. `match: { service: '*' }` with a `DENY`
-  action; more specific rules still override it (§14).
+  action in the gateway rule directory; more specific rules still override it
+  unless the gateway rule is `final` (§14).
 - **Fail closed**: an evaluation error is a `DENY`; an invalid rule file stops
   the gateway at boot; a duplicate rule name is an error.
 - **Every decision is persisted** per activity: decision, reason, matched
-  rules, `name@version#contentHash12` for each, the deciding rule, timestamp.
+  rules, owner-qualified `name@version#contentHash12` for each, the deciding
+  rule, timestamp.
 
 ## 7. Human approval over MCP
 
@@ -643,10 +654,10 @@ call rather than a fix.
 - **Decision:** a call no rule targets is allowed (`NO_GOVERNANCE`) even with
   `GOVERNANCE_DEFAULT_DECISION=DENY` — the default applies only to calls some
   rule targets. A path the spec does not have has no `operationId`, so only a
-  service-local broad/gateway-level rule (or a `path` rule naming its
-  `{id}`-collapsed form) reaches it. Should unresolved operations fail closed?
-  Until decided, a deployment that must fail closed adds a catch-all rule to
-  each service's policy (§6).
+  gateway-owned broad rule, a service-owned broad rule for that service, or a
+  `path` rule naming its `{id}`-collapsed form reaches it. Should unresolved
+  operations fail closed? Until decided, a deployment that must fail closed
+  adds a catch-all in the gateway rule directory (§6).
 - Rule targets are not checked against the specs. A typo in `service`,
   `operation` or `path` loads fine and targets nothing; a spec refresh that
   renames an `operationId` or drops a path silently un-governs the rules
@@ -668,11 +679,12 @@ call rather than a fix.
   the rules in force). A stored approval never expires — only the
   `requestState` carrying it does (`GOVERNANCE_APPROVAL_TTL_SEC`), and a
   resume via `_meta["harbor/execution-id"]` is asked the same question again.
-- No active rules ship with the demo service directories. Rules are loaded
-  from the configured source for each enabled service; the root `governance/`
-  folder is documentation/examples, not a process-wide ruleset. A missing
-  default local directory leaves that service with no rules and logs a
-  warning.
+- No active rule files ship by default. Top-level files under
+  `GATEWAY_GOVERNANCE_RULES_DIR` are loaded once as the shared gateway policy;
+  each enabled service also loads its configured service-owned source. The
+  gateway source is file-only and a missing/unreadable gateway directory fails
+  startup. A missing default service-local directory leaves that service with
+  no rules and logs a warning.
 
 **Approvals and identity**
 

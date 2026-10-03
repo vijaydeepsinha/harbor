@@ -318,12 +318,14 @@ The URL is never fetched at startup (a known limitation): a service needs a loca
 
 ### Governance Rules
 
-Governance Rules are service-owned policy, loaded independently for each
-enabled service and evaluated by Harbor's central execution runtime. This is
-similar to Skills being attached to a service, but their role is different:
-Skills tell the agent how to use the API; Governance Rules enforce whether a
-backend call is allowed or needs approval. A disabled service never
-constructs or loads its governance source.
+Governance Rules may be gateway-owned policy in the root
+`governance/rules/` directory or service-owned policy loaded independently for
+each enabled service. Harbor's central execution runtime evaluates the shared
+gateway rules with only the selected service's rules. Skills tell the agent
+how to use the API; Governance Rules enforce whether a backend call is allowed
+or needs approval. A disabled service never constructs or loads its
+service-owned governance source. Gateway-owned rules are configured with
+`GATEWAY_GOVERNANCE_RULES_DIR` and are loaded independently of service enablement.
 
 ```json
 {

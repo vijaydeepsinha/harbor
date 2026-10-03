@@ -32,7 +32,7 @@ describe.skipIf(!env.strictBaseUrl)('fail-closed instance (default DENY, short r
         expect(out.value).toMatchObject({status: 200})
         expect((await s().strictAdmin().inspect(out.meta.executionId!)).decisions[0]).toMatchObject({
             decision: DECISION.ALLOW,
-            decidingRule: 'strict-allow-ping'
+            decidingRule: 'commerce/strict-allow-ping'
         })
         expect(await s().mock.count('GET', '/ping')).toBe(1)
     })

@@ -324,7 +324,7 @@ Full configuration reference → [`service-onboarding.md`](service-onboarding.md
 
 ## Govern what the AI may do
 
-Skills tell the AI *how* to use a service; **Governance Rules** decide *whether* a call may go out. Both are owned per service, but rules are host-enforced YAML/JSON policy selected by that service's `config.json` `governance` block. The repository ships no active policy files in the demo services; root `governance/rules/` contains the authoring guide and examples only. Rules are evaluated centrally before each backend call: `ALLOW`, `DENY`, or `REQUIRE_APPROVAL`, which pauses the run and asks a human over MCP. Start with [`../governance/rules/README.md`](../governance/rules/README.md) for the format and [`code-mode-governance.md`](code-mode-governance.md) for executions, replay and approvals.
+Skills tell the AI *how* to use a service; **Governance Rules** decide *whether* a call may go out. Rules can be gateway-owned (file-only policies in the root `governance/rules/` directory, shared across enabled services) or service-owned (source selected by that service's `config.json` `governance` block). The repository ships no active policy rule files by default; the root guide and nested examples are not loaded as rules. Both scopes are evaluated centrally before each backend call: `ALLOW`, `DENY`, or `REQUIRE_APPROVAL`, which pauses the run and asks a human over MCP. A gateway `final` rule can override service and endpoint rules. Start with [`../governance/rules/README.md`](../governance/rules/README.md) for the format and [`code-mode-governance.md`](code-mode-governance.md) for executions, replay and approvals.
 
 ---
 

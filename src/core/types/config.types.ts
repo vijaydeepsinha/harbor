@@ -62,6 +62,10 @@ export interface ExecutionConfig {
         executionSec?: number
     }
     governance: {
+        /** Gateway-owned file rule directory; shared across every enabled service. */
+        gatewayRulesDir?: string
+        /** Seconds between gateway-owned rule refreshes; 0 loads once. */
+        gatewayRulesRefreshSec?: number
         /**
          * Decision for a call that some rule targets (its `match` fits) but no rule
          * matches. A call no rule targets is ungoverned and always allowed

@@ -6,7 +6,7 @@ import {validateGlobalConfig} from '../../src/core/config/config.js'
 import {GOVERNANCE_DECISION} from '../../src/core/constants.js'
 
 describe('governance configuration defaults', () => {
-    const KEYS = ['TOKEN_CACHE_TYPE', 'IDEMPOTENCY_TYPE', 'ENABLE_AUDIT', 'AUDIT_SINKS', 'GOVERNANCE_RULES_DIR', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'GOVERNANCE_DEFAULT_DECISION', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
+    const KEYS = ['TOKEN_CACHE_TYPE', 'IDEMPOTENCY_TYPE', 'ENABLE_AUDIT', 'AUDIT_SINKS', 'GOVERNANCE_RULES_DIR', 'GOVERNANCE_RULES_SOURCE', 'GOVERNANCE_RULES_URL', 'GOVERNANCE_RULES_URL_TIMEOUT_MS', 'GOVERNANCE_RULES_REFRESH_SEC', 'GATEWAY_GOVERNANCE_RULES_DIR', 'GATEWAY_GOVERNANCE_RULES_REFRESH_SEC', 'GOVERNANCE_DEFAULT_DECISION', 'EXECUTION_CODE_RETENTION', 'EXECUTION_RETENTION_SEC',
         'EXECUTION_STORE_TYPE', 'EXECUTION_STORE_MEMCACHE_HOST', 'EXECUTION_STORE_MEMCACHE_PORT', 'EXECUTION_STORE_MEMCACHE_TIMEOUT_MS',
         'EXECUTION_STORE_MEMCACHE_KEY_PREFIX', 'EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC', 'HARBOR_SERVER_ID'] as const
     let saved: Record<string, string | undefined> = {}
@@ -26,16 +26,49 @@ describe('governance configuration defaults', () => {
         expect(validateGlobalConfig().execution.governance.defaultDecision).toBe(GOVERNANCE_DECISION.DENY)
     })
 
-    it('keeps decision defaults and approval settings global, but does not configure a global rule source', () => {
+    it('keeps gateway file-rule settings and decision defaults global', () => {
         const governance = validateGlobalConfig().execution.governance
         expect(governance).toMatchObject({
             defaultDecision: GOVERNANCE_DECISION.DENY,
-            approvalTtlSec: 600
+            approvalTtlSec: 600,
+            gatewayRulesDir: expect.stringMatching(/governance\/rules$/),
+            gatewayRulesRefreshSec: 0
         })
 
         expect(governance).not.toHaveProperty('rulesDir')
         expect(governance).not.toHaveProperty('rulesSource')
         expect(governance).not.toHaveProperty('rulesRefreshSec')
+    })
+
+    it('accepts a gateway rule directory and non-negative refresh interval', () => {
+        process.env['GATEWAY_GOVERNANCE_RULES_DIR'] = '/etc/harbor/gateway-rules'
+        process.env['GATEWAY_GOVERNANCE_RULES_REFRESH_SEC'] = '60'
+        expect(validateGlobalConfig().execution.governance).toMatchObject({
+            gatewayRulesDir: '/etc/harbor/gateway-rules',
+            gatewayRulesRefreshSec: 60
+        })
+    })
+
+    it('rejects an empty gateway rule directory and invalid refresh intervals', () => {
+        for (const [key, value] of [
+            ['GATEWAY_GOVERNANCE_RULES_DIR', ''],
+            ['GATEWAY_GOVERNANCE_RULES_REFRESH_SEC', '-1'],
+            ['GATEWAY_GOVERNANCE_RULES_REFRESH_SEC', '2147484']
+        ]) {
+            process.env[key] = value
+            const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+                throw new Error(`exit ${code}`)
+            }) as never)
+            const error = vi.spyOn(console, 'error').mockImplementation(() => {
+            })
+            try {
+                expect(() => validateGlobalConfig()).toThrow('exit 1')
+            } finally {
+                exit.mockRestore()
+                error.mockRestore()
+                delete process.env[key]
+            }
+        }
     })
 
     it('refuses legacy gateway-global rule source variables instead of silently running without those policies', () => {
@@ -47,7 +80,7 @@ describe('governance configuration defaults', () => {
         })
         try {
             expect(() => validateGlobalConfig()).toThrow('exit 1')
-            expect(String(error.mock.calls[0]?.[0])).toContain('per-service')
+            expect(String(error.mock.calls[0]?.[0])).toContain('GATEWAY_GOVERNANCE_RULES_DIR')
         } finally {
             exit.mockRestore()
             error.mockRestore()

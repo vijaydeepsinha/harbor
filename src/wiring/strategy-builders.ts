@@ -205,6 +205,11 @@ export function buildGovernanceRuleSource(
     }
 }
 
+/** Gateway rules are deliberately file-only and cannot select a registered per-service source. */
+export function buildGatewayGovernanceRuleSource(rulesDir: string, logger?: Logger): GovernanceRuleSource {
+    return new DirectoryRuleSourceStrategy(rulesDir, logger)
+}
+
 export function buildSpecLoader(
     specSource: { type: 'file' | 'url' | 'url-with-fallback'; url?: string },
     specPath: string,

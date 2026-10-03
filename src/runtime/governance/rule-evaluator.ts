@@ -41,6 +41,18 @@ export interface GovernanceOutcome {
     decidingRule?: string
 }
 
+/** Rule ownership is explicit because a service-owned broad rule is not gateway-wide. */
+export interface GovernanceRuleScopes {
+    gatewayRules: readonly LoadedRule[]
+    serviceRules: readonly LoadedRule[]
+}
+
+interface ScopedRule {
+    loaded: LoadedRule
+    level: RuleLevel
+    owner?: string
+}
+
 /**
  * Deterministic evaluator (§21–§22).
  *
@@ -49,11 +61,12 @@ export interface GovernanceOutcome {
  *    NOT). A leaf on a missing field — or on a computed operand that cannot be
  *    computed — holds only for `exists: false`; comparisons between
  *    mismatched types are false.
- * 2. One level decides. Each rule's level follows from its `match`
- *    (see {@link ruleLevel}): the most specific level with a matched rule
- *    decides — endpoint overrides service, service overrides gateway — unless
- *    a matched rule is `final`, which pins the decision to the broadest level
- *    holding a matched `final` rule.
+ * 2. One level decides. With explicit scopes, gateway-owned rules are always
+ *    gateway-level; service-owned rules are service-level unless their match
+ *    names an operation/path, making them endpoint-level. The most specific
+ *    matched level decides unless a matched `final` rule pins the decision to
+ *    the broadest level holding a matched final rule. The array overload keeps
+ *    the original match-derived behavior for existing evaluator callers.
  * 3. Within the deciding level the strongest action wins:
  *    DENY > REQUIRE_APPROVAL > ALLOW. The deciding rule is the first (file
  *    order) rule of that level carrying the winning action. `matchedRules`
@@ -67,10 +80,36 @@ export function evaluateGovernance(
     rules: readonly LoadedRule[],
     request: GovernanceRequest,
     defaultDecision: GovernanceDecisionType
+): GovernanceOutcome
+export function evaluateGovernance(
+    scopes: GovernanceRuleScopes,
+    request: GovernanceRequest,
+    defaultDecision: GovernanceDecisionType
+): GovernanceOutcome
+export function evaluateGovernance(
+    rulesOrScopes: readonly LoadedRule[] | GovernanceRuleScopes,
+    request: GovernanceRequest,
+    defaultDecision: GovernanceDecisionType
 ): GovernanceOutcome {
     try {
-        const targeted = rules.filter(r => ruleTargets(r.rule, request))
-        const matched = targeted.filter(r => r.rule.conditions === undefined || conditionsHold(r.rule.conditions, request))
+        const scopedRules: ScopedRule[] = 'gatewayRules' in rulesOrScopes
+            ? [
+                ...rulesOrScopes.gatewayRules.map(loaded => ({
+                    loaded,
+                    level: RULE_LEVEL.GATEWAY,
+                    owner: 'gateway'
+                })),
+                ...rulesOrScopes.serviceRules.map(loaded => ({
+                    loaded,
+                    level: ruleLevel(loaded.rule) === RULE_LEVEL.ENDPOINT ? RULE_LEVEL.ENDPOINT : RULE_LEVEL.SERVICE,
+                    owner: request.service
+                }))
+            ]
+            : rulesOrScopes.map(loaded => ({loaded, level: ruleLevel(loaded.rule)}))
+        const targeted = scopedRules.filter(({loaded}) => ruleTargets(loaded.rule, request))
+        const matched = targeted.filter(({loaded}) => (
+            loaded.rule.conditions === undefined || conditionsHold(loaded.rule.conditions, request)
+        ))
         if (matched.length === 0) {
             return targeted.length === 0
                 ? {
@@ -87,16 +126,25 @@ export function evaluateGovernance(
                 }
         }
         const deciding = decidingLevelRules(matched)
-        let winner = deciding[0] as LoadedRule
-        for (const r of deciding) {
-            if (GOVERNANCE_PRECEDENCE[r.rule.action.type] > GOVERNANCE_PRECEDENCE[winner.rule.action.type]) winner = r
+        let winner = deciding[0] as ScopedRule
+        for (const scoped of deciding) {
+            if (GOVERNANCE_PRECEDENCE[scoped.loaded.rule.action.type] > GOVERNANCE_PRECEDENCE[winner.loaded.rule.action.type]) {
+                winner = scoped
+            }
         }
+        const identity = (scoped: ScopedRule) => (
+            scoped.owner === undefined ? scoped.loaded.rule.name : `${scoped.owner}/${scoped.loaded.rule.name}`
+        )
         return {
-            decision: winner.rule.action.type,
-            reason: winner.rule.action.reason ?? `${GOVERNANCE_REASON.RULE_MATCHED}: ${winner.rule.name}`,
-            matchedRules: matched.map(r => r.rule.name),
-            ruleVersions: matched.map(ruleVersionTag),
-            decidingRule: winner.rule.name
+            decision: winner.loaded.rule.action.type,
+            reason: winner.loaded.rule.action.reason ?? `${GOVERNANCE_REASON.RULE_MATCHED}: ${winner.loaded.rule.name}`,
+            matchedRules: matched.map(identity),
+            ruleVersions: matched.map(scoped => (
+                scoped.owner === undefined
+                    ? ruleVersionTag(scoped.loaded)
+                    : `${scoped.owner}/${ruleVersionTag(scoped.loaded)}`
+            )),
+            decidingRule: identity(winner)
         }
     } catch (err) {
         return {
@@ -109,10 +157,10 @@ export function evaluateGovernance(
 }
 
 /**
- * A rule's level follows from what its `match` names: an operation or a path
- * ⇒ endpoint; a service only ⇒ service; neither ⇒ gateway. A clause that
- * matches anything (`*`, or the path `/**`) names nothing. `method` restricts
- * a rule at any level and does not change it.
+ * A rule's match-derived level: operation/path ⇒ endpoint; service only ⇒
+ * service; neither ⇒ gateway. Explicitly scoped evaluation adjusts broad
+ * service-owned rules to the service tier and gateway-owned rules to the
+ * gateway tier. `*`, `/**`, and method constraints do not raise specificity.
  */
 export function ruleLevel(rule: GovernanceRule): RuleLevel {
     const m = rule.match
@@ -123,9 +171,9 @@ export function ruleLevel(rule: GovernanceRule): RuleLevel {
 }
 
 /** The matched rules of the level that decides (see evaluateGovernance, step 2). */
-function decidingLevelRules(matched: readonly LoadedRule[]): LoadedRule[] {
-    const specificity = (r: LoadedRule) => RULE_LEVEL_SPECIFICITY[ruleLevel(r.rule)]
-    const finals = matched.filter(r => r.rule.final === true)
+function decidingLevelRules(matched: readonly ScopedRule[]): ScopedRule[] {
+    const specificity = (r: ScopedRule) => RULE_LEVEL_SPECIFICITY[r.level]
+    const finals = matched.filter(r => r.loaded.rule.final === true)
     const level = finals.length > 0
         ? Math.min(...finals.map(specificity))
         : Math.max(...matched.map(specificity))

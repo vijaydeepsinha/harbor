@@ -280,8 +280,8 @@ const collection = {
             ], {headers: {'X-Harbor-Client-ID': 'postman-client-7'}}),
             inspect('GET /executions/{id} — decision ALLOW persisted', 'executionId', [
                 "pm.test('execution COMPLETED', () => pm.expect(insp.execution.status).to.eql('COMPLETED'));",
-                "pm.test('policy decision is ALLOW by allow-read-customer', () => { pm.expect(insp.decisions[0].decision).to.eql('ALLOW'); pm.expect(insp.decisions[0].decidingRule).to.eql('allow-read-customer'); });",
-                "pm.test('rule version tag recorded', () => pm.expect(insp.decisions[0].ruleVersions[0]).to.match(/^allow-read-customer@1#[0-9a-f]{12}$/));",
+                "pm.test('policy decision is ALLOW by allow-read-customer', () => { pm.expect(insp.decisions[0].decision).to.eql('ALLOW'); pm.expect(insp.decisions[0].decidingRule).to.eql('commerce/allow-read-customer'); });",
+                "pm.test('rule version tag recorded', () => pm.expect(insp.decisions[0].ruleVersions[0]).to.match(/^commerce\\/allow-read-customer@1#[0-9a-f]{12}$/));",
                 "pm.test('activity journaled with OpenAPI identity', () => { pm.expect(insp.activities[0].request.operationId).to.eql('getCustomer'); pm.expect(insp.activities[0].status).to.eql('COMPLETED'); });"
             ]),
             downstream('Downstream — exactly one GET /customers/customer-001 as alice', '?method=GET&path=/customers/customer-001', [
@@ -701,7 +701,7 @@ const collection = {
         folder('14 - Audit', 'Decisions, approvals and the derived history are the audit trail — no log scraping.', [
             inspect('Inspect the multi-step execution — decisions, approvals, history', 'msExecutionId', [
                 "pm.test('every decision carries reason and rule versions', () => insp.decisions.forEach(d => { pm.expect(d.reason).to.be.a('string'); pm.expect(d.ruleVersions).to.be.an('array'); pm.expect(d.evaluatedAt).to.be.a('string'); }));",
-                "pm.test('approval-required decisions name their rule', () => { const d = insp.decisions.find(x => x.decision === 'REQUIRE_APPROVAL'); pm.expect(d.ruleVersions[0]).to.match(/^[a-z0-9-]+@[^#]+#[0-9a-f]{12}$/); });",
+                "pm.test('approval-required decisions name their owner and rule', () => { const d = insp.decisions.find(x => x.decision === 'REQUIRE_APPROVAL'); pm.expect(d.ruleVersions[0]).to.match(/^(gateway|[a-z0-9-]+)\\/[a-z0-9-]+@[^#]+#[0-9a-f]{12}$/); });",
                 "pm.test('approvals record who/when/how', () => insp.approvals.forEach(a => { pm.expect(a.decidedVia).to.eql('mcp-elicitation'); pm.expect(a.decidedAt).to.be.a('string'); }));",
                 "pm.test('history is chronological and complete', () => { const ev = insp.history.map(h => h.kind + ':' + h.event + (h.sequence ? '#' + h.sequence : '')); pm.expect(ev[0]).to.eql('EXECUTION:CREATED'); pm.expect(ev).to.include('APPROVAL:APPROVED#2'); pm.expect(ev).to.include('APPROVAL:APPROVED#3'); pm.expect(ev[ev.length - 1]).to.eql('EXECUTION:COMPLETED'); const at = insp.history.map(h => h.at); pm.expect([...at].sort()).to.eql(at); });",
                 "pm.test('no bearer token is persisted', () => pm.expect(JSON.stringify(insp)).to.not.include(pm.environment.get('tokenAlice')));"
@@ -714,7 +714,7 @@ const collection = {
                 T.toolError('GOVERNANCE_DENIED'), T.status('DENIED'), T.capture('hardAliasExecutionId', "meta['harbor/execution-id']")
             ]),
             inspect('Inspect — the rule that denied the canonical DELETE is the one that decided', 'hardAliasExecutionId', [
-                "pm.test('deny-delete-order decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('deny-delete-order'));"
+                "pm.test('deny-delete-order decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('commerce/deny-delete-order'));"
             ]),
             apiExecute('Dot-segment spelling (/orders/./…) → INVALID_API_REQUEST before governance', 'commerce', HARDENING.deleteOrderAt('/orders/./order-001'), [T.toolError('INVALID_API_REQUEST')]),
             apiExecute('Encoded-slash spelling (/orders%2F…) → INVALID_API_REQUEST', 'commerce', HARDENING.deleteOrderAt('/orders%2Forder-001'), [T.toolError('INVALID_API_REQUEST')]),

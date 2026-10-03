@@ -13,7 +13,7 @@ import {DECISION, ERR, EXECUTION_STATUS} from '../helpers/env.js'
 import * as programs from '../fixtures/programs.js'
 import {AMOUNTS, IDENTITIES, RESOURCES} from '../fixtures/identities.js'
 
-const RULE_TAG = /^[a-z0-9-]+@[^#]+#[0-9a-f]{12}$/
+const RULE_TAG = /^(?:gateway|[a-z0-9-]+)\/[a-z0-9-]+@[^#]+#[0-9a-f]{12}$/
 
 describe('audit trail', () => {
     const s = useScenario()
@@ -37,8 +37,8 @@ describe('audit trail', () => {
             activitySequence: 2,
             decision: DECISION.ALLOW,
             reason: 'RULE_MATCHED: allow-update-order',
-            matchedRules: ['allow-update-order'],
-            decidingRule: 'allow-update-order'
+            matchedRules: ['commerce/allow-update-order'],
+            decidingRule: 'commerce/allow-update-order'
         })
         expect(decisions[1]!.ruleVersions).toEqual([expect.stringMatching(RULE_TAG)])
         for (const d of decisions) expect(Number.isNaN(Date.parse(d.evaluatedAt))).toBe(false)
@@ -52,7 +52,7 @@ describe('audit trail', () => {
         s().track(b.executionId)
         const [ia, ib] = await Promise.all([s().admin.inspect(a.executionId), s().admin.inspect(b.executionId)])
         expect(ia.decisions[0]!.ruleVersions).toEqual(ib.decisions[0]!.ruleVersions)
-        expect(ia.decisions[0]!.ruleVersions[0]).toMatch(/^high-value-order-requires-approval@3#/)
+        expect(ia.decisions[0]!.ruleVersions[0]).toMatch(/^commerce\/high-value-order-requires-approval@3#/)
     })
 
     it('should_record_who_decided_when_and_with_what_comment_on_each_approval', async () => {
@@ -74,7 +74,7 @@ describe('audit trail', () => {
         expect(Date.parse(approvals[0]!.decidedAt!)).toBeGreaterThanOrEqual(Date.parse(approvals[0]!.createdAt))
         expect(approvals[0]!.summary).toMatchObject({
             reason: 'Order amount exceeds the approval threshold',
-            matchedRules: ['high-value-order-requires-approval']
+            matchedRules: ['commerce/high-value-order-requires-approval']
         })
     })
 

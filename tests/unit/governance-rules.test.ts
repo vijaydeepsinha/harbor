@@ -830,6 +830,97 @@ describe('governance evaluator', () => {
         })
     })
 
+    describe('explicit gateway/service rule scopes', () => {
+        const deleting = (service: string): GovernanceRequest => ({
+            ...req,
+            service,
+            method: 'DELETE',
+            specPath: '/records/{id}',
+            operationId: 'deleteRecord',
+            body: undefined
+        })
+
+        it('applies a gateway final DENY across services and qualifies persisted rule identities', () => {
+            const gatewayDeny = rule({
+                name: 'no-deletes',
+                match: {method: 'DELETE'},
+                final: true,
+                action: {type: 'DENY'}
+            })
+            for (const service of ['orders', 'payments']) {
+                const serviceRules = [
+                    rule({
+                        name: 'no-deletes',
+                        match: {service, method: 'DELETE'},
+                        final: true,
+                        action: {type: 'ALLOW'}
+                    }),
+                    rule({
+                        name: 'delete-endpoint-allowed',
+                        match: {service, operation: 'deleteRecord'},
+                        action: {type: 'ALLOW'}
+                    })
+                ]
+                expect(evaluateGovernance({
+                    gatewayRules: [gatewayDeny],
+                    serviceRules
+                }, deleting(service), GOVERNANCE_DECISION.ALLOW)).toMatchObject({
+                    decision: GOVERNANCE_DECISION.DENY,
+                    decidingRule: 'gateway/no-deletes',
+                    matchedRules: [
+                        'gateway/no-deletes',
+                        `${service}/no-deletes`,
+                        `${service}/delete-endpoint-allowed`
+                    ],
+                    ruleVersions: [
+                        'gateway/no-deletes@1#abcdef012345',
+                        `${service}/no-deletes@1#abcdef012345`,
+                        `${service}/delete-endpoint-allowed@1#abcdef012345`
+                    ]
+                })
+            }
+        })
+
+        it('keeps service-owned broad rules at service scope and ordinary precedence specific', () => {
+            const request = deleting('orders')
+            const gatewayAllow = rule({
+                name: 'gateway-allow',
+                match: {method: 'DELETE'},
+                action: {type: 'ALLOW'}
+            })
+            const serviceFinal = rule({
+                name: 'service-final-allow',
+                match: {method: 'DELETE'},
+                final: true,
+                action: {type: 'ALLOW'}
+            })
+            const endpointDeny = rule({
+                name: 'endpoint-deny',
+                match: {operation: 'deleteRecord'},
+                action: {type: 'DENY'}
+            })
+            expect(evaluateGovernance({
+                gatewayRules: [gatewayAllow],
+                serviceRules: [serviceFinal, endpointDeny]
+            }, request, GOVERNANCE_DECISION.ALLOW)).toMatchObject({
+                decision: GOVERNANCE_DECISION.ALLOW,
+                decidingRule: 'orders/service-final-allow'
+            })
+
+            expect(evaluateGovernance({
+                gatewayRules: [gatewayAllow],
+                serviceRules: [rule({
+                    name: 'service-allow',
+                    match: {service: 'orders'},
+                    action: {type: 'ALLOW'}
+                }), endpointDeny]
+            }, request, GOVERNANCE_DECISION.ALLOW)).toMatchObject({
+                decision: GOVERNANCE_DECISION.DENY,
+                decidingRule: 'orders/endpoint-deny'
+            })
+        })
+    })
+
     it('fails closed to DENY when evaluation itself throws', () => {
         const poison = {
             rule: Object.defineProperty({...rule({}).rule}, 'match', {

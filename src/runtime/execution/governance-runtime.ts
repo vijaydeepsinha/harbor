@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
+import {resolve} from 'node:path'
 import type {ExecutionConfig} from '../../core/types/config.types.js'
 import type {Logger} from '../../core/types/logger.types.js'
 import type {ExecutionPersistence} from '../../spi/execution/execution-store.js'
@@ -8,6 +9,7 @@ import type {GovernanceRuleSourceConfig} from '../../core/types/config.types.js'
 import {
     buildExecutionStore,
     buildGovernanceRuleSource,
+    buildGatewayGovernanceRuleSource,
     GovernanceRulesDirectoryAbsentError
 } from '../../wiring/strategy-builders.js'
 import type {GovernanceRuleDocument, GovernanceRuleSource} from '../../spi/governance/rule-source.js'
@@ -31,6 +33,8 @@ export interface GovernanceRuntime {
     persistence: ExecutionPersistence
     executionManager: ExecutionManager
     approvals: ApprovalService
+    /** Returns the gateway-owned rules shared by calls to every enabled service. */
+    gatewayRules(): readonly LoadedRule[]
     /** Returns the active rules for a registered service; throws for an unknown service. */
     rulesForService(service: string): readonly LoadedRule[]
     requestState: ResumeStateCodec
@@ -67,9 +71,20 @@ export async function buildGovernanceRuntime(
             }
         } : {})
     })
+    const gatewayRuleStore = new GovernanceRuleStore()
     const ruleStores = new Map<string, GovernanceRuleStore>()
     const ruleRefreshers: GovernanceRuleRefresher[] = []
     try {
+        const gatewayRuleSource = buildGatewayGovernanceRuleSource(
+            config.governance.gatewayRulesDir ?? resolve(process.cwd(), 'governance/rules'),
+            logger
+        )
+        gatewayRuleStore.swap(parseRuleDocuments(
+            await gatewayRuleSource.load(), logger, gatewayRuleSource.name
+        ))
+        ruleRefreshers.push(new GovernanceRuleRefresher(
+            gatewayRuleSource, gatewayRuleStore, config.governance.gatewayRulesRefreshSec ?? 0, logger
+        ))
         for (const service of services) {
             const ruleSource = buildGovernanceRuleSource(service.governance, logger)
             const rules = new GovernanceRuleStore()
@@ -96,13 +111,19 @@ export async function buildGovernanceRuntime(
     logger.info(
         {
             store: persistence.name,
-            rules: Object.fromEntries(Array.from(ruleStores, ([service, store]) => [service, store.describe()])),
+            rules: {
+                gateway: gatewayRuleStore.describe(),
+                services: Object.fromEntries(Array.from(ruleStores, ([service, store]) => [service, store.describe()]))
+            },
             defaultDecision: config.governance.defaultDecision
         },
         'Code Mode governance layer ready'
     )
     return {
         persistence, executionManager: manager, approvals,
+        gatewayRules(): readonly LoadedRule[] {
+            return gatewayRuleStore.getRules()
+        },
         rulesForService(service: string): readonly LoadedRule[] {
             const rules = ruleStores.get(service)
             if (!rules) throw new Error(`No Governance Rule set is registered for service "${service}"`)
