@@ -15,7 +15,13 @@ import {buildMcpServerFactory} from '../../src/runtime/http/mcp-server-factory.j
 import {ServiceRegistry} from '../../src/runtime/registry/service-registry.js'
 import type {MetricsRegistry} from '../../src/runtime/observability/metrics.js'
 import {globalConfig, makeConnector, makeResources, makeRuntime, silentLogger} from '../unit/code-mode-harness.js'
-import {APPROVAL_INPUT_KEY, ERR, EXECUTION_ID_META_KEY, EXECUTION_STATUS, GOVERNANCE_DECISION} from '../../src/core/constants.js'
+import {
+    APPROVAL_INPUT_KEY,
+    ERR,
+    EXECUTION_ID_META_KEY,
+    EXECUTION_STATUS,
+    GOVERNANCE_DECISION
+} from '../../src/core/constants.js'
 
 const PROGRAM = `async () => {
   const c = await api.request({ method: 'GET', path: '/campaigns' })
@@ -188,14 +194,21 @@ describe('MCP wire: approval via input_required + retry', () => {
                 jsonrpc: '2.0',
                 id: nextId++,
                 method: 'tools/call',
-                params: {name: 'api_execute', arguments: {service: 'trafficking', code: DELETE_PROGRAM}, _meta: envelope(true)}
+                params: {
+                    name: 'api_execute',
+                    arguments: {service: 'trafficking', code: DELETE_PROGRAM},
+                    _meta: envelope(true)
+                }
             })
         }), {authInfo: {token: 'wire-token', clientId: 'harbor-client', scopes: []}}))
         const result = denied['result'] as Record<string, unknown>
         expect(result['resultType']).toBe('complete')
         expect(result['isError']).toBe(true)
         expect(result['inputRequests']).toBeUndefined()
-        const body = JSON.parse((result['content'] as Array<{ text: string }>)[0]!.text) as { code: string; error: string }
+        const body = JSON.parse((result['content'] as Array<{ text: string }>)[0]!.text) as {
+            code: string;
+            error: string
+        }
         expect(body.code).toBe(ERR.GOVERNANCE_DENIED)
         expect(body.error).toContain('Gateway policy forbids all DELETE requests.')
         expect(count('GET', '/campaigns') - beforeGets).toBe(1)

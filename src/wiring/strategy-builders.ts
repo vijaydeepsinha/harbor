@@ -6,6 +6,7 @@ import type {IdempotencyStrategy} from '../spi/idempotency/idempotency-strategy.
 import type {SpecLoaderStrategy} from '../spi/spec/spec-loader.js'
 import type {
     ExecutionStoreBackendConfig,
+    GovernanceRuleSourceConfig,
     IdempotencyBackendConfig,
     TokenCacheBackendConfig
 } from '../core/types/config.types.js'
@@ -25,7 +26,6 @@ import {fileSpec} from '../adapters/spec/strategies/file-spec-loader.strategy.js
 import {urlSpec} from '../adapters/spec/strategies/url-spec-loader.strategy.js'
 import {urlWithFallback} from '../adapters/spec/strategies/url-with-fallback-spec-loader.strategy.js'
 import type {GovernanceRuleSource} from '../spi/governance/rule-source.js'
-import type {GovernanceRuleSourceConfig} from '../core/types/config.types.js'
 import type {AuditSink} from '../spi/observability/audit-sink.js'
 import {CONSOLE_AUDIT_SINK, ConsoleAuditSink} from '../adapters/observability/console-audit-sink.js'
 import {DirectoryRuleSourceStrategy} from '../adapters/governance/strategies/directory-rule-source.strategy.js'
