@@ -21,8 +21,8 @@ describe('denied operations', () => {
         const out = expectToolError(await s().client('alice').apiExecute('commerce', programs.createThenDeleteOrder(RESOURCES.customerAllowed, AMOUNTS.normal)), ERR.GOVERNANCE_DENIED)
         s().track(out.meta.executionId)
         expect(out.retryable).toBe(false)
-        expect(out.message).toContain('Order deletion is not permitted through agents')
-        expect(out.message).toContain('deny-delete-order')
+        expect(out.message).toContain('Gateway policy forbids all DELETE requests.')
+        expect(out.message).toContain('deny-all-delete')
         expect(out.meta.executionStatus).toBe(EXECUTION_STATUS.DENIED)
         expect(out.payload['executionId']).toBe(out.meta.executionId)
 
@@ -38,7 +38,7 @@ describe('denied operations', () => {
             pathParams: {orderId: 'order-001'}
         })
         expect(insp.activities[1]).not.toHaveProperty('response')
-        expect(insp.decisions.map(d => [d.activitySequence, d.decision, d.decidingRule ?? null])).toEqual([[1, DECISION.ALLOW, null], [2, DECISION.DENY, 'commerce/deny-delete-order']])
+        expect(insp.decisions.map(d => [d.activitySequence, d.decision, d.decidingRule ?? null])).toEqual([[1, DECISION.ALLOW, null], [2, DECISION.DENY, 'gateway/deny-all-delete']])
         expect(insp.approvals).toEqual([])
         expect(await s().mock.calls()).toEqual(['POST /orders'])
         expect((await s().mock.state())['orders']).toHaveLength(1) // still there

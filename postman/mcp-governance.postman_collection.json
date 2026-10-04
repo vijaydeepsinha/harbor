@@ -616,7 +616,7 @@
                   "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
                   "pm.test('tool error code is GOVERNANCE_DENIED', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('GOVERNANCE_DENIED'); });",
                   "pm.test('execution status is DENIED', () => pm.expect(meta['harbor/execution-status']).to.eql('DENIED'));",
-                  "pm.test('denial names the rule and reason', () => { pm.expect(payload.error).to.include('deny-delete-order'); pm.expect(payload.retryable).to.eql(false); });",
+                  "pm.test('denial names the gateway final rule and reason', () => { pm.expect(payload.error).to.include('deny-all-delete'); pm.expect(payload.retryable).to.eql(false); });",
                   "pm.collectionVariables.set('executionId', meta['harbor/execution-id']);"
                 ]
               }
@@ -5071,7 +5071,7 @@
                 "exec": [
                   "pm.test('inspection is 200', () => pm.response.to.have.status(200));",
                   "const insp = pm.response.json();",
-                  "pm.test('deny-delete-order decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('commerce/deny-delete-order'));"
+                  "pm.test('gateway deny-all-delete decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('gateway/deny-all-delete'));"
                 ]
               }
             }

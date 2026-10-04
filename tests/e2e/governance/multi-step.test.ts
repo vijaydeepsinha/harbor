@@ -169,7 +169,7 @@ describe('multi-step workflow with two approval points', () => {
         expect(insp.activities.map(a => [a.sequence, a.status])).toEqual([[1, ACTIVITY_STATUS.COMPLETED], [2, ACTIVITY_STATUS.COMPLETED], [3, ACTIVITY_STATUS.DENIED]])
         expect(insp.approvals.map(a => [a.activitySequence, a.status])).toEqual([[2, APPROVAL_STATUS.APPROVED]])
         expect(insp.decisions.map(d => [d.activitySequence, d.decision])).toEqual([[1, DECISION.ALLOW], [2, DECISION.REQUIRE_APPROVAL], [3, DECISION.DENY]])
-        expect(insp.decisions[2]!.decidingRule).toBe('commerce/deny-delete-order')
+        expect(insp.decisions[2]!.decidingRule).toBe('gateway/deny-all-delete')
         expect(await s().mock.count('POST', '/notifications')).toBe(0)
     })
 

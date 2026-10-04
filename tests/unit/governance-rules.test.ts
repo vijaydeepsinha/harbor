@@ -919,6 +919,117 @@ describe('governance evaluator', () => {
                 decidingRule: 'orders/endpoint-deny'
             })
         })
+
+        it.each([
+            {
+                label: 'endpoint final DENY beats broader non-final REQUIRE_APPROVAL',
+                gatewayRules: [],
+                serviceRules: [
+                    rule({
+                        name: 'service-approve',
+                        match: {method: 'DELETE'},
+                        action: {type: 'REQUIRE_APPROVAL'}
+                    }),
+                    rule({
+                        name: 'endpoint-deny',
+                        match: {operation: 'deleteRecord'},
+                        final: true,
+                        action: {type: 'DENY'}
+                    })
+                ],
+                expected: {decision: GOVERNANCE_DECISION.DENY, decidingRule: 'orders/endpoint-deny'}
+            },
+            {
+                label: 'endpoint final REQUIRE_APPROVAL beats broader non-final DENY',
+                gatewayRules: [],
+                serviceRules: [
+                    rule({
+                        name: 'service-deny',
+                        match: {method: 'DELETE'},
+                        action: {type: 'DENY'}
+                    }),
+                    rule({
+                        name: 'endpoint-approve',
+                        match: {operation: 'deleteRecord'},
+                        final: true,
+                        action: {type: 'REQUIRE_APPROVAL'}
+                    })
+                ],
+                expected: {decision: GOVERNANCE_DECISION.REQUIRE_APPROVAL, decidingRule: 'orders/endpoint-approve'}
+            },
+            {
+                label: 'service final REQUIRE_APPROVAL beats endpoint final DENY because the broadest final tier wins',
+                gatewayRules: [],
+                serviceRules: [
+                    rule({
+                        name: 'service-approve',
+                        match: {method: 'DELETE'},
+                        final: true,
+                        action: {type: 'REQUIRE_APPROVAL'}
+                    }),
+                    rule({
+                        name: 'endpoint-deny',
+                        match: {operation: 'deleteRecord'},
+                        final: true,
+                        action: {type: 'DENY'}
+                    })
+                ],
+                expected: {decision: GOVERNANCE_DECISION.REQUIRE_APPROVAL, decidingRule: 'orders/service-approve'}
+            },
+            {
+                label: 'gateway final ALLOW beats service final DENY and endpoint final REQUIRE_APPROVAL',
+                gatewayRules: [rule({
+                    name: 'gateway-allow',
+                    match: {method: 'DELETE'},
+                    final: true,
+                    action: {type: 'ALLOW'}
+                })],
+                serviceRules: [
+                    rule({
+                        name: 'service-deny',
+                        match: {method: 'DELETE'},
+                        final: true,
+                        action: {type: 'DENY'}
+                    }),
+                    rule({
+                        name: 'endpoint-approve',
+                        match: {operation: 'deleteRecord'},
+                        final: true,
+                        action: {type: 'REQUIRE_APPROVAL'}
+                    })
+                ],
+                expected: {decision: GOVERNANCE_DECISION.ALLOW, decidingRule: 'gateway/gateway-allow'}
+            },
+            {
+                label: 'gateway final REQUIRE_APPROVAL beats service final DENY and endpoint final ALLOW',
+                gatewayRules: [rule({
+                    name: 'gateway-approve',
+                    match: {method: 'DELETE'},
+                    final: true,
+                    action: {type: 'REQUIRE_APPROVAL'}
+                })],
+                serviceRules: [
+                    rule({
+                        name: 'service-deny',
+                        match: {method: 'DELETE'},
+                        final: true,
+                        action: {type: 'DENY'}
+                    }),
+                    rule({
+                        name: 'endpoint-allow',
+                        match: {operation: 'deleteRecord'},
+                        final: true,
+                        action: {type: 'ALLOW'}
+                    })
+                ],
+                expected: {decision: GOVERNANCE_DECISION.REQUIRE_APPROVAL, decidingRule: 'gateway/gateway-approve'}
+            }
+        ])('$label', ({gatewayRules, serviceRules, expected}) => {
+            expect(evaluateGovernance({
+                gatewayRules,
+                serviceRules
+            }, deleting('orders'), GOVERNANCE_DECISION.ALLOW)).toMatchObject(expected)
+        })
     })
 
     it('fails closed to DENY when evaluation itself throws', () => {

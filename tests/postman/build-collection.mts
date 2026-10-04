@@ -298,7 +298,7 @@ const collection = {
             resetMock(),
             apiExecute('api_execute — create then DELETE order (DENY at #2)', 'commerce', programs.createThenDeleteOrder(RESOURCES.customerAllowed, AMOUNTS.normal), [
                 T.noRpcError, T.toolError('GOVERNANCE_DENIED'), T.status('DENIED'),
-                "pm.test('denial names the rule and reason', () => { pm.expect(payload.error).to.include('deny-delete-order'); pm.expect(payload.retryable).to.eql(false); });",
+                "pm.test('denial names the gateway final rule and reason', () => { pm.expect(payload.error).to.include('deny-all-delete'); pm.expect(payload.retryable).to.eql(false); });",
                 T.capture('executionId', "meta['harbor/execution-id']")
             ]),
             inspect('GET /executions/{id} — DENIED with DENY decision', 'executionId', [
@@ -714,7 +714,7 @@ const collection = {
                 T.toolError('GOVERNANCE_DENIED'), T.status('DENIED'), T.capture('hardAliasExecutionId', "meta['harbor/execution-id']")
             ]),
             inspect('Inspect — the rule that denied the canonical DELETE is the one that decided', 'hardAliasExecutionId', [
-                "pm.test('deny-delete-order decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('commerce/deny-delete-order'));"
+                "pm.test('gateway deny-all-delete decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('gateway/deny-all-delete'));"
             ]),
             apiExecute('Dot-segment spelling (/orders/./…) → INVALID_API_REQUEST before governance', 'commerce', HARDENING.deleteOrderAt('/orders/./order-001'), [T.toolError('INVALID_API_REQUEST')]),
             apiExecute('Encoded-slash spelling (/orders%2F…) → INVALID_API_REQUEST', 'commerce', HARDENING.deleteOrderAt('/orders%2Forder-001'), [T.toolError('INVALID_API_REQUEST')]),
