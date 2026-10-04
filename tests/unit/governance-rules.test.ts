@@ -279,49 +279,94 @@ describe('governance rule loader', () => {
         }
     })
 
-    it('the documented example rule set loads (copying it into governance/rules/ must not stop the gateway)', () => {
+    it('the documented order service examples load', () => {
         const loaded = loadGovernanceRules(join(process.cwd(), 'governance/rules/examples'))
-        expect(loaded.map(l => l.rule.name)).toContain('never-delete-campaigns')
-        expect(loaded.find(l => l.rule.name === 'never-delete-campaigns')?.rule.match.path).toBe('/campaigns/{id}')
+        expect(loaded.map(l => l.rule.name)).toEqual([
+            'high-value-order',
+            'usd-order-review',
+            'expensive-first-item',
+            'complex-order-review',
+            'order-service-baseline'
+        ])
     })
 
-    it('the example bid rules review missing or unusable current bids, not just computable increases', () => {
-        // The owner's PR #4 question: a request carries the new bid, so how is the previous one known? It is not —
-        // the rule compares two fields of the same request, and must not be skippable by leaving one out.
-        const examples = loadGovernanceRules(join(process.cwd(), 'governance/rules/examples'))
-        const update = (body: Record<string, unknown>): GovernanceRequest => ({
+    it('the separate gateway example is final across services', () => {
+        const gatewayRules = loadGovernanceRules(join(process.cwd(), 'governance/rules/examples/gateway'))
+        const serviceAllow = rule({
+            name: 'allow-orders',
+            match: {service: 'orders'},
+            action: {type: 'ALLOW'}
+        })
+        const outcome = evaluateGovernance({
+            gatewayRules,
+            serviceRules: [serviceAllow]
+        }, {
             executionId: 'e',
             activitySequence: 1,
-            service: 'trafficking',
+            service: 'orders',
+            method: 'DELETE',
+            specPath: '/orders',
+            query: {all: true}
+        }, GOVERNANCE_DECISION.DENY)
+
+        expect(outcome).toMatchObject({
+            decision: GOVERNANCE_DECISION.DENY,
+            decidingRule: 'gateway/no-bulk-deletes-anywhere'
+        })
+    })
+
+    it('the order examples demonstrate thresholds, item limits, and AND/OR/NOT logic', () => {
+        const examples = loadGovernanceRules(join(process.cwd(), 'governance/rules/examples'))
+        const order = (
+            body: Record<string, unknown>,
+            query?: Record<string, unknown>
+        ): GovernanceRequest => ({
+            executionId: 'e',
+            activitySequence: 1,
+            service: 'order',
             method: 'POST',
-            specPath: '/campaigns/{id}',
-            operationId: 'updateCampaign',
-            pathParams: {id: 'C1'},
-            body: {owner: 'growth', ...body}
+            specPath: '/orders',
+            operationId: 'placeOrder',
+            ...(query !== undefined ? {query} : {}),
+            body
         })
-        const decide = (body: Record<string, unknown>) => evaluateGovernance(examples, update(body), GOVERNANCE_DECISION.DENY)
-        expect(decide({bid: 13.1, currentBid: 10})).toMatchObject({
+        const decide = (body: Record<string, unknown>, query?: Record<string, unknown>) =>
+            evaluateGovernance({
+                gatewayRules: [],
+                serviceRules: examples
+            }, order(body, query), GOVERNANCE_DECISION.DENY)
+
+        expect(decide({amount: 1200, currency: 'EUR', items: [{unitPrice: 100}]})).toMatchObject({
             decision: 'REQUIRE_APPROVAL',
-            matchedRules: ['bid-jump', 'trafficking-baseline']
+            decidingRule: 'order/high-value-order'
         })
-        expect(decide({bid: 12, currentBid: 10}).decision).toBe('ALLOW') // +20%: the service baseline allows it
-        // Not stating the bid it replaces used to make the ratio uncomputable — the rule did not fire and the baseline allowed it.
-        expect(decide({bid: 40})).toMatchObject({
+        expect(decide({amount: 100, currency: 'USD', items: [{unitPrice: 25}]})).toMatchObject({
             decision: 'REQUIRE_APPROVAL',
-            matchedRules: expect.arrayContaining(['bid-jump'])
+            decidingRule: 'order/usd-order-review'
         })
-        for (const currentBid of [null, 0, -10, 'not-a-number', '10', true, [], {}, Infinity, NaN]) {
-            expect(decide({bid: 20, currentBid}), `currentBid=${JSON.stringify(currentBid)}`)
-                .toMatchObject({decision: 'REQUIRE_APPROVAL', matchedRules: expect.arrayContaining(['bid-jump'])})
-        }
-        expect(decide({bid: 13, currentBid: 10}).decision).toBe('ALLOW') // exactly +30%
-        // A claimed current bid cannot lift a bid past the absolute ceiling.
-        expect(decide({bid: 60, currentBid: 59})).toMatchObject({
+        expect(decide({amount: 100, currency: 'EUR', items: [{unitPrice: 600}]})).toMatchObject({
+            decision: 'DENY',
+            decidingRule: 'order/expensive-first-item'
+        })
+        expect(decide(
+            {amount: 100, currency: 'EUR', items: [{unitPrice: 300}]}
+        )).toMatchObject({
             decision: 'REQUIRE_APPROVAL',
-            matchedRules: expect.arrayContaining(['bid-ceiling'])
+            decidingRule: 'order/complex-order-review'
         })
-        // An update that does not touch the bid is not a bid change.
-        expect(decide({name: 'Q4 renamed'}).decision).toBe('ALLOW')
+        expect(decide(
+            {amount: 100, currency: 'EUR', items: [{unitPrice: 300}]},
+            {preApproved: 'true'}
+        )).toMatchObject({
+            decision: 'ALLOW',
+            decidingRule: 'order/order-service-baseline'
+        })
+        expect(decide(
+            {amount: 800, currency: 'EUR', items: [{unitPrice: 100}]}
+        )).toMatchObject({
+            decision: 'REQUIRE_APPROVAL',
+            decidingRule: 'order/complex-order-review'
+        })
     })
 
     it('rule store swaps atomically and describes itself', () => {

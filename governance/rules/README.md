@@ -53,6 +53,16 @@ an empty set while rules are in force changes nothing — the last valid set
 stays in force. Clearing all rules for a service requires restarting the
 gateway.
 
+The examples are kept separate by ownership: `order-governance.yaml` shows
+service-owned order rules, and the nested gateway example shows cross-service
+policy. These are documentation fixtures, not active policies. The order
+example uses illustrative `amount`, `currency`, and `items` fields not present
+in the demo order API; extend the service API before applying those rules.
+Copy a rule to the appropriate source directory: gateway rules to
+`GATEWAY_GOVERNANCE_RULES_DIR`, service rules to that service's configured
+source. The directory loader reads only top-level files, so the nested
+`examples/` tree is not loaded by default.
+
 Every enabled service's source is loaded and validated during gateway
 startup. For a URL source, Harbor performs the GET before startup completes
 and uses the latest response immediately; it does not wait for the first
@@ -74,37 +84,40 @@ read.
 A file holds one rule, a list of rules, or `{ rules: [...] }`:
 
 ```yaml
-name: high-budget-campaign          # kebab-case, unique
+name: high-value-order              # kebab-case, unique
 version: 2                          # free-form revision marker, recorded on every decision
-description: Large spends need a human
+description: Large orders need a human
 match:                              # which operations — every present clause must match; "*" = any present value
-  service: trafficking
-  operation: createCampaign         # OpenAPI operationId
+  service: order
+  operation: placeOrder              # OpenAPI operationId
   # method: POST                    # or a list: [POST, PUT]
-  # path: /campaigns                # OpenAPI path template starting with /, exactly as in the spec; /campaigns/** = it and everything beneath
+  # path: /orders                    # OpenAPI path template starting with /, exactly as in the spec; /orders/** = it and everything beneath
 conditions:                         # when — a boolean tree over request values
   allOf:
-    - percent_of: { part: body.budget, whole: body.totalBudget }
-      greater_than: 20              # budget is more than 20% of the total budget
-    - not: { field: query.dryRun, equals: true }
+    - field: body.amount
+      greater_than: 1000
+    - not: { field: query.preApproved, equals: 'true' }
 action:                             # what — advisory only
   type: REQUIRE_APPROVAL            # ALLOW | DENY | REQUIRE_APPROVAL
-  reason: Campaign budget exceeds the approval threshold
+  reason: Order amount exceeds the approval threshold
 ```
 
 ## Levels
 
-What `match` names sets how broadly a rule applies:
+The source determines ownership; within a service-owned source, `match` sets
+the rule's scope:
 
-| Level | `match` names | Applies to | Example |
+| Level | Source and `match` | Applies to | Example |
 |---|---|---|---|
-| **service policy baseline** | no service, operation or path | every call governed by this service's own rule source | `match: { method: DELETE }` |
-| **service** | a `service` only | every endpoint of that service | `match: { service: trafficking }` |
-| **endpoint** | an `operation` or a `path` (incl. `/prefix/**`) | those endpoints | `match: { service: trafficking, operation: createCampaign }` |
+| **gateway** | Gateway source configured by `GATEWAY_GOVERNANCE_RULES_DIR`; any `match` | Calls across services that match the rule | `match: { method: DELETE }` |
+| **service policy baseline** | A service's own source; no service, operation or path in `match` | Every call governed by that service's source | `match: { method: DELETE }` |
+| **service** | A service's own source; a `service` only | Every endpoint of that service | `match: { service: order }` |
+| **endpoint** | A service's own source; an `operation` or a `path` (incl. `/prefix/**`) | Those endpoints | `match: { service: order, operation: placeOrder }` |
 
-Rule sources are isolated by service: a rule loaded for one service is never
-evaluated for another. Within one service's source, `*` (and the path `/**`)
-names nothing, so it does not raise a rule's level.
+Gateway rules are shared across services. Service-owned rule sources are
+isolated: a rule loaded for one service is never evaluated for another.
+Within one service's source, `*` (and the path `/**`) names nothing, so it
+does not raise a rule's level.
 It matches any *present* value: every call has a service and a path, but
 `operation: '*'` never targets a call without an `operationId` — one whose
 path the spec does not have, or whose operation declares none.
@@ -187,8 +200,9 @@ Evaluation is a pure function of the rule and the request — no I/O, no clock:
   the ratio. Require a positive claimed current bid too (`not: { field:
   body.currentBid, greater_than: 0 }`), so a negative denominator cannot
   hide an increase. Keep an absolute limit the claim cannot move.
-  `governance/rules/examples/campaign-governance.yaml` (`bid-jump`,
-  `bid-ceiling`) shows both.
+  A rule should handle missing, zero and non-numeric old values as well as
+  large increases; computed ratios are available when the request contains
+  both values.
 - Dates are `YYYY-MM-DD` or date-times **with a zone** (`2026-03-01T09:00:00Z`,
   `…+05:30`). A zone-less date-time or an impossible date (`2026-02-30`) does
   not compute: JavaScript would read the first in the host's time zone and roll
@@ -245,7 +259,9 @@ targets it and its `conditions` hold.
      `NO_GOVERNANCE`) **whatever `GOVERNANCE_DEFAULT_DECISION` says**. A
      gateway with no rules behaves exactly as without governance.
 
-Gateway-owned rule file:
+Gateway-owned rule file. Put it in the directory configured by
+`GATEWAY_GOVERNANCE_RULES_DIR`; the source, not a `service` match clause,
+determines gateway ownership:
 
 ```yaml
 - name: no-deletes-anywhere
@@ -254,24 +270,25 @@ Gateway-owned rule file:
   action: { type: DENY }
 ```
 
-Service-owned rule file:
+Service-owned rules belong in that service's configured source. The `service`
+match value must be the service name Harbor registers:
 
 ```yaml
-- name: trafficking-reads
-  match: { service: trafficking, method: GET }
+- name: order-reads
+  match: { service: order, method: GET }
   action: { type: ALLOW }
-- name: big-campaigns
-  match: { service: trafficking, operation: createCampaign }
-  conditions: { budget: { greater_than: 1000000 } }
+- name: high-value-orders
+  match: { service: order, operation: placeOrder }
+  conditions: { amount: { greater_than: 1000 } }
   action: { type: REQUIRE_APPROVAL }
 ```
 
-With these rules and the default `DENY`, a `POST /campaigns` with a budget of
+With these rules and the default `DENY`, a `POST /orders` with an amount of
 500 is denied: the endpoint rule targets it but does not match, and no service
-rule allows POSTs. Add a service- or endpoint-level `ALLOW` for what should
-pass.
+rule allows order creation. Add a service- or endpoint-level `ALLOW` for what
+should pass.
 
-The gateway DELETE rule does not target a `PATCH /campaigns/C1`, so other
+The gateway DELETE rule does not target a `PATCH /orders/ord-1`, so other
 policies decide it (step 5). Rules written for some operations leave every
 other call — and every path the spec does not have — ungoverned. To target
 every call at gateway scope, add a gateway-owned catch-all; without `final`,
