@@ -30,7 +30,7 @@ Areas of particular concern:
 - **`requestState` forgery or replay** — tampering with, forging, or reusing the sealed MRTR `requestState` to answer an approval that was not issued to you or has expired, or to have one approval decided twice
 - **Cross-principal access** — inspecting, approving, rejecting, or resuming another principal's execution, over MCP or `/executions`
 - **Replay divergence** — a resumed execution running a request other than the one journaled or approved, or re-sending a call whose outcome was recorded or is unknown
-- **Harbor-owned header forgery** — a program setting or overriding `Authorization`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `X-Idempotency-Key` or other headers Harbor sets on outbound calls
+- **Harbor-owned header forgery** — a program setting or overriding `Authorization`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `X-Harbor-Execution-ID`, `X-Idempotency-Key` or other headers Harbor sets on outbound calls
 - **Outbound request escape** — a program making Harbor send a request to a host, scheme or path outside the service's configured base URL (absolute or protocol-relative URLs, `..` or encoded-slash segments, routing headers)
 - **Dependency vulnerabilities** — run `npm audit` to check known CVEs
 

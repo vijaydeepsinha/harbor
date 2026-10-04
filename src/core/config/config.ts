@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import {readFileSync} from 'node:fs'
-import {fileURLToPath} from 'node:url'
+import {resolve} from 'node:path'
 import {z} from 'zod'
 import type {
     CouchbaseConnectionConfig,
@@ -20,21 +20,12 @@ import {
     EXECUTION_CODE_RETENTION,
     EXECUTION_STORE_TYPE,
     GOVERNANCE_DECISION,
-    GOVERNANCE_RULE_SOURCE_TYPE,
     MCP_DEFAULT_HOST,
     MCP_DEFAULT_MAX_BODY_BYTES,
     MCP_DEFAULT_PORT,
     REQUEST_SOURCE_VALUE,
     STORE_TYPE
 } from '../constants.js'
-
-/**
- * `<install root>/governance/rules`: three levels up from both
- * src/core/config/config.ts and dist/core/config/config.js — the same root
- * SERVICES_DIR defaults to, so the rules are found whatever the working
- * directory the gateway was started from.
- */
-export const DEFAULT_GOVERNANCE_RULES_DIR = fileURLToPath(new URL('../../../governance/rules', import.meta.url))
 
 // ── Config-file loader ───────────────────────────────────────────────────────
 //
@@ -235,6 +226,9 @@ const GlobalConfigSchema = z.object({
     HARBOR_AUTH_SERVERS: z.string().optional(),
     HARBOR_SCOPES_SUPPORTED: z.string().optional(),
     // ── Code Mode governance layer ──
+    // Gateway-owned file rules are separate from per-service governance source settings.
+    GATEWAY_GOVERNANCE_RULES_DIR: z.string().min(1).default('./governance/rules'),
+    GATEWAY_GOVERNANCE_RULES_REFRESH_SEC: z.coerce.number().int().min(0).max(Math.floor(2_147_483_647 / 1000)).default(0),
     // in-memory | file | memcache, or the name of a backend registered with registerExecutionStoreBackend.
     EXECUTION_STORE_TYPE: z.string().regex(REGISTERED_TYPE_NAME, 'a store type name (in-memory, file, memcache, or a registered backend)').default(EXECUTION_STORE_TYPE.IN_MEMORY),
     // memcache store only (EXECUTION_STORE_MEMCACHE_HOST / _PORT are required with it, _TIMEOUT_MS optional — same shape as TOKEN_CACHE_MEMCACHE_*).
@@ -246,14 +240,6 @@ const GlobalConfigSchema = z.object({
     EXECUTION_CODE_RETENTION: z.enum([EXECUTION_CODE_RETENTION.DROP, EXECUTION_CODE_RETENTION.KEEP]).default(EXECUTION_CODE_RETENTION.DROP),
     // Seconds a finished (terminal) execution and all its records are kept before deletion; 0 = keep forever.
     EXECUTION_RETENTION_SEC: z.coerce.number().int().min(0).default(86_400),
-    // Unset ⇒ <install root>/governance/rules, like SERVICES_DIR (see DEFAULT_GOVERNANCE_RULES_DIR); a set value is relative to the working directory.
-    GOVERNANCE_RULES_DIR: z.string().min(1).optional(),
-    // Where rules come from: dir (GOVERNANCE_RULES_DIR), url (GOVERNANCE_RULES_URL), or a registered source type.
-    GOVERNANCE_RULES_SOURCE: z.string().min(1).default(GOVERNANCE_RULE_SOURCE_TYPE.DIR),
-    GOVERNANCE_RULES_URL: z.string().url().optional(),
-    GOVERNANCE_RULES_URL_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-    // 0 = load once at boot. A refresh that fails (unreachable, invalid) keeps the last valid rule set.
-    GOVERNANCE_RULES_REFRESH_SEC: z.coerce.number().int().min(0).default(0),
     // Fail closed where governance applies: a call some rule targets but none matches is denied.
     // Calls no rule targets are ungoverned and allowed regardless (NO_GOVERNANCE).
     GOVERNANCE_DEFAULT_DECISION: z.enum([GOVERNANCE_DECISION.ALLOW, GOVERNANCE_DECISION.DENY, GOVERNANCE_DECISION.REQUIRE_APPROVAL]).default(GOVERNANCE_DECISION.DENY),
@@ -261,6 +247,21 @@ const GlobalConfigSchema = z.object({
     GOVERNANCE_REQUEST_STATE_KEY: z.string().min(32).optional(),
     GOVERNANCE_APPROVAL_TTL_SEC: z.coerce.number().int().positive().default(600),
 }).superRefine((env, ctx) => {
+    for (const key of [
+        'GOVERNANCE_RULES_SOURCE',
+        'GOVERNANCE_RULES_DIR',
+        'GOVERNANCE_RULES_URL',
+        'GOVERNANCE_RULES_URL_TIMEOUT_MS',
+        'GOVERNANCE_RULES_REFRESH_SEC'
+    ]) {
+        if (process.env[key] !== undefined) {
+            ctx.addIssue({
+                code: 'custom',
+                path: [key],
+                message: 'legacy Governance Rule setting; use GATEWAY_GOVERNANCE_RULES_DIR and GATEWAY_GOVERNANCE_RULES_REFRESH_SEC for gateway file rules, or the service config.json "governance" block for service rules'
+            })
+        }
+    }
     // Audit on with no destination would drop every record while the switch says it is on.
     if (env.ENABLE_AUDIT && env.AUDIT_SINKS.split(',').every(sink => sink.trim() === '')) {
         ctx.addIssue({
@@ -351,11 +352,8 @@ export function validateGlobalConfig(): GlobalConfig {
             store: resolveExecutionStoreConfig(env),
             retention: {code: env.EXECUTION_CODE_RETENTION, executionSec: env.EXECUTION_RETENTION_SEC},
             governance: {
-                rulesDir: env.GOVERNANCE_RULES_DIR ?? DEFAULT_GOVERNANCE_RULES_DIR,
-                rulesSource: env.GOVERNANCE_RULES_SOURCE,
-                ...(env.GOVERNANCE_RULES_URL ? {rulesUrl: env.GOVERNANCE_RULES_URL} : {}),
-                rulesUrlTimeoutMs: env.GOVERNANCE_RULES_URL_TIMEOUT_MS,
-                rulesRefreshSec: env.GOVERNANCE_RULES_REFRESH_SEC,
+                gatewayRulesDir: resolve(process.cwd(), env.GATEWAY_GOVERNANCE_RULES_DIR),
+                gatewayRulesRefreshSec: env.GATEWAY_GOVERNANCE_RULES_REFRESH_SEC,
                 defaultDecision: env.GOVERNANCE_DEFAULT_DECISION,
                 ...(env.GOVERNANCE_REQUEST_STATE_KEY ? {requestStateKey: env.GOVERNANCE_REQUEST_STATE_KEY} : {}),
                 approvalTtlSec: env.GOVERNANCE_APPROVAL_TTL_SEC

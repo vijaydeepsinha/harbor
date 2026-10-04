@@ -139,6 +139,8 @@ export const HTTP_HEADER = {
     HARBOR_SERVER_ID: 'X-Harbor-Server-ID',
     /** The external caller's own id, forwarded from the inbound `/mcp` request when it sent one. */
     HARBOR_CLIENT_ID: 'X-Harbor-Client-ID',
+    /** Durable governed execution identity, shared across MCP approval turns. */
+    HARBOR_EXECUTION_ID: 'X-Harbor-Execution-ID',
     /** MCP 2026-07-28 protocol headers (spec §13/§14). Validated by the SDK;
      *  Harbor only reads them for routing/authorization/observability. */
     MCP_PROTOCOL_VERSION: 'MCP-Protocol-Version',
@@ -463,9 +465,9 @@ export const EXECUTION_CODE_RETENTION = {
 } as const
 export type ExecutionCodeRetention = (typeof EXECUTION_CODE_RETENTION)[keyof typeof EXECUTION_CODE_RETENTION]
 
-/** Built-in Governance Rule sources (`GOVERNANCE_RULES_SOURCE`); others via registerGovernanceRuleSourceBackend. */
+/** Built-in per-service Governance Rule sources (`governance.rulesSource`); others via registerGovernanceRuleSourceBackend. */
 export const GOVERNANCE_RULE_SOURCE_TYPE = {
-    DIR: 'dir',
+    FILE: 'file',
     URL: 'url',
 } as const
 

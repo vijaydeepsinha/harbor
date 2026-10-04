@@ -50,7 +50,7 @@ export interface Refusal {
 }
 
 /** What one `api_execute` call came to. The responder turns it into metrics, audit and the MCP result. */
-export type ApiExecuteReport =
+export type ApiExecuteResult =
 /** Nothing ran: the resume was refused, or the human's answer it carried ended the execution. */
     | { kind: 'refused'; executionId: string; refusal: Refusal }
     /** A retry without an answer while the approval is still pending: ask again. */
@@ -104,7 +104,7 @@ const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
  * audit and the MCP result belong to the responder, which works from the
  * report returned here. Never throws: every failure is a `failed` report.
  */
-export async function runApiExecute(input: ApiExecuteRunInput, deps: ApiExecuteRunDeps): Promise<ApiExecuteReport> {
+export async function runApiExecute(input: ApiExecuteRunInput, deps: ApiExecuteRunDeps): Promise<ApiExecuteResult> {
     const {governanceRuntime, logger} = deps
     const {service, code, request, resources, userIdHash} = input
     const {correlationId} = request
@@ -248,9 +248,10 @@ function sandboxContext(
         permissionGuard: resources.permissionGuard,
         idempotencyKey,
         idempotencyKeyTtlMs: resources.idempotencyKeyTtlMs,
-        // Backends correlate every call of one script by its execution id — it
-        // survives the new isolate (and new MCP request) of each approval resume.
-        correlationId: executionId ?? request.correlationId,
+        // A correlation id scopes one MCP request and the sandbox run it starts.
+        // The execution id links separate runs across approval resumes.
+        correlationId: request.correlationId,
+        ...(executionId !== undefined ? {executionId} : {}),
         ...(deps.callerClientId !== undefined ? {clientId: deps.callerClientId} : {}),
         limits: resources.sandboxLimits,
         ...(bridge ? {executionBridge: bridge} : {callLog: calls})
@@ -259,7 +260,7 @@ function sandboxContext(
 
 type Opened =
     | { kind: 'open'; execution: ExecutionRecord }
-    | Extract<ApiExecuteReport, { kind: 'refused' | 'askAgain' }>
+    | Extract<ApiExecuteResult, { kind: 'refused' | 'askAgain' }>
 
 /**
  * Decides which execution this call belongs to (§6, §7, §26):
@@ -420,7 +421,10 @@ function makeBridge(
         journal,
         resolve: (method, rawPath) => resolveOperation(svc.specStore.getSpec(), method, rawPath),
         decide: async (sequence: number, request: ActivityRequestRecord): Promise<GovernanceVerdict> => {
-            const outcome = evaluateGovernance(governanceRuntime.rules.getRules(), {
+            const outcome = evaluateGovernance({
+                gatewayRules: governanceRuntime.gatewayRules(),
+                serviceRules: governanceRuntime.rulesForService(svc.name)
+            }, {
                 executionId: execution.executionId, activitySequence: sequence, service: svc.name,
                 method: request.method, specPath: request.specPath,
                 ...(request.operationId !== undefined ? {operationId: request.operationId} : {}),

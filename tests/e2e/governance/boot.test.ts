@@ -11,33 +11,40 @@
  */
 import {describe, expect, it} from 'vitest'
 import {spawnSync} from 'node:child_process'
-import {existsSync, mkdirSync} from 'node:fs'
+import {cpSync, mkdirSync} from 'node:fs'
 import {join} from 'node:path'
 import {env} from '../helpers/env.js'
 import {materializeServices} from '../setup/materialize-services.mjs'
 
 const INVALID_RULES = join(env.repoRoot, 'tests/e2e/fixtures/governance/invalid')
+const GATEWAY_RULES = join(env.repoRoot, 'tests/e2e/fixtures/governance/gateway')
 const SERVICES = join(env.repoRoot, 'tests/e2e/fixtures/services')
 
 function bootWithInvalidRules(): { status: number | null; output: string } {
+    const services = join(env.repoRoot, 'artifacts', 'e2e', 'boot-invalid-services')
+    mkdirSync(join(env.repoRoot, 'artifacts', 'e2e'), {recursive: true})
+    materializeServices(SERVICES, services, {host: '127.0.0.1', port: 4010})
+    const invalidServiceRules = join(services, 'commerce', 'governance', 'rules')
+    mkdirSync(invalidServiceRules, {recursive: true})
+    cpSync(INVALID_RULES, invalidServiceRules, {recursive: true})
     if (env.harborImage) {
         const r = spawnSync('docker', [
             'run', '--rm', '--network', 'none',
-            '-e', 'GOVERNANCE_RULES_DIR=/app/e2e/governance', '-e', 'SERVICES_DIR=/app/e2e/services', '-e', 'LOG_LEVEL=error',
-            '-v', `${INVALID_RULES}:/app/e2e/governance:ro`, '-v', `${SERVICES}:/app/e2e/services:ro`,
+            '-e', 'SERVICES_DIR=/app/e2e/services',
+            '-e', 'GATEWAY_GOVERNANCE_RULES_DIR=/app/e2e/gateway-governance',
+            '-e', 'LOG_LEVEL=error',
+            '-v', `${services}:/app/e2e/services:ro`,
+            '-v', `${GATEWAY_RULES}:/app/e2e/gateway-governance:ro`,
             env.harborImage
         ], {encoding: 'utf8', timeout: 120_000})
         return {status: r.status, output: (r.stdout ?? '') + (r.stderr ?? '')}
     }
-    const services = join(env.repoRoot, 'artifacts', 'e2e', 'boot-services')
-    mkdirSync(join(env.repoRoot, 'artifacts', 'e2e'), {recursive: true})
-    if (!existsSync(services)) materializeServices(SERVICES, services, {host: '127.0.0.1', port: 4010})
     const r = spawnSync(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
         cwd: env.repoRoot, encoding: 'utf8', timeout: 120_000,
         env: {
             ...process.env,
-            GOVERNANCE_RULES_DIR: INVALID_RULES,
             SERVICES_DIR: services,
+            GATEWAY_GOVERNANCE_RULES_DIR: GATEWAY_RULES,
             MCP_PORT: '3999',
             LOG_LEVEL: 'error',
             EXECUTION_STORE_TYPE: 'in-memory'

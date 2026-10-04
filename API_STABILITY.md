@@ -98,7 +98,7 @@ registerExecutionStoreBackend(type: string, factory: ExecutionStoreFactory): voi
 registerGovernanceRuleSourceBackend(type: string, factory: GovernanceRuleSourceFactory): void // 🟡
 ```
 
-Call them once at startup, before `createMcpGateway`. A registered backend is selected by name: `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept a kebab-case registered name, a service's `config.json` `idempotency.type` may name one, `AUDIT_SINKS` lists sink names and `GOVERNANCE_RULES_SOURCE` names a rule source. An unregistered name is refused at boot: the gateway stops, except that a service whose idempotency type names nothing registered is skipped. The factory types (`TokenCacheFactory`, `IdempotencyFactory`, `AuditSinkFactory`, `ExecutionStoreFactory`, `GovernanceRuleSourceFactory`) are exported beside them and carry the same status as their register function.
+Call them once at startup, before `createMcpGateway`. A registered backend is selected by name: `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept a kebab-case registered name, a service's `config.json` `idempotency.type` may name one, `AUDIT_SINKS` lists sink names, and each service's `config.json` `governance.rulesSource` selects its rule source. An unregistered name is refused at boot: the gateway stops, except that a service whose idempotency type names nothing registered is skipped. The factory types (`TokenCacheFactory`, `IdempotencyFactory`, `AuditSinkFactory`, `ExecutionStoreFactory`, `GovernanceRuleSourceFactory`) are exported beside them and carry the same status as their register function.
 
 ---
 
@@ -161,8 +161,8 @@ Error bodies from these routes are `{ error, code, … }` with `code` from `ERR`
 | `io.modelcontextprotocol/serverInfo` in response `_meta` | ✅ | Protocol-defined; `{ name: "harbor", version }` |
 | `harbor/execution-id`, `harbor/execution-status`, `harbor/approval-id` (`_meta`) | 🟡 | `META_PREFIX` (`src/core/constants.ts`) is a placeholder until the project's public name is settled; `harbor/execution-id` in a request `_meta` resumes an execution |
 | `input_required` approval form (input key `approval`; `approve` boolean — the listed answer words are accepted too — and `comment`) | 🟡 | The MRTR pattern is the protocol's; the form content is Harbor's |
-| Outbound `Authorization`, `Content-Type`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-Idempotency-Key`, `X-Correlation-ID` | ✅ | Header names. Values are not frozen: `X-Correlation-ID` is the execution id in a governed run, and the idempotency key format (`mcp-{service}-{executionId}-{sequence}`) changed in 1.0.0 |
-| Outbound `X-Harbor-Server-ID` (`HARBOR_SERVER_ID`), `X-Harbor-Client-ID` (forwarded from the caller) | 🟡 | New in 1.0.0 |
+| Outbound `Authorization`, `Content-Type`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-Idempotency-Key`, `X-Correlation-ID` | ✅ | Header names. Values are not frozen: `X-Correlation-ID` is the current MCP request id (shared within one sandbox run), while governed idempotency keys include the durable execution id (`mcp-{service}-{executionId}-{sequence}`) |
+| Outbound `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `X-Harbor-Execution-ID` | ✅ | Gateway stamp, optional forwarded caller ID, and governed execution ID respectively; `X-Harbor-Execution-ID` is absent on the legacy path |
 
 ### Error Codes
 

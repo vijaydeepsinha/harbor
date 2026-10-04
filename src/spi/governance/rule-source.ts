@@ -14,10 +14,11 @@ export interface GovernanceRuleDocument {
  * Where Governance Rules come from — a directory, a URL, or anything
  * registered with `registerGovernanceRuleSourceBackend` (object storage, a
  * config service, a database). Harbor asks for the whole set at boot and, when
- * `GOVERNANCE_RULES_REFRESH_SEC` > 0, again on every refresh; it validates the
- * set and swaps it in atomically, or keeps the previous set if anything is
- * wrong. So `load` must throw on any failure rather than return part of the
- * set: a missing document must never read as "that rule no longer exists".
+ * that service's `governance.rulesRefreshSec` > 0, again on every refresh; it
+ * validates the set and swaps it in atomically, or keeps the previous set if
+ * anything is wrong. So `load` must throw on any failure rather than return
+ * part of the set: a missing document must never read as "that rule no longer
+ * exists".
  */
 export interface GovernanceRuleSource {
     readonly name: string

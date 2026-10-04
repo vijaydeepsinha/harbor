@@ -15,11 +15,16 @@ import {buildMcpServerFactory} from '../../src/runtime/http/mcp-server-factory.j
 import {ServiceRegistry} from '../../src/runtime/registry/service-registry.js'
 import type {MetricsRegistry} from '../../src/runtime/observability/metrics.js'
 import {globalConfig, makeConnector, makeResources, makeRuntime, silentLogger} from '../unit/code-mode-harness.js'
-import {APPROVAL_INPUT_KEY, ERR, EXECUTION_ID_META_KEY, EXECUTION_STATUS} from '../../src/core/constants.js'
+import {APPROVAL_INPUT_KEY, ERR, EXECUTION_ID_META_KEY, EXECUTION_STATUS, GOVERNANCE_DECISION} from '../../src/core/constants.js'
 
 const PROGRAM = `async () => {
   const c = await api.request({ method: 'GET', path: '/campaigns' })
   const r = await api.request({ method: 'POST', path: '/campaigns/' + c.data[0].id + '/finalize' })
+  return { did: r.data.did }
+}`
+const DELETE_PROGRAM = `async () => {
+  const c = await api.request({ method: 'GET', path: '/campaigns' })
+  const r = await api.request({ method: 'DELETE', path: '/campaigns/' + c.data[0].id })
   return { did: r.data.did }
 }`
 const RULE = {
@@ -145,5 +150,100 @@ describe('MCP wire: approval via input_required + retry', () => {
         expect(body.code).toBe(ERR.APPROVAL_REQUIRED)
         expect((r['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY]).toBe(body.executionId)
         expect((await governanceRuntime.approvals.get(body.approvalId)).status).toBe('PENDING')
+    })
+
+    it('a gateway final DENY beats a more specific service approval rule and never pauses', async () => {
+        const runtime = makeRuntime([{
+            name: 'delete-needs-approval',
+            match: {service: 'trafficking', path: '/campaigns/{id}'},
+            action: {type: 'REQUIRE_APPROVAL', reason: 'service review'}
+        }], GOVERNANCE_DECISION.ALLOW, undefined, undefined, [{
+            name: 'deny-all-delete',
+            match: {method: 'DELETE'},
+            final: true,
+            action: {type: 'DENY', reason: 'Gateway policy forbids all DELETE requests.'}
+        }])
+        const deleting = createMcpHandler(
+            buildMcpServerFactory({
+                registry,
+                globalConfig,
+                logger: silentLogger,
+                metrics,
+                governanceRuntime: runtime
+            }),
+            {legacy: 'reject'}
+        )
+        const beforeGets = count('GET', '/campaigns')
+        const beforeDeletes = count('DELETE', '/campaigns/C1')
+        const denied = await readJsonRpc(await deleting.fetch(new Request('http://harbor.test/mcp', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                accept: 'application/json, text/event-stream',
+                'mcp-protocol-version': '2026-07-28',
+                'mcp-method': 'tools/call',
+                'mcp-name': 'api_execute'
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: nextId++,
+                method: 'tools/call',
+                params: {name: 'api_execute', arguments: {service: 'trafficking', code: DELETE_PROGRAM}, _meta: envelope(true)}
+            })
+        }), {authInfo: {token: 'wire-token', clientId: 'harbor-client', scopes: []}}))
+        const result = denied['result'] as Record<string, unknown>
+        expect(result['resultType']).toBe('complete')
+        expect(result['isError']).toBe(true)
+        expect(result['inputRequests']).toBeUndefined()
+        const body = JSON.parse((result['content'] as Array<{ text: string }>)[0]!.text) as { code: string; error: string }
+        expect(body.code).toBe(ERR.GOVERNANCE_DENIED)
+        expect(body.error).toContain('Gateway policy forbids all DELETE requests.')
+        expect(count('GET', '/campaigns') - beforeGets).toBe(1)
+        expect(count('DELETE', '/campaigns/C1') - beforeDeletes).toBe(0)
+    })
+
+    it('a gateway final REQUIRE_APPROVAL beats a more specific service DENY and still pauses', async () => {
+        const runtime = makeRuntime([{
+            name: 'finalize-denied',
+            match: {service: 'trafficking', operation: 'finalizeCampaign'},
+            action: {type: 'DENY', reason: 'service says no'}
+        }], GOVERNANCE_DECISION.ALLOW, undefined, undefined, [{
+            name: 'gateway-post-approval',
+            match: {method: 'POST'},
+            final: true,
+            action: {type: 'REQUIRE_APPROVAL', reason: 'gateway review'}
+        }])
+        const governed = createMcpHandler(
+            buildMcpServerFactory({
+                registry,
+                globalConfig,
+                logger: silentLogger,
+                metrics,
+                governanceRuntime: runtime
+            }),
+            {legacy: 'reject'}
+        )
+        const beforeFinalizes = count('POST', '/campaigns/C1/finalize')
+        const paused = await readJsonRpc(await governed.fetch(new Request('http://harbor.test/mcp', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                accept: 'application/json, text/event-stream',
+                'mcp-protocol-version': '2026-07-28',
+                'mcp-method': 'tools/call',
+                'mcp-name': 'api_execute'
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: nextId++,
+                method: 'tools/call',
+                params: {name: 'api_execute', arguments: {service: 'trafficking', code: PROGRAM}, _meta: envelope(true)}
+            })
+        }), {authInfo: {token: 'wire-token', clientId: 'harbor-client', scopes: []}}))
+        const result = paused['result'] as Record<string, unknown>
+        expect(result['resultType']).toBe('input_required')
+        const inputRequests = result['inputRequests'] as Record<string, { params: { message: string } }>
+        expect(inputRequests[APPROVAL_INPUT_KEY]?.params.message).toContain('gateway review')
+        expect(count('POST', '/campaigns/C1/finalize') - beforeFinalizes).toBe(0)
     })
 })

@@ -66,7 +66,7 @@ export function parseRuleDocuments(documents: readonly GovernanceRuleDocument[],
 
 /** The rule files directly in `dir` (see readRuleDirectory), validated. A missing directory means no rules. */
 export function loadGovernanceRules(dir: string, logger?: Logger): LoadedRule[] {
-    return parseRuleDocuments(readRuleDirectory(dir, logger), logger, `dir:${dir}`)
+    return parseRuleDocuments(readRuleDirectory(dir, logger), logger, `file:${dir}`)
 }
 
 /**

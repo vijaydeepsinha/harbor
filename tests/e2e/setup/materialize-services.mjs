@@ -9,7 +9,7 @@
 import {cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs'
 import {join} from 'node:path'
 
-export function materializeServices(sourceDir, targetDir, {host, port}) {
+export function materializeServices(sourceDir, targetDir, {host, port, governanceProfile}) {
     if (existsSync(targetDir)) rmSync(targetDir, {recursive: true, force: true})
     mkdirSync(targetDir, {recursive: true})
     cpSync(sourceDir, targetDir, {recursive: true})
@@ -19,6 +19,14 @@ export function materializeServices(sourceDir, targetDir, {host, port}) {
         const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'))
         cfg.api = {...(cfg.api ?? {}), host, port}
         writeFileSync(cfgPath, JSON.stringify(cfg, null, 2))
+        if (governanceProfile) {
+            const sourceRules = join(governanceProfile, entry)
+            if (existsSync(sourceRules)) {
+                const targetRules = join(targetDir, entry, 'governance', 'rules')
+                mkdirSync(targetRules, {recursive: true})
+                cpSync(sourceRules, targetRules, {recursive: true})
+            }
+        }
     }
     return targetDir
 }

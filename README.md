@@ -40,7 +40,7 @@ AI client  →  Harbor  →  Your backend APIs
 - **V8 sandbox isolation** — AI-written JavaScript cannot access the network, filesystem, or framework internals
 - **Pluggable auth** — `static-token`, `oauth-introspection`, `jwt-validation` (local JWKS, no AS round-trip), `oauth-2.1` (RFC 8414/OIDC auto-discovery)
 - **OAuth 2.1 Protected Resource** — RFC 9728 discovery metadata, `WWW-Authenticate` on a 401 for a missing or malformed bearer (an invalid token is refused per tool call; see [`docs/mcp-2026-07-28-compatibility.md`](docs/mcp-2026-07-28-compatibility.md))
-- **Code Mode governance** — durable executions, an activity journal with replay, declarative Governance Rules (ALLOW / DENY / REQUIRE_APPROVAL) evaluated before every backend call, and human approval over MCP ([`docs/code-mode-governance.md`](docs/code-mode-governance.md))
+- **Code Mode governance** — durable executions, an activity journal with replay, and declarative Governance Rules evaluated before every backend call. Rules can be **gateway-owned** for cross-service policy or **service-owned** for one service; matching rules apply together with gateway/service/endpoint precedence and optional `final` overrides. Decisions support ALLOW / DENY / REQUIRE_APPROVAL and human approval over MCP ([`docs/code-mode-governance.md`](docs/code-mode-governance.md), [rule format and ownership](governance/rules/README.md))
 - **Pluggable backends** — register token-cache, idempotency, execution-store, audit-sink and rule-source backends in your entry point and select them by name, without forking the codebase
 - **Per-service configuration** — each service declares its own auth, circuit breaker, and spec source
 - **Zero API changes** — your backend never changes; Harbor is a pure adapter

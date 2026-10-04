@@ -410,7 +410,8 @@
                   "pm.test('_meta carries harbor/execution-id', () => pm.expect(meta['harbor/execution-id']).to.be.a('string'));",
                   "pm.test('execution status is COMPLETED', () => pm.expect(meta['harbor/execution-status']).to.eql('COMPLETED'));",
                   "pm.test('backend answered 200', () => pm.expect(payload.status).to.eql(200));",
-                  "pm.collectionVariables.set('executionId', meta['harbor/execution-id']);"
+                  "pm.collectionVariables.set('executionId', meta['harbor/execution-id']);",
+                  "pm.collectionVariables.set('allowedRequestId', String(rpc.id));"
                 ]
               }
             }
@@ -450,8 +451,8 @@
                   "pm.test('inspection is 200', () => pm.response.to.have.status(200));",
                   "const insp = pm.response.json();",
                   "pm.test('execution COMPLETED', () => pm.expect(insp.execution.status).to.eql('COMPLETED'));",
-                  "pm.test('policy decision is ALLOW by allow-read-customer', () => { pm.expect(insp.decisions[0].decision).to.eql('ALLOW'); pm.expect(insp.decisions[0].decidingRule).to.eql('allow-read-customer'); });",
-                  "pm.test('rule version tag recorded', () => pm.expect(insp.decisions[0].ruleVersions[0]).to.match(/^allow-read-customer@1#[0-9a-f]{12}$/));",
+                  "pm.test('policy decision is ALLOW by allow-read-customer', () => { pm.expect(insp.decisions[0].decision).to.eql('ALLOW'); pm.expect(insp.decisions[0].decidingRule).to.eql('commerce/allow-read-customer'); });",
+                  "pm.test('rule version tag recorded', () => pm.expect(insp.decisions[0].ruleVersions[0]).to.match(/^commerce\\/allow-read-customer@1#[0-9a-f]{12}$/));",
                   "pm.test('activity journaled with OpenAPI identity', () => { pm.expect(insp.activities[0].request.operationId).to.eql('getCustomer'); pm.expect(insp.activities[0].status).to.eql('COMPLETED'); });"
                 ]
               }
@@ -497,7 +498,10 @@
                   "const calls = pm.response.json();",
                   "pm.test('backend received exactly 1 request', () => pm.expect(calls).to.have.length(1));",
                   "pm.test('the caller identity was forwarded', () => pm.expect(calls[0].identity).to.eql('alice'));",
-                  "pm.test('Harbor-owned headers are stamped', () => { pm.expect(calls[0].headers['x-correlation-id']).to.be.a('string'); pm.expect(calls[0].headers['x-mcp-tool']).to.eql('api_execute'); pm.expect(calls[0].headers['x-mcp-service']).to.eql('commerce'); pm.expect(calls[0].headers['x-harbor-server-id']).to.eql('HARBOR_GATEWAY'); pm.expect(calls[0].headers['x-harbor-client-id']).to.eql('postman-client-7'); });"
+                  "pm.test('the request correlation id is distinct from the execution id', () => { pm.expect(calls[0].headers['x-correlation-id']).to.eql(pm.collectionVariables.get('allowedRequestId')); pm.expect(calls[0].headers['x-correlation-id']).to.not.eql(pm.collectionVariables.get('executionId')); });",
+                  "pm.test('Harbor stamp and forwarded client id are present', () => { pm.expect(calls[0].headers['x-harbor-server-id']).to.eql('HARBOR_GATEWAY'); pm.expect(calls[0].headers['x-harbor-client-id']).to.eql('postman-client-7'); });",
+                  "pm.test('execution id header is present and matches the execution', () => pm.expect(calls[0].headers['x-harbor-execution-id']).to.eql(pm.collectionVariables.get('executionId')));",
+                  "pm.test('MCP tool and service headers are stamped', () => { pm.expect(calls[0].headers['x-mcp-tool']).to.eql('api_execute'); pm.expect(calls[0].headers['x-mcp-service']).to.eql('commerce'); });"
                 ]
               }
             }
@@ -612,7 +616,7 @@
                   "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
                   "pm.test('tool error code is GOVERNANCE_DENIED', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('GOVERNANCE_DENIED'); });",
                   "pm.test('execution status is DENIED', () => pm.expect(meta['harbor/execution-status']).to.eql('DENIED'));",
-                  "pm.test('denial names the rule and reason', () => { pm.expect(payload.error).to.include('deny-delete-order'); pm.expect(payload.retryable).to.eql(false); });",
+                  "pm.test('denial names the gateway final rule and reason', () => { pm.expect(payload.error).to.include('deny-all-delete'); pm.expect(payload.retryable).to.eql(false); });",
                   "pm.collectionVariables.set('executionId', meta['harbor/execution-id']);"
                 ]
               }
@@ -1750,7 +1754,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const startedAt = Date.now()\\n  const customer = await api.request({ method: 'GET', path: '/customers/customer-001' })\\n  const order = await api.request({ method: 'POST', path: '/orders', body: { customerId: customer.data.id, amount: 10001, items: ['sku-9'] } })\\n  const payment = await api.request({ method: 'POST', path: '/payments', body: { orderId: order.data.id, amount: order.data.amount } })\\n  const note = await api.request({ method: 'POST', path: '/notifications', body: { customerId: customer.data.id, message: 'Order ' + order.data.id + ' paid by ' + payment.data.id } })\\n  return { startedAt, customerId: customer.data.id, orderId: order.data.id, paymentId: payment.data.id, notificationId: note.data.id, statuses: [customer.status, order.status, payment.status, note.status] }\\n}\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 801,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const startedAt = Date.now()\\n  const customer = await api.request({ method: 'GET', path: '/customers/customer-001' })\\n  const order = await api.request({ method: 'POST', path: '/orders', body: { customerId: customer.data.id, amount: 10001, items: ['sku-9'] } })\\n  const payment = await api.request({ method: 'POST', path: '/payments', body: { orderId: order.data.id, amount: order.data.amount } })\\n  const note = await api.request({ method: 'POST', path: '/notifications', body: { customerId: customer.data.id, message: 'Order ' + order.data.id + ' paid by ' + payment.data.id } })\\n  return { startedAt, customerId: customer.data.id, orderId: order.data.id, paymentId: payment.data.id, notificationId: note.data.id, statuses: [customer.status, order.status, payment.status, note.status] }\\n}\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1780,7 +1784,8 @@
                   "pm.test('paused at activity #2 createOrder', () => pm.expect(result.inputRequests.approval.params.message).to.include('Activity:  #2'));",
                   "pm.collectionVariables.set('msExecutionId', meta['harbor/execution-id']);",
                   "pm.collectionVariables.set('msApprovalId1', meta['harbor/approval-id']);",
-                  "pm.collectionVariables.set('msRequestState1', result.requestState);"
+                  "pm.collectionVariables.set('msRequestState1', result.requestState);",
+                  "pm.collectionVariables.set('msCorrelationId1', String(rpc.id));"
                 ]
               }
             }
@@ -1853,7 +1858,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "const calls = pm.response.json();",
-                  "pm.test('exactly [GET /customers/customer-001]', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001']));"
+                  "pm.test('exactly [GET /customers/customer-001]', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001']));",
+                  "pm.test('run 1 uses separate correlation and execution ids', () => { pm.expect(calls[0].headers['x-correlation-id']).to.eql(pm.collectionVariables.get('msCorrelationId1')); pm.expect(calls[0].headers['x-correlation-id']).to.not.eql(pm.collectionVariables.get('msExecutionId')); pm.expect(calls[0].headers['x-harbor-execution-id']).to.eql(pm.collectionVariables.get('msExecutionId')); });"
                 ]
               }
             }
@@ -1900,7 +1906,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const startedAt = Date.now()\\n  const customer = await api.request({ method: 'GET', path: '/customers/customer-001' })\\n  const order = await api.request({ method: 'POST', path: '/orders', body: { customerId: customer.data.id, amount: 10001, items: ['sku-9'] } })\\n  const payment = await api.request({ method: 'POST', path: '/payments', body: { orderId: order.data.id, amount: order.data.amount } })\\n  const note = await api.request({ method: 'POST', path: '/notifications', body: { customerId: customer.data.id, message: 'Order ' + order.data.id + ' paid by ' + payment.data.id } })\\n  return { startedAt, customerId: customer.data.id, orderId: order.data.id, paymentId: payment.data.id, notificationId: note.data.id, statuses: [customer.status, order.status, payment.status, note.status] }\\n}\"\n    },\n    \"requestState\": \"{{msRequestState1}}\",\n    \"inputResponses\": {\n      \"approval\": {\n        \"action\": \"accept\",\n        \"content\": {\n          \"approve\": true\n        }\n      }\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 802,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const startedAt = Date.now()\\n  const customer = await api.request({ method: 'GET', path: '/customers/customer-001' })\\n  const order = await api.request({ method: 'POST', path: '/orders', body: { customerId: customer.data.id, amount: 10001, items: ['sku-9'] } })\\n  const payment = await api.request({ method: 'POST', path: '/payments', body: { orderId: order.data.id, amount: order.data.amount } })\\n  const note = await api.request({ method: 'POST', path: '/notifications', body: { customerId: customer.data.id, message: 'Order ' + order.data.id + ' paid by ' + payment.data.id } })\\n  return { startedAt, customerId: customer.data.id, orderId: order.data.id, paymentId: payment.data.id, notificationId: note.data.id, statuses: [customer.status, order.status, payment.status, note.status] }\\n}\"\n    },\n    \"requestState\": \"{{msRequestState1}}\",\n    \"inputResponses\": {\n      \"approval\": {\n        \"action\": \"accept\",\n        \"content\": {\n          \"approve\": true\n        }\n      }\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1930,7 +1936,8 @@
                   "pm.test('a NEW approval for activity #3', () => { pm.expect(meta['harbor/approval-id']).to.not.eql(pm.collectionVariables.get('msApprovalId1')); pm.expect(result.inputRequests.approval.params.message).to.include('Activity:  #3'); });",
                   "pm.test('payment body built from the replayed order response', () => pm.expect(result.inputRequests.approval.params.message).to.include('\"orderId\":\"order-001\"'));",
                   "pm.collectionVariables.set('msApprovalId2', meta['harbor/approval-id']);",
-                  "pm.collectionVariables.set('msRequestState2', result.requestState);"
+                  "pm.collectionVariables.set('msRequestState2', result.requestState);",
+                  "pm.collectionVariables.set('msCorrelationId2', String(rpc.id));"
                 ]
               }
             }
@@ -1963,7 +1970,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "const calls = pm.response.json();",
-                  "pm.test('exactly [GET customer, POST /orders]', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001','POST /orders']));"
+                  "pm.test('exactly [GET customer, POST /orders]', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001','POST /orders']));",
+                  "pm.test('run 2 has a new correlation id; replayed run 1 keeps its id', () => { const ids = calls.map(c => c.headers['x-correlation-id']); pm.expect(ids).to.eql([pm.collectionVariables.get('msCorrelationId1'), pm.collectionVariables.get('msCorrelationId2')]); pm.expect(ids[1]).to.not.eql(ids[0]); pm.expect(ids[1]).to.not.eql(pm.collectionVariables.get('msExecutionId')); });",
+                  "pm.test('both downstream requests carry the same execution id', () => pm.expect(calls.map(c => c.headers['x-harbor-execution-id'])).to.eql([pm.collectionVariables.get('msExecutionId'), pm.collectionVariables.get('msExecutionId')]));"
                 ]
               }
             }
@@ -2051,7 +2060,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const startedAt = Date.now()\\n  const customer = await api.request({ method: 'GET', path: '/customers/customer-001' })\\n  const order = await api.request({ method: 'POST', path: '/orders', body: { customerId: customer.data.id, amount: 10001, items: ['sku-9'] } })\\n  const payment = await api.request({ method: 'POST', path: '/payments', body: { orderId: order.data.id, amount: order.data.amount } })\\n  const note = await api.request({ method: 'POST', path: '/notifications', body: { customerId: customer.data.id, message: 'Order ' + order.data.id + ' paid by ' + payment.data.id } })\\n  return { startedAt, customerId: customer.data.id, orderId: order.data.id, paymentId: payment.data.id, notificationId: note.data.id, statuses: [customer.status, order.status, payment.status, note.status] }\\n}\"\n    },\n    \"requestState\": \"{{msRequestState2}}\",\n    \"inputResponses\": {\n      \"approval\": {\n        \"action\": \"accept\",\n        \"content\": {\n          \"approve\": true\n        }\n      }\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 803,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"commerce\",\n      \"code\": \"async () => {\\n  const startedAt = Date.now()\\n  const customer = await api.request({ method: 'GET', path: '/customers/customer-001' })\\n  const order = await api.request({ method: 'POST', path: '/orders', body: { customerId: customer.data.id, amount: 10001, items: ['sku-9'] } })\\n  const payment = await api.request({ method: 'POST', path: '/payments', body: { orderId: order.data.id, amount: order.data.amount } })\\n  const note = await api.request({ method: 'POST', path: '/notifications', body: { customerId: customer.data.id, message: 'Order ' + order.data.id + ' paid by ' + payment.data.id } })\\n  return { startedAt, customerId: customer.data.id, orderId: order.data.id, paymentId: payment.data.id, notificationId: note.data.id, statuses: [customer.status, order.status, payment.status, note.status] }\\n}\"\n    },\n    \"requestState\": \"{{msRequestState2}}\",\n    \"inputResponses\": {\n      \"approval\": {\n        \"action\": \"accept\",\n        \"content\": {\n          \"approve\": true\n        }\n      }\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-governance\",\n        \"version\": \"1\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2080,7 +2089,8 @@
                   "pm.test('tool result is not an error', () => pm.expect(result.isError).to.not.eql(true));",
                   "pm.test('execution status is COMPLETED', () => pm.expect(meta['harbor/execution-status']).to.eql('COMPLETED'));",
                   "pm.test('all four steps succeeded', () => pm.expect(payload.statuses).to.eql([200,201,201,201]));",
-                  "pm.test('ids from every step', () => { pm.expect(payload.orderId).to.eql('order-001'); pm.expect(payload.paymentId).to.eql('payment-001'); pm.expect(payload.notificationId).to.eql('notification-001'); });"
+                  "pm.test('ids from every step', () => { pm.expect(payload.orderId).to.eql('order-001'); pm.expect(payload.paymentId).to.eql('payment-001'); pm.expect(payload.notificationId).to.eql('notification-001'); });",
+                  "pm.collectionVariables.set('msCorrelationId3', String(rpc.id));"
                 ]
               }
             }
@@ -2113,7 +2123,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "const calls = pm.response.json();",
-                  "pm.test('exactly-once across three isolates', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001','POST /orders','POST /payments','POST /notifications']));"
+                  "pm.test('exactly-once across three isolates', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001','POST /orders','POST /payments','POST /notifications']));",
+                  "pm.test('correlation ids group calls by sandbox run, separately from execution id', () => { const ids = calls.map(c => c.headers['x-correlation-id']); pm.expect(ids).to.eql([pm.collectionVariables.get('msCorrelationId1'), pm.collectionVariables.get('msCorrelationId2'), pm.collectionVariables.get('msCorrelationId3'), pm.collectionVariables.get('msCorrelationId3')]); pm.expect(new Set(ids).size).to.eql(3); pm.expect(ids).to.not.include(pm.collectionVariables.get('msExecutionId')); });",
+                  "pm.test('all downstream calls carry the stable execution id', () => pm.expect(calls.map(c => c.headers['x-harbor-execution-id'])).to.eql(Array(4).fill(pm.collectionVariables.get('msExecutionId'))));"
                 ]
               }
             }
@@ -4903,7 +4915,7 @@
                   "pm.test('inspection is 200', () => pm.response.to.have.status(200));",
                   "const insp = pm.response.json();",
                   "pm.test('every decision carries reason and rule versions', () => insp.decisions.forEach(d => { pm.expect(d.reason).to.be.a('string'); pm.expect(d.ruleVersions).to.be.an('array'); pm.expect(d.evaluatedAt).to.be.a('string'); }));",
-                  "pm.test('approval-required decisions name their rule', () => { const d = insp.decisions.find(x => x.decision === 'REQUIRE_APPROVAL'); pm.expect(d.ruleVersions[0]).to.match(/^[a-z0-9-]+@[^#]+#[0-9a-f]{12}$/); });",
+                  "pm.test('approval-required decisions name their owner and rule', () => { const d = insp.decisions.find(x => x.decision === 'REQUIRE_APPROVAL'); pm.expect(d.ruleVersions[0]).to.match(/^(gateway|[a-z0-9-]+)\\/[a-z0-9-]+@[^#]+#[0-9a-f]{12}$/); });",
                   "pm.test('approvals record who/when/how', () => insp.approvals.forEach(a => { pm.expect(a.decidedVia).to.eql('mcp-elicitation'); pm.expect(a.decidedAt).to.be.a('string'); }));",
                   "pm.test('history is chronological and complete', () => { const ev = insp.history.map(h => h.kind + ':' + h.event + (h.sequence ? '#' + h.sequence : '')); pm.expect(ev[0]).to.eql('EXECUTION:CREATED'); pm.expect(ev).to.include('APPROVAL:APPROVED#2'); pm.expect(ev).to.include('APPROVAL:APPROVED#3'); pm.expect(ev[ev.length - 1]).to.eql('EXECUTION:COMPLETED'); const at = insp.history.map(h => h.at); pm.expect([...at].sort()).to.eql(at); });",
                   "pm.test('no bearer token is persisted', () => pm.expect(JSON.stringify(insp)).to.not.include(pm.environment.get('tokenAlice')));"
@@ -5059,7 +5071,7 @@
                 "exec": [
                   "pm.test('inspection is 200', () => pm.response.to.have.status(200));",
                   "const insp = pm.response.json();",
-                  "pm.test('deny-delete-order decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('deny-delete-order'));"
+                  "pm.test('gateway deny-all-delete decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('gateway/deny-all-delete'));"
                 ]
               }
             }

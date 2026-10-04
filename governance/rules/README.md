@@ -5,71 +5,119 @@ attempt. Rules answer *"is Harbor allowed to execute this operation, and under
 what conditions?"* — they are **not** Skills (which tell the agent *how* to
 accomplish a task and live under `services/<name>/skills/`).
 
-Every `*.yaml` / `*.yml` / `*.json` file **directly in this directory** is
-loaded at boot. Files in sub-directories are not — `examples/` is
-documentation. **No rule file ships here**: until you add one, every call is
-ungoverned (see [How a call is decided](#how-a-call-is-decided)).
+Governance Rules may be **gateway-owned** or **service-owned**. Skills explain
+*how* an agent should use an API; Governance Rules decide *whether* a backend
+operation may execute, and can require human approval.
 
-`GOVERNANCE_RULES_DIR` unset means *this* directory — the install's own
-`governance/rules/`, whatever the working directory (like `SERVICES_DIR`); a
-value you set is resolved against the working directory. The production
-Docker image does not copy `governance/`, so mount your rules there or point
-`GOVERNANCE_RULES_DIR` at them.
+The gateway-owned, file-only source defaults to the root `governance/rules/`
+directory. Set `GATEWAY_GOVERNANCE_RULES_DIR` to another directory if needed;
+`GATEWAY_GOVERNANCE_RULES_REFRESH_SEC` controls periodic reload (`0` means
+load once). Every top-level `*.yaml` / `*.yml` / `*.json` file is loaded;
+nested folders and other file types are ignored. The README and nested
+`examples/` directory are documentation, not active rule files. The gateway
+source is loaded once and evaluated across all enabled services.
 
-Rules do not have to ship with the deployment:
+Each service may also own its own rule source, selected in that service's
+`config.json`. Its default directory is
+`<serviceDir>/governance/rules/` (where `serviceDir` is that service's
+directory under `SERVICES_DIR`). Every top-level `*.yaml` / `*.yml` / `*.json`
+file is loaded; nested folders are not. Service sources may independently use
+`file`, `url`, or a registered source and refresh schedule. **No active rule
+files ship by default.**
 
-| `GOVERNANCE_RULES_SOURCE` | Rules come from |
-|---|---|
-| `dir` (default) | the files in `GOVERNANCE_RULES_DIR` (a mounted volume or ConfigMap works) |
-| `url` | one document at `GOVERNANCE_RULES_URL` (`{ rules: [...] }`, a list, or one rule), fetched with GET within `GOVERNANCE_RULES_URL_TIMEOUT_MS`; parsed as JSON when the `Content-Type` says JSON or the URL path ends in `.json`, as YAML otherwise |
-| anything else | a source registered with `registerGovernanceRuleSourceBackend(type, factory)` (`src/wiring/strategy-builders.ts`) — object storage, a config service, a database |
+Each service may select its own source and refresh interval in its
+`config.json`:
 
-`GOVERNANCE_RULES_REFRESH_SEC` (default `0` = load once) re-reads the source on
-that interval. A changed set is swapped in whole; a refresh that cannot reach
-the source, reads an invalid set, or reads an empty set while rules are in
-force changes nothing — the last valid set stays in force and the failure is
-logged on every attempt. A file renamed aside by a deploy, an emptied mount
-or a URL answering `rules: []` looks exactly like "no rules", so clearing
-every rule takes a restart.
+```json
+{
+  "governance": {
+    "rulesSource": "file",
+    "rulesDir": "governance/rules",
+    "rulesRefreshSec": 0
+  }
+}
+```
 
-At boot there is no previous set, so an unreadable source or an invalid first
-set stops the gateway. The one exception is a rules directory that does not
-exist: the gateway starts with **no rules** and logs a warning. A refresh
-that finds the directory missing keeps the rules in force, and one that finds
-it created loads it.
+`rulesDir` is optional for the `file` source and defaults to the folder above;
+relative paths are resolved from the service directory. A service may instead
+set `rulesSource: "url"` and `rulesUrl` (one `{ rules: [...] }` document, a
+list, or one rule, fetched with GET within `rulesUrlTimeoutMs`; JSON when the
+response Content-Type says JSON or URL ends in `.json`, YAML otherwise), or
+name a source registered with `registerGovernanceRuleSourceBackend`. Settings
+are independent per service: a service can use a mounted directory while
+another uses a URL or custom source, with its own `rulesRefreshSec`.
+
+`rulesRefreshSec` defaults to `0` (load once). A changed set is swapped in
+whole; a refresh that cannot reach the source, reads an invalid set, or reads
+an empty set while rules are in force changes nothing — the last valid set
+stays in force. Clearing all rules for a service requires restarting the
+gateway.
+
+The examples are kept separate by ownership: `order-governance.yaml` shows
+service-owned order rules, and the nested gateway example shows cross-service
+policy. These are documentation fixtures, not active policies. The order
+example uses illustrative `amount`, `currency`, and `items` fields not present
+in the demo order API; extend the service API before applying those rules.
+Copy a rule to the appropriate source directory: gateway rules to
+`GATEWAY_GOVERNANCE_RULES_DIR`, service rules to that service's configured
+source. The directory loader reads only top-level files, so the nested
+`examples/` tree is not loaded by default.
+
+Every enabled service's source is loaded and validated during gateway
+startup. For a URL source, Harbor performs the GET before startup completes
+and uses the latest response immediately; it does not wait for the first
+periodic refresh. A failed initial URL load stops startup because no last
+valid in-memory set exists yet. Failed later refreshes keep the active set.
+
+Once a service is registered, an unknown source type, unreadable configured
+source or invalid initial rule set stops gateway startup so it cannot
+accidentally run without its intended policy. Invalid URL/refresh config
+discovered while scanning skips that service (as with other invalid service
+config); if no other service registers, the gateway exits. The default
+directory source is the exception:
+if a service's default or configured directory does not exist, that service
+starts with **no rules** and logs a warning. A refresh that finds it missing
+keeps rules in force, and one that finds it created loads it. A service marked
+`"enabled": false` is skipped before its governance source is constructed or
+read.
 
 A file holds one rule, a list of rules, or `{ rules: [...] }`:
 
 ```yaml
-name: high-budget-campaign          # kebab-case, unique
+name: high-value-order              # kebab-case, unique
 version: 2                          # free-form revision marker, recorded on every decision
-description: Large spends need a human
+description: Large orders need a human
 match:                              # which operations — every present clause must match; "*" = any present value
-  service: trafficking
-  operation: createCampaign         # OpenAPI operationId
+  service: order
+  operation: placeOrder              # OpenAPI operationId
   # method: POST                    # or a list: [POST, PUT]
-  # path: /campaigns                # OpenAPI path template starting with /, exactly as in the spec; /campaigns/** = it and everything beneath
+  # path: /orders                    # OpenAPI path template starting with /, exactly as in the spec; /orders/** = it and everything beneath
 conditions:                         # when — a boolean tree over request values
   allOf:
-    - percent_of: { part: body.budget, whole: body.totalBudget }
-      greater_than: 20              # budget is more than 20% of the total budget
-    - not: { field: query.dryRun, equals: true }
+    - field: body.amount
+      greater_than: 1000
+    - not: { field: query.preApproved, equals: 'true' }
 action:                             # what — advisory only
   type: REQUIRE_APPROVAL            # ALLOW | DENY | REQUIRE_APPROVAL
-  reason: Campaign budget exceeds the approval threshold
+  reason: Order amount exceeds the approval threshold
 ```
 
 ## Levels
 
-What `match` names sets how broadly a rule applies:
+The source determines ownership; within a service-owned source, `match` sets
+the rule's scope:
 
-| Level | `match` names | Applies to | Example |
+| Level | Source and `match` | Applies to | Example |
 |---|---|---|---|
-| **gateway** | no service, operation or path | every service | `match: { method: DELETE }` |
-| **service** | a `service` only | every endpoint of that service | `match: { service: trafficking }` |
-| **endpoint** | an `operation` or a `path` (incl. `/prefix/**`) | those endpoints | `match: { service: trafficking, operation: createCampaign }` |
+| **gateway** | Gateway source configured by `GATEWAY_GOVERNANCE_RULES_DIR`; any `match` | Calls across services that match the rule | `match: { method: DELETE }` |
+| **service policy baseline** | A service's own source; no service, operation or path in `match` | Every call governed by that service's source | `match: { method: DELETE }` |
+| **service** | A service's own source; a `service` only | Every endpoint of that service | `match: { service: order }` |
+| **endpoint** | A service's own source; an `operation` or a `path` (incl. `/prefix/**`) | Those endpoints | `match: { service: order, operation: placeOrder }` |
 
-`*` (and the path `/**`) names nothing, so it does not raise a rule's level.
+Gateway rules are shared across services. Service-owned rule sources are
+isolated: a rule loaded for one service is never evaluated for another.
+Within one service's source, `*` (and the path `/**`) names nothing, so it
+does not raise a rule's level.
 It matches any *present* value: every call has a service and a path, but
 `operation: '*'` never targets a call without an `operationId` — one whose
 path the spec does not have, or whose operation declares none.
@@ -152,8 +200,9 @@ Evaluation is a pure function of the rule and the request — no I/O, no clock:
   the ratio. Require a positive claimed current bid too (`not: { field:
   body.currentBid, greater_than: 0 }`), so a negative denominator cannot
   hide an increase. Keep an absolute limit the claim cannot move.
-  `governance/rules/examples/campaign-governance.yaml` (`bid-jump`,
-  `bid-ceiling`) shows both.
+  A rule should handle missing, zero and non-numeric old values as well as
+  large increases; computed ratios are available when the request contains
+  both values.
 - Dates are `YYYY-MM-DD` or date-times **with a zone** (`2026-03-01T09:00:00Z`,
   `…+05:30`). A zone-less date-time or an impossible date (`2026-02-30`) does
   not compute: JavaScript would read the first in the host's time zone and roll
@@ -187,51 +236,66 @@ any other key is a load error.
 A rule **targets** a call when its `match` fits it, and **matches** it when it
 targets it and its `conditions` hold.
 
-1. **The most specific level with a matching rule decides**: endpoint rules
-   override service rules, service rules override gateway rules. An endpoint
-   rule whose conditions are false does not match, so the service level
-   decides.
-2. **`final: true` pins a broader level**: when a `final` rule matches, the
-   decision is made at its level and more specific rules are not consulted
+1. **Ownership sets the broadest scope.** Every rule loaded from the gateway
+   directory belongs to the gateway tier, even if it names a service,
+   operation, or path. A rule loaded from a service's source belongs to that
+   service: operation/path-specific rules are endpoint-tier; other service
+   rules (including method-only rules) are service-tier. A service file can
+   never define a cross-service gateway rule.
+2. **The most specific matching tier decides**: endpoint rules override
+   service rules, and service rules override non-final gateway rules. An
+   endpoint rule whose conditions are false does not match, so the next
+   matching tier decides.
+3. **`final: true` pins a broader tier**: when a `final` rule matches, the
+   decision is made at its tier and more specific tiers are not consulted
    (with several, the broadest wins, whatever their actions — a gateway
-   `final` ALLOW beats a service `final` DENY) — e.g. a gateway "never
-   DELETE" that no service or endpoint rule can override.
-3. **Within the deciding level: DENY > REQUIRE_APPROVAL > ALLOW**; the first
+   `final` ALLOW beats a service `final` DENY).
+4. **Within the deciding tier: DENY > REQUIRE_APPROVAL > ALLOW**; the first
    rule in file order carrying the winning action is the deciding rule.
-4. **Nothing matches**:
+5. **Nothing matches**:
    - some rule targets the call ⇒ `GOVERNANCE_DEFAULT_DECISION` (default
      **`DENY`**, reason `NO_MATCHING_RULE`);
    - no rule targets it ⇒ the call is ungoverned and **allowed** (reason
      `NO_GOVERNANCE`) **whatever `GOVERNANCE_DEFAULT_DECISION` says**. A
      gateway with no rules behaves exactly as without governance.
 
+Gateway-owned rule file. Put it in the directory configured by
+`GATEWAY_GOVERNANCE_RULES_DIR`; the source, not a `service` match clause,
+determines gateway ownership:
+
 ```yaml
-- name: no-deletes-anywhere          # gateway, final: nothing below can allow a DELETE
+- name: no-deletes-anywhere
   match: { method: DELETE }
   final: true
   action: { type: DENY }
-- name: trafficking-reads            # service: all trafficking reads are fine …
-  match: { service: trafficking, method: GET }
+```
+
+Service-owned rules belong in that service's configured source. The `service`
+match value must be the service name Harbor registers:
+
+```yaml
+- name: order-reads
+  match: { service: order, method: GET }
   action: { type: ALLOW }
-- name: big-campaigns                # endpoint: … and large campaigns need a human
-  match: { service: trafficking, operation: createCampaign }
-  conditions: { budget: { greater_than: 1000000 } }
+- name: high-value-orders
+  match: { service: order, operation: placeOrder }
+  conditions: { amount: { greater_than: 1000 } }
   action: { type: REQUIRE_APPROVAL }
 ```
 
-With these rules and the default `DENY`, a `POST /campaigns` with a budget of
+With these rules and the default `DENY`, a `POST /orders` with an amount of
 500 is denied: the endpoint rule targets it but does not match, and no service
-rule allows POSTs. Add a service- or endpoint-level `ALLOW` for what should
-pass.
+rule allows order creation. Add a service- or endpoint-level `ALLOW` for what
+should pass.
 
-The same rules still **allow** a `PATCH /campaigns/C1`, or any call to
-another service: no rule targets it (step 4). Rules written for some
-operations leave every other call — and every path the spec does not have —
-ungoverned. To fail closed, add a gateway-level rule that targets every call;
-any service or endpoint rule that matches still decides first:
+The gateway DELETE rule does not target a `PATCH /orders/ord-1`, so other
+policies decide it (step 5). Rules written for some operations leave every
+other call — and every path the spec does not have — ungoverned. To target
+every call at gateway scope, add a gateway-owned catch-all; without `final`,
+more-specific service or endpoint rules can still decide:
 
 ```yaml
-- name: deny-everything-else         # gateway: targets every call (every call has a service)
+- name: deny-everything-else
   match: { service: '*' }
   action: { type: DENY, reason: No Governance Rule allows this operation }
 ```

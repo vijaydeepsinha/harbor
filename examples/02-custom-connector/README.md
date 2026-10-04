@@ -12,14 +12,25 @@ The framework ships with built-in backends — token cache: `in-memory`, `memcac
 | Idempotency | `registerIdempotencyBackend` | `IDEMPOTENCY_TYPE=redis` (default for every service), or `"type"` in a service's `idempotency` block |
 | Execution store | `registerExecutionStoreBackend` | `EXECUTION_STORE_TYPE=…` |
 | Audit sink | `registerAuditSinkBackend` | `AUDIT_SINKS=console,…` |
-| Governance Rule source | `registerGovernanceRuleSourceBackend` | `GOVERNANCE_RULES_SOURCE=…` |
+| Governance Rule source | `registerGovernanceRuleSourceBackend` | `"governance": { "rulesSource": "…" }` in each service's `config.json` |
 
 ## What changes in config.json
 
-Only idempotency is per service. Its block is handed to your factory whole, so it can carry your backend's own settings:
+Idempotency and Governance Rule source selection are per service. Their blocks are handed to their factories, so they can carry backend-specific settings:
 
 ```json
 { "idempotency": { "type": "redis", "url": "redis://localhost:6379" } }
+```
+
+```json
+{
+  "governance": {
+    "rulesSource": "url",
+    "rulesUrl": "https://config.example/orders/rules.yaml",
+    "rulesUrlTimeoutMs": 5000,
+    "rulesRefreshSec": 60
+  }
+}
 ```
 
 A token-cache, idempotency or execution-store backend selected by env var receives only `{ type }` and reads its own settings; an audit-sink factory receives a per-service logger lookup, a rule-source factory the governance settings. Built-in types are unaffected.

@@ -1,0 +1,9 @@
+name: deny-all-delete
+version: 1
+description: Block all DELETE API calls at the gateway level.
+match:
+  method: DELETE
+action:
+  type: DENY
+  reason: Gateway policy forbids all DELETE requests.
+final: true

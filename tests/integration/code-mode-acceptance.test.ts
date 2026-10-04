@@ -144,8 +144,8 @@ describe('§47 acceptance: two approval rounds, every side effect exactly once',
         expect(decisions.map(d => [d.activitySequence, d.decision])).toEqual([
             [1, 'ALLOW'], [2, 'ALLOW'], [3, 'REQUIRE_APPROVAL'], [4, 'REQUIRE_APPROVAL'], [5, 'ALLOW']
         ])
-        expect(decisions[2]?.matchedRules).toEqual(['activate-requires-approval'])
-        expect(decisions[4]?.decidingRule).toBe('finalize-allowed')
+        expect(decisions[2]?.matchedRules).toEqual(['trafficking/activate-requires-approval'])
+        expect(decisions[4]?.decidingRule).toBe('trafficking/finalize-allowed')
         expect(approvals.map(a => [a.activitySequence, a.status, a.decidedVia])).toEqual([
             [3, 'APPROVED', 'mcp-elicitation'], [4, 'APPROVED', 'mcp-elicitation']
         ])

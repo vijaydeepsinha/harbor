@@ -18,7 +18,7 @@ import type {ResumeState} from '../runtime/execution/request-state.js'
 import {CallLog, type CallLogSource} from '../runtime/execution/activity-journal.js'
 import {isToolError, mcpError, mcpSuccess, resolveService, type ToolResponse, validateAuth} from './tool-helpers.js'
 import {type McpRequestView, readMcpRequest} from './mcp-request-view.js'
-import {type ApiExecuteReport, runApiExecute} from './execute-api-run.js'
+import {type ApiExecuteResult, runApiExecute} from './execute-api-run.js'
 import {classifyFailure, executionMeta, refusalOutcome} from './execute-api-outcome.js'
 import {
     APPROVAL_INPUT_KEY,
@@ -205,22 +205,26 @@ interface Responder {
 
 const NO_CALLS: CallLogSource = new CallLog()
 
-async function respond(report: ApiExecuteReport, r: Responder): Promise<ToolResponse | InputRequiredResult> {
-    switch (report.kind) {
+async function respond(apiExecuteResult: ApiExecuteResult, responder: Responder): Promise<ToolResponse | InputRequiredResult> {
+    switch (apiExecuteResult.kind) {
         case 'askAgain':
             // Before the call there was nothing new to record: the question is simply put again.
-            return buildInputRequired(requireRuntime(r), r.request, report.approvalId, report.state)
+            // Approval resumes require the execution runtime; this guard fails fast instead of
+            // letting the request proceed without the data needed to seal the approval state.
+            return buildInputRequired(requireGovernanceRuntime(responder), responder.request, apiExecuteResult.approvalId, apiExecuteResult.state)
 
         case 'refused': {
             // Refused, or the answer itself ended the execution (decline, cancel): nothing ran, but the
             // decision is part of the audit trail — under the principal that just authenticated, which
             // for a refused resume is the caller who tried, not the execution's owner. codeSubmitted
             // stays what this caller sent — never the persisted program, which may belong to someone else.
-            const {refusal, executionId} = report
-            audit(r, {calls: NO_CALLS, executionId}, {
+            // Destructure only the fields we need from the result object. This is equivalent to
+            // `apiExecuteResult.refusal` and `apiExecuteResult.executionId`, but keeps the call-site concise.
+            const {refusal, executionId} = apiExecuteResult
+            audit(responder, {calls: NO_CALLS, executionId}, {
                 outcome: refusalOutcome(refusal.code),
                 errorCode: refusal.code
-            }, r.code)
+            }, responder.code)
             return mcpError(
                 refusal.message, refusal.code, refusal.retryable, refusal.extra,
                 refusal.meta ? executionMeta(executionId, refusal.meta.status, refusal.meta.approvalId) : undefined
@@ -228,56 +232,59 @@ async function respond(report: ApiExecuteReport, r: Responder): Promise<ToolResp
         }
 
         case 'completed': {
-            const {result, executionId, calls} = report
+            const {result, executionId, calls} = apiExecuteResult
             const collector = new AuditCollector(calls)
-            r.logger.info(
+            responder.logger.info(
                 {
-                    correlationId: r.request.correlationId, service: r.service, executionId, step: '4/4 done',
-                    durationMs: Date.now() - r.startTime,
+                    correlationId: responder.request.correlationId, service: responder.service, executionId, step: '4/4 done',
+                    durationMs: Date.now() - responder.startTime,
                     apiCallCount: collector.getCallCount(),
                     endpointsAccessed: collector.getEndpoints()
                 },
                 `${LOG_PREFIX.MCP_OUT} ${TOOL.API_EXECUTE} — result returned to AI client`
             )
-            r.logger.debug({
-                correlationId: r.request.correlationId,
-                service: r.service,
+            responder.logger.debug({
+                correlationId: responder.request.correlationId,
+                service: responder.service,
                 response: JSON.stringify(result, null, 2)
             }, `${LOG_PREFIX.MCP_OUT} response payload`)
-            r.metrics.increment(METRIC.TOOL_CALLS, {
+            responder.metrics.increment(METRIC.TOOL_CALLS, {
                 tool: TOOL.API_EXECUTE,
-                service: r.service,
+                service: responder.service,
                 outcome: OUTCOME.SUCCESS
             })
-            audit(r, report, {outcome: OUTCOME.SUCCESS}, report.program)
+            audit(responder, apiExecuteResult, {outcome: OUTCOME.SUCCESS}, apiExecuteResult.program)
             return mcpSuccess(result, executionMeta(executionId, EXECUTION_STATUS.COMPLETED))
         }
 
         case 'failed':
-            return respondToFailure(report, r)
+            return respondToFailure(apiExecuteResult, responder)
     }
 }
 
-async function respondToFailure(report: Extract<ApiExecuteReport, {
+async function respondToFailure(apiExecuteResult: Extract<ApiExecuteResult, {
     kind: 'failed'
-}>, r: Responder): Promise<ToolResponse | InputRequiredResult> {
-    const {error, executionId} = report
+}>, responder: Responder): Promise<ToolResponse | InputRequiredResult> {
+    const {error, executionId} = apiExecuteResult
     const errObj = ensureError(error)
     const errorCode = getErrorCode(error)
     const failure = classifyFailure(error)
-    const {correlationId} = r.request
+    // `request` is the normalized MCP view; its first-class `correlationId` field is the
+    // request-scoped trace id used for logs and metrics. It is distinct from a durable
+    // execution id and is intentionally not read from the response `_meta`.
+    const {correlationId} = responder.request
 
-    if (failure.openedCircuit !== undefined) r.metrics.increment(METRIC.CB_OPENS, {endpoint: failure.openedCircuit})
-    if (failure.sandboxError) r.metrics.increment(METRIC.SANDBOX_ERRORS, {tool: TOOL.API_EXECUTE, errorType: errorCode})
-    r.metrics.increment(METRIC.TOOL_CALLS, {tool: TOOL.API_EXECUTE, service: r.service, outcome: failure.outcome})
+    if (failure.openedCircuit !== undefined) responder.metrics.increment(METRIC.CB_OPENS, {endpoint: failure.openedCircuit})
+    if (failure.sandboxError) responder.metrics.increment(METRIC.SANDBOX_ERRORS, {tool: TOOL.API_EXECUTE, errorType: errorCode})
+    responder.metrics.increment(METRIC.TOOL_CALLS, {tool: TOOL.API_EXECUTE, service: responder.service, outcome: failure.outcome})
 
     // Log raw cause server-side for internal errors; client response stays sanitized.
     if (error instanceof SandboxExecutionError && error.cause) {
         const cause = ensureError(error.cause)
-        r.logger.error(
+        responder.logger.error(
             {
                 correlationId,
-                service: r.service,
+                service: responder.service,
                 executionId,
                 errorCode,
                 causeMessage: cause.message,
@@ -286,20 +293,20 @@ async function respondToFailure(report: Extract<ApiExecuteReport, {
             `${TOOL.API_EXECUTE} failed — internal sandbox error`
         )
     } else {
-        r.logger.warn({
+        responder.logger.warn({
             correlationId,
-            service: r.service,
+            service: responder.service,
             executionId,
             errorCode,
             message: errObj.message
         }, `${TOOL.API_EXECUTE} failed`)
     }
 
-    audit(r, report, {outcome: failure.outcome, errorType: errObj.name, errorCode}, report.program)
+    audit(responder, apiExecuteResult, {outcome: failure.outcome, errorType: errObj.name, errorCode}, apiExecuteResult.program)
 
     // A pause: hand the question to the client.
-    if (error instanceof ApprovalRequiredError && r.governanceRuntime && executionId !== undefined) {
-        return approvalResult(r.governanceRuntime, r.request, error, r.userIdHash, r.logger)
+    if (error instanceof ApprovalRequiredError && responder.governanceRuntime && executionId !== undefined) {
+        return approvalResult(responder.governanceRuntime, responder.request, error, responder.userIdHash, responder.logger)
     }
 
     // Attach structured progress (per-call status + ids extracted from
@@ -307,7 +314,7 @@ async function respondToFailure(report: Extract<ApiExecuteReport, {
     // multi-step workflow without recreating already-created entities.
     // Omit the field entirely when nothing was recorded to keep the
     // payload minimal.
-    const progress = new ProgressCollector(report.calls, r.resources.sandboxLimits.maxApiCalls)
+    const progress = new ProgressCollector(apiExecuteResult.calls, responder.resources.sandboxLimits.maxApiCalls)
     const extra = {
         ...(progress.hasAny() ? {progress: progress.summary()} : {}),
         ...(executionId !== undefined ? {executionId} : {})
@@ -317,13 +324,13 @@ async function respondToFailure(report: Extract<ApiExecuteReport, {
         errorCode,
         errorRetryable(error),
         Object.keys(extra).length ? extra : undefined,
-        executionMeta(executionId, report.status)
+        executionMeta(executionId, apiExecuteResult.status)
     )
 }
 
 /** One audit record for this tool call; `codeSubmitted` is the program that ran, or what the caller sent when nothing did. */
 function audit(
-    r: Responder,
+    responder: Responder,
     run: { calls: CallLogSource; executionId?: string },
     fields: { outcome: AuditOutcome; errorType?: string; errorCode?: string },
     codeSubmitted: string
@@ -333,28 +340,28 @@ function audit(
         {
             auditId: uuidv4(),
             timestamp: new Date().toISOString(),
-            service: r.resources.name,
-            environment: r.globalConfig.observability.environment,
-            userIdHash: r.userIdHash,
-            correlationId: r.request.correlationId,
+            service: responder.resources.name,
+            environment: responder.globalConfig.observability.environment,
+            userIdHash: responder.userIdHash,
+            correlationId: responder.request.correlationId,
             tool: TOOL.API_EXECUTE,
-            authStrategy: r.resources.authStrategyName,
-            idempotencyStrategy: r.resources.idempotencyStrategyName,
-            circuitBreakerStrategy: r.resources.circuitBreakerStrategyName,
+            authStrategy: responder.resources.authStrategyName,
+            idempotencyStrategy: responder.resources.idempotencyStrategyName,
+            circuitBreakerStrategy: responder.resources.circuitBreakerStrategyName,
             codeSubmitted,
             endpointsAccessed: collector.getEndpoints(),
             apiCallCount: collector.getCallCount(),
-            durationMs: Date.now() - r.startTime,
+            durationMs: Date.now() - responder.startTime,
             ...(run.executionId !== undefined ? {executionId: run.executionId} : {}),
             ...fields
         },
-        r.resources.logger,
-        r.globalConfig,
-        r.auditPipeline
+        responder.resources.logger,
+        responder.globalConfig,
+        responder.auditPipeline
     )
 }
 
-function requireRuntime(r: Responder): GovernanceRuntime {
+function requireGovernanceRuntime(r: Responder): GovernanceRuntime {
     if (!r.governanceRuntime) throw new Error('An approval answer needs the execution runtime')
     return r.governanceRuntime
 }
@@ -363,7 +370,7 @@ function requireRuntime(r: Responder): GovernanceRuntime {
 async function approvalResult(
     governanceRuntime: GovernanceRuntime,
     request: McpRequestView,
-    err: ApprovalRequiredError,
+    approvalRequiredError: ApprovalRequiredError,
     userIdHash: string,
     logger: Logger
 ): Promise<ToolResponse | InputRequiredResult> {
@@ -371,30 +378,30 @@ async function approvalResult(
     if (request.supportsElicitation) {
         logger.info({
             correlationId,
-            executionId: err.executionId,
-            approvalId: err.approvalId
+            executionId: approvalRequiredError.executionId,
+            approvalId: approvalRequiredError.approvalId
         }, 'Execution paused — approval requested via MCP elicitation')
-        return buildInputRequired(governanceRuntime, request, err.approvalId, {
-            executionId: err.executionId, approvalId: err.approvalId, activitySequence: err.activitySequence, userIdHash
+        return buildInputRequired(governanceRuntime, request, approvalRequiredError.approvalId, {
+            executionId: approvalRequiredError.executionId, approvalId: approvalRequiredError.approvalId, activitySequence: approvalRequiredError.activitySequence, userIdHash
         })
     }
     logger.info({
         correlationId,
-        executionId: err.executionId,
-        approvalId: err.approvalId
+        executionId: approvalRequiredError.executionId,
+        approvalId: approvalRequiredError.approvalId
     }, 'Execution paused — client lacks elicitation; approval expected over HTTP')
     return mcpError(
-        `${err.message} This client does not support elicitation: decide via POST /executions/${err.executionId}/approvals/${err.approvalId}, ` +
-        `then call ${TOOL.API_EXECUTE} again with _meta["${EXECUTION_ID_META_KEY}"] = "${err.executionId}" to resume.`,
+        `${approvalRequiredError.message} This client does not support elicitation: decide via POST /executions/${approvalRequiredError.executionId}/approvals/${approvalRequiredError.approvalId}, ` +
+        `then call ${TOOL.API_EXECUTE} again with _meta["${EXECUTION_ID_META_KEY}"] = "${approvalRequiredError.executionId}" to resume.`,
         ERR.APPROVAL_REQUIRED,
         false,
         {
-            executionId: err.executionId,
-            approvalId: err.approvalId,
-            activitySequence: err.activitySequence,
-            approval: err.summary
+            executionId: approvalRequiredError.executionId,
+            approvalId: approvalRequiredError.approvalId,
+            activitySequence: approvalRequiredError.activitySequence,
+            approval: approvalRequiredError.summary
         },
-        executionMeta(err.executionId, EXECUTION_STATUS.WAITING_APPROVAL, err.approvalId)
+        executionMeta(approvalRequiredError.executionId, EXECUTION_STATUS.WAITING_APPROVAL, approvalRequiredError.approvalId)
     )
 }
 

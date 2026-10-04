@@ -30,14 +30,21 @@ const STRICT_PORT = Number(process.env['E2E_HARBOR_STRICT_PORT'] ?? 3334)
 const MOCK_PORT = Number(process.env['E2E_MOCK_API_PORT'] ?? 4010)
 const CONTROL_PORT = Number(process.env['E2E_LOCAL_CONTROL_PORT'] ?? 4099)
 const FIXTURES = join(ROOT, 'tests', 'e2e', 'fixtures')
+const GATEWAY_RULES = join(FIXTURES, 'governance', 'gateway')
 // One process per gateway (`node --import tsx`), so SIGKILL really kills it — the tsx CLI would spawn a child that outlives it.
 const TSX_ARGS = ['--import', 'tsx', 'src/index.ts']
 
 mkdirSync(LOGS, {recursive: true})
 mkdirSync(LOCAL, {recursive: true})
-const servicesDir = materializeServices(join(FIXTURES, 'services'), join(LOCAL, 'services'), {
+const servicesDir = materializeServices(join(FIXTURES, 'services'), join(LOCAL, 'services-default'), {
     host: '127.0.0.1',
-    port: MOCK_PORT
+    port: MOCK_PORT,
+    governanceProfile: join(FIXTURES, 'governance', 'default')
+})
+const strictServicesDir = materializeServices(join(FIXTURES, 'services'), join(LOCAL, 'services-strict'), {
+    host: '127.0.0.1',
+    port: MOCK_PORT,
+    governanceProfile: join(FIXTURES, 'governance', 'strict')
 })
 const executionsDir = join(LOCAL, 'executions')
 if (existsSync(executionsDir)) rmSync(executionsDir, {recursive: true, force: true})
@@ -61,6 +68,7 @@ function start(name, cmd, args, env) {
 const harborEnv = (extra) => ({
     MCP_HOST: '127.0.0.1',
     SERVICES_DIR: servicesDir,
+    GATEWAY_GOVERNANCE_RULES_DIR: GATEWAY_RULES,
     ENABLE_AUDIT: 'true',
     LOG_LEVEL: 'info',
     ENVIRONMENT: 'dev',
@@ -72,7 +80,6 @@ const startMock = () => start('mock-api', process.execPath, [join(ROOT, 'tests',
 })
 const startHarbor = () => start('harbor', process.execPath, TSX_ARGS, harborEnv({
     MCP_PORT: String(HARBOR_PORT),
-    GOVERNANCE_RULES_DIR: join(FIXTURES, 'governance', 'default'),
     GOVERNANCE_DEFAULT_DECISION: 'ALLOW',
     GOVERNANCE_APPROVAL_TTL_SEC: '600',
     GOVERNANCE_REQUEST_STATE_KEY: 'e2e-request-state-key-0123456789abcdef0123456789',
@@ -81,7 +88,7 @@ const startHarbor = () => start('harbor', process.execPath, TSX_ARGS, harborEnv(
 }))
 const startStrict = () => start('harbor-strict', process.execPath, TSX_ARGS, harborEnv({
     MCP_PORT: String(STRICT_PORT),
-    GOVERNANCE_RULES_DIR: join(FIXTURES, 'governance', 'strict'),
+    SERVICES_DIR: strictServicesDir,
     GOVERNANCE_DEFAULT_DECISION: 'DENY',
     GOVERNANCE_APPROVAL_TTL_SEC: '3',
     GOVERNANCE_REQUEST_STATE_KEY: 'e2e-strict-request-state-key-0123456789abcdef01234',

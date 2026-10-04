@@ -6,8 +6,8 @@ import {redactUrl} from '../../../core/utils/url.js'
 import type {GovernanceRuleDocument, GovernanceRuleSource} from '../../../spi/governance/rule-source.js'
 
 /**
- * `GOVERNANCE_RULES_SOURCE=url`: one document (`{ rules: [...] }`, a list, or
- * a single rule) fetched with GET from `GOVERNANCE_RULES_URL` at boot and on
+ * `governance.rulesSource=url`: one document (`{ rules: [...] }`, a list, or
+ * a single rule) fetched with GET from `governance.rulesUrl` at boot and on
  * every refresh. JSON when the response says so (or the URL ends in `.json`),
  * YAML otherwise. Anything but a 2xx — or a timeout — throws, so the caller
  * keeps the rules it has.

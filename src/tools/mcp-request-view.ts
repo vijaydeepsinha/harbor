@@ -55,10 +55,12 @@ const resumeStateSchema = z.object({
 })
 
 /**
- * Reads one request. `codec` is the execution runtime's requestState codec
- * (absent on the legacy path, where nothing is ever sealed). A context the
- * SDK did not fill — a test double, a transport that omits a field — reads
- * as "no such input", never as an error.
+ * Builds the validated view of one incoming MCP request.
+ * The function reads only the fields the tool is allowed to consume from
+ * `ServerContext`, normalizes them into a stable shape, and treats missing or
+ * malformed values as "no such input" instead of failing the whole request.
+ * `codec` is the execution runtime's requestState codec; it is absent on the
+ * legacy path, where nothing is sealed or resumed.
  */
 export function readMcpRequest(ctx: ServerContext | undefined, codec?: Pick<ResumeStateCodec, 'mint'>): McpRequestView {
     const advisory = readRequestMeta(ctx)

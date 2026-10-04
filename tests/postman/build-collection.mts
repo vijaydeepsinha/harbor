@@ -37,6 +37,7 @@ interface McpItemOptions {
     token?: string
     /** Raw body override (string) for malformed requests. */
     rawBody?: string
+    rpcId?: number
     headers?: Record<string, string>
     omitHeaders?: string[]
     envelope?: Record<string, unknown> | false
@@ -56,7 +57,7 @@ function mcpItem(o: McpItemOptions) {
         ...o.params,
         _meta: {...envelope, ...((o.params['_meta'] as Record<string, unknown>) ?? {})}
     } : {}
-    const body = o.rawBody ?? JSON.stringify({jsonrpc: '2.0', id: 1, method: o.method, params}, null, 2)
+    const body = o.rawBody ?? JSON.stringify({jsonrpc: '2.0', id: o.rpcId ?? 1, method: o.method, params}, null, 2)
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         Accept: 'application/json, text/event-stream',
@@ -274,18 +275,22 @@ const collection = {
             apiExecute('api_execute — read customer-001 (ALLOW)', 'commerce', programs.readCustomer(RESOURCES.customerAllowed), [
                 T.noRpcError, T.complete, T.notIsError, T.execId, T.status('COMPLETED'),
                 "pm.test('backend answered 200', () => pm.expect(payload.status).to.eql(200));",
-                T.capture('executionId', "meta['harbor/execution-id']")
+                T.capture('executionId', "meta['harbor/execution-id']"),
+                T.capture('allowedRequestId', 'String(rpc.id)')
             ], {headers: {'X-Harbor-Client-ID': 'postman-client-7'}}),
             inspect('GET /executions/{id} — decision ALLOW persisted', 'executionId', [
                 "pm.test('execution COMPLETED', () => pm.expect(insp.execution.status).to.eql('COMPLETED'));",
-                "pm.test('policy decision is ALLOW by allow-read-customer', () => { pm.expect(insp.decisions[0].decision).to.eql('ALLOW'); pm.expect(insp.decisions[0].decidingRule).to.eql('allow-read-customer'); });",
-                "pm.test('rule version tag recorded', () => pm.expect(insp.decisions[0].ruleVersions[0]).to.match(/^allow-read-customer@1#[0-9a-f]{12}$/));",
+                "pm.test('policy decision is ALLOW by allow-read-customer', () => { pm.expect(insp.decisions[0].decision).to.eql('ALLOW'); pm.expect(insp.decisions[0].decidingRule).to.eql('commerce/allow-read-customer'); });",
+                "pm.test('rule version tag recorded', () => pm.expect(insp.decisions[0].ruleVersions[0]).to.match(/^commerce\\/allow-read-customer@1#[0-9a-f]{12}$/));",
                 "pm.test('activity journaled with OpenAPI identity', () => { pm.expect(insp.activities[0].request.operationId).to.eql('getCustomer'); pm.expect(insp.activities[0].status).to.eql('COMPLETED'); });"
             ]),
             downstream('Downstream — exactly one GET /customers/customer-001 as alice', '?method=GET&path=/customers/customer-001', [
                 "pm.test('backend received exactly 1 request', () => pm.expect(calls).to.have.length(1));",
                 "pm.test('the caller identity was forwarded', () => pm.expect(calls[0].identity).to.eql('alice'));",
-                "pm.test('Harbor-owned headers are stamped', () => { pm.expect(calls[0].headers['x-correlation-id']).to.be.a('string'); pm.expect(calls[0].headers['x-mcp-tool']).to.eql('api_execute'); pm.expect(calls[0].headers['x-mcp-service']).to.eql('commerce'); pm.expect(calls[0].headers['x-harbor-server-id']).to.eql('HARBOR_GATEWAY'); pm.expect(calls[0].headers['x-harbor-client-id']).to.eql('postman-client-7'); });"
+                "pm.test('the request correlation id is distinct from the execution id', () => { pm.expect(calls[0].headers['x-correlation-id']).to.eql(pm.collectionVariables.get('allowedRequestId')); pm.expect(calls[0].headers['x-correlation-id']).to.not.eql(pm.collectionVariables.get('executionId')); });",
+                "pm.test('Harbor stamp and forwarded client id are present', () => { pm.expect(calls[0].headers['x-harbor-server-id']).to.eql('HARBOR_GATEWAY'); pm.expect(calls[0].headers['x-harbor-client-id']).to.eql('postman-client-7'); });",
+                "pm.test('execution id header is present and matches the execution', () => pm.expect(calls[0].headers['x-harbor-execution-id']).to.eql(pm.collectionVariables.get('executionId')));",
+                "pm.test('MCP tool and service headers are stamped', () => { pm.expect(calls[0].headers['x-mcp-tool']).to.eql('api_execute'); pm.expect(calls[0].headers['x-mcp-service']).to.eql('commerce'); });"
             ])
         ]),
 
@@ -293,7 +298,7 @@ const collection = {
             resetMock(),
             apiExecute('api_execute — create then DELETE order (DENY at #2)', 'commerce', programs.createThenDeleteOrder(RESOURCES.customerAllowed, AMOUNTS.normal), [
                 T.noRpcError, T.toolError('GOVERNANCE_DENIED'), T.status('DENIED'),
-                "pm.test('denial names the rule and reason', () => { pm.expect(payload.error).to.include('deny-delete-order'); pm.expect(payload.retryable).to.eql(false); });",
+                "pm.test('denial names the gateway final rule and reason', () => { pm.expect(payload.error).to.include('deny-all-delete'); pm.expect(payload.retryable).to.eql(false); });",
                 T.capture('executionId', "meta['harbor/execution-id']")
             ]),
             inspect('GET /executions/{id} — DENIED with DENY decision', 'executionId', [
@@ -399,13 +404,17 @@ const collection = {
             apiExecute('Run 1 — start: pauses at #2 (order)', 'commerce', fourStep, [
                 T.noRpcError, T.paused, T.status('WAITING_APPROVAL'),
                 "pm.test('paused at activity #2 createOrder', () => pm.expect(result.inputRequests.approval.params.message).to.include('Activity:  #2'));",
-                T.capture('msExecutionId', "meta['harbor/execution-id']"), T.capture('msApprovalId1', "meta['harbor/approval-id']"), T.capture('msRequestState1', 'result.requestState')
-            ]),
+                T.capture('msExecutionId', "meta['harbor/execution-id']"), T.capture('msApprovalId1', "meta['harbor/approval-id']"), T.capture('msRequestState1', 'result.requestState'),
+                T.capture('msCorrelationId1', 'String(rpc.id)')
+            ], {rpcId: 801}),
             inspect('Inspect after run 1 — [COMPLETED, WAITING_APPROVAL]', 'msExecutionId', [
                 "pm.test('runCount 1', () => pm.expect(insp.execution.runCount).to.eql(1));",
                 "pm.test('activities', () => pm.expect(insp.activities.map(a => a.status)).to.eql(['COMPLETED','WAITING_APPROVAL']));"
             ]),
-            downstream('Downstream after run 1 — only the GET', '', ["pm.test('exactly [GET /customers/customer-001]', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001']));"]),
+            downstream('Downstream after run 1 — only the GET', '', [
+                "pm.test('exactly [GET /customers/customer-001]', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001']));",
+                "pm.test('run 1 uses separate correlation and execution ids', () => { pm.expect(calls[0].headers['x-correlation-id']).to.eql(pm.collectionVariables.get('msCorrelationId1')); pm.expect(calls[0].headers['x-correlation-id']).to.not.eql(pm.collectionVariables.get('msExecutionId')); pm.expect(calls[0].headers['x-harbor-execution-id']).to.eql(pm.collectionVariables.get('msExecutionId')); });"
+            ]),
             mrtrAnswer('Run 2 — approve #2: replays #1, executes #2, pauses at #3 (payment)', 'commerce', fourStep, 'msRequestState1', {
                 action: 'accept',
                 content: {approve: true}
@@ -414,9 +423,14 @@ const collection = {
                 "pm.test('same execution', () => pm.expect(meta['harbor/execution-id']).to.eql(pm.collectionVariables.get('msExecutionId')));",
                 "pm.test('a NEW approval for activity #3', () => { pm.expect(meta['harbor/approval-id']).to.not.eql(pm.collectionVariables.get('msApprovalId1')); pm.expect(result.inputRequests.approval.params.message).to.include('Activity:  #3'); });",
                 "pm.test('payment body built from the replayed order response', () => pm.expect(result.inputRequests.approval.params.message).to.include('\"orderId\":\"order-001\"'));",
-                T.capture('msApprovalId2', "meta['harbor/approval-id']"), T.capture('msRequestState2', 'result.requestState')
+                T.capture('msApprovalId2', "meta['harbor/approval-id']"), T.capture('msRequestState2', 'result.requestState'),
+                T.capture('msCorrelationId2', 'String(rpc.id)')
+            ], {rpcId: 802}),
+            downstream('Downstream after run 2 — GET not repeated, order once', '', [
+                "pm.test('exactly [GET customer, POST /orders]', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001','POST /orders']));",
+                "pm.test('run 2 has a new correlation id; replayed run 1 keeps its id', () => { const ids = calls.map(c => c.headers['x-correlation-id']); pm.expect(ids).to.eql([pm.collectionVariables.get('msCorrelationId1'), pm.collectionVariables.get('msCorrelationId2')]); pm.expect(ids[1]).to.not.eql(ids[0]); pm.expect(ids[1]).to.not.eql(pm.collectionVariables.get('msExecutionId')); });",
+                "pm.test('both downstream requests carry the same execution id', () => pm.expect(calls.map(c => c.headers['x-harbor-execution-id'])).to.eql([pm.collectionVariables.get('msExecutionId'), pm.collectionVariables.get('msExecutionId')]));"
             ]),
-            downstream('Downstream after run 2 — GET not repeated, order once', '', ["pm.test('exactly [GET customer, POST /orders]', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001','POST /orders']));"]),
             inspect('Inspect after run 2 — runCount 2, approvals [APPROVED, PENDING]', 'msExecutionId', [
                 "pm.test('runCount 2', () => pm.expect(insp.execution.runCount).to.eql(2));",
                 "pm.test('activities', () => pm.expect(insp.activities.map(a => a.status)).to.eql(['COMPLETED','COMPLETED','WAITING_APPROVAL']));",
@@ -428,9 +442,14 @@ const collection = {
             }, [
                 T.noRpcError, T.complete, T.notIsError, T.status('COMPLETED'),
                 "pm.test('all four steps succeeded', () => pm.expect(payload.statuses).to.eql([200,201,201,201]));",
-                "pm.test('ids from every step', () => { pm.expect(payload.orderId).to.eql('order-001'); pm.expect(payload.paymentId).to.eql('payment-001'); pm.expect(payload.notificationId).to.eql('notification-001'); });"
+                "pm.test('ids from every step', () => { pm.expect(payload.orderId).to.eql('order-001'); pm.expect(payload.paymentId).to.eql('payment-001'); pm.expect(payload.notificationId).to.eql('notification-001'); });",
+                T.capture('msCorrelationId3', 'String(rpc.id)')
+            ], {rpcId: 803}),
+            downstream('Downstream after run 3 — every call exactly once, in order', '', [
+                "pm.test('exactly-once across three isolates', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001','POST /orders','POST /payments','POST /notifications']));",
+                "pm.test('correlation ids group calls by sandbox run, separately from execution id', () => { const ids = calls.map(c => c.headers['x-correlation-id']); pm.expect(ids).to.eql([pm.collectionVariables.get('msCorrelationId1'), pm.collectionVariables.get('msCorrelationId2'), pm.collectionVariables.get('msCorrelationId3'), pm.collectionVariables.get('msCorrelationId3')]); pm.expect(new Set(ids).size).to.eql(3); pm.expect(ids).to.not.include(pm.collectionVariables.get('msExecutionId')); });",
+                "pm.test('all downstream calls carry the stable execution id', () => pm.expect(calls.map(c => c.headers['x-harbor-execution-id'])).to.eql(Array(4).fill(pm.collectionVariables.get('msExecutionId'))));"
             ]),
-            downstream('Downstream after run 3 — every call exactly once, in order', '', ["pm.test('exactly-once across three isolates', () => pm.expect(calls.map(c => c.method + ' ' + c.path)).to.eql(['GET /customers/customer-001','POST /orders','POST /payments','POST /notifications']));"]),
             inspect('Inspect after run 3 — COMPLETED, runCount 3, two approvals APPROVED', 'msExecutionId', [
                 "pm.test('COMPLETED after 3 runs', () => { pm.expect(insp.execution.status).to.eql('COMPLETED'); pm.expect(insp.execution.runCount).to.eql(3); });",
                 "pm.test('every activity COMPLETED; runIndex shows which isolate first met it', () => { pm.expect(insp.activities.map(a => a.status)).to.eql(['COMPLETED','COMPLETED','COMPLETED','COMPLETED']); pm.expect(insp.activities.map(a => a.runIndex)).to.eql([1,1,2,3]); });",
@@ -682,7 +701,7 @@ const collection = {
         folder('14 - Audit', 'Decisions, approvals and the derived history are the audit trail — no log scraping.', [
             inspect('Inspect the multi-step execution — decisions, approvals, history', 'msExecutionId', [
                 "pm.test('every decision carries reason and rule versions', () => insp.decisions.forEach(d => { pm.expect(d.reason).to.be.a('string'); pm.expect(d.ruleVersions).to.be.an('array'); pm.expect(d.evaluatedAt).to.be.a('string'); }));",
-                "pm.test('approval-required decisions name their rule', () => { const d = insp.decisions.find(x => x.decision === 'REQUIRE_APPROVAL'); pm.expect(d.ruleVersions[0]).to.match(/^[a-z0-9-]+@[^#]+#[0-9a-f]{12}$/); });",
+                "pm.test('approval-required decisions name their owner and rule', () => { const d = insp.decisions.find(x => x.decision === 'REQUIRE_APPROVAL'); pm.expect(d.ruleVersions[0]).to.match(/^(gateway|[a-z0-9-]+)\\/[a-z0-9-]+@[^#]+#[0-9a-f]{12}$/); });",
                 "pm.test('approvals record who/when/how', () => insp.approvals.forEach(a => { pm.expect(a.decidedVia).to.eql('mcp-elicitation'); pm.expect(a.decidedAt).to.be.a('string'); }));",
                 "pm.test('history is chronological and complete', () => { const ev = insp.history.map(h => h.kind + ':' + h.event + (h.sequence ? '#' + h.sequence : '')); pm.expect(ev[0]).to.eql('EXECUTION:CREATED'); pm.expect(ev).to.include('APPROVAL:APPROVED#2'); pm.expect(ev).to.include('APPROVAL:APPROVED#3'); pm.expect(ev[ev.length - 1]).to.eql('EXECUTION:COMPLETED'); const at = insp.history.map(h => h.at); pm.expect([...at].sort()).to.eql(at); });",
                 "pm.test('no bearer token is persisted', () => pm.expect(JSON.stringify(insp)).to.not.include(pm.environment.get('tokenAlice')));"
@@ -695,7 +714,7 @@ const collection = {
                 T.toolError('GOVERNANCE_DENIED'), T.status('DENIED'), T.capture('hardAliasExecutionId', "meta['harbor/execution-id']")
             ]),
             inspect('Inspect — the rule that denied the canonical DELETE is the one that decided', 'hardAliasExecutionId', [
-                "pm.test('deny-delete-order decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('deny-delete-order'));"
+                "pm.test('gateway deny-all-delete decided', () => pm.expect(insp.decisions[0].decidingRule).to.eql('gateway/deny-all-delete'));"
             ]),
             apiExecute('Dot-segment spelling (/orders/./…) → INVALID_API_REQUEST before governance', 'commerce', HARDENING.deleteOrderAt('/orders/./order-001'), [T.toolError('INVALID_API_REQUEST')]),
             apiExecute('Encoded-slash spelling (/orders%2F…) → INVALID_API_REQUEST', 'commerce', HARDENING.deleteOrderAt('/orders%2Forder-001'), [T.toolError('INVALID_API_REQUEST')]),

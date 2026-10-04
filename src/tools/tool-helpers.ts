@@ -90,7 +90,12 @@ export function mcpSuccess(data: unknown, appMeta?: AppMeta): ToolResponse {
     }
 }
 
-/** Reads correlation id from the MCP handler context, falling back to a fresh UUID. */
+/**
+ * Reads the request-scoped correlation id from the MCP handler context.
+ * This is the trace id for the current tool call, distinct from a durable
+ * execution id. When the SDK does not provide one, a fresh UUID is generated
+ * so every request still has a stable log/telemetry identifier.
+ */
 export function extractCorrelationId(ctx: ServerContext | undefined): string {
     const id = ctx?.mcpReq?.id
     if (id !== undefined && id !== null) return String(id)
@@ -137,6 +142,12 @@ export function readRequestMeta(ctx: ServerContext | undefined): AdvisoryRequest
  */
 export const serviceCodeSchema = z.object({service: z.string(), code: z.string()})
 
+/**
+ * Resolves a configured service by name.
+ * Returns the bound service resources when the service exists; otherwise it
+ * returns the canonical unknown-service MCP error payload so the caller can
+ * report the valid service names without continuing into the runtime.
+ */
 export function resolveService(
     registry: ServiceRegistry,
     service: string,
@@ -155,6 +166,12 @@ export function resolveService(
     return resources
 }
 
+/**
+ * Type guard for tool error responses.
+ * `isError` is the standard marker used by MCP handlers to distinguish a
+ * failure payload from a normal result object without relying on the caller to
+ * inspect the shape manually.
+ */
 export function isToolError(result: unknown): result is ToolResponse {
     return typeof result === 'object' && result !== null && 'isError' in result
 }

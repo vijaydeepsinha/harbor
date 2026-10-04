@@ -12,7 +12,7 @@ Design and behaviour: `docs/code-mode-governance.md`; rule format: `governance/r
 - [x] Durable executions: the original program is persisted and authoritative; an `executionId` survives approval rounds and resumes in a fresh isolate
 - [x] Activity journal at the sandbox bridge: journal before call, replay of completed calls, `REPLAY_DIVERGED` on a changed program, unknown outcomes fail closed
 - [x] Governance Rules: OpenAPI-operation targeting, condition trees, gateway / service / endpoint levels with `final`, `DENY > REQUIRE_APPROVAL > ALLOW`, default decision for targeted-unmatched calls
-- [x] Rule sources: directory (default), URL, or `registerGovernanceRuleSourceBackend`; periodic refresh that keeps the last valid set
+- [x] Per-service rule sources: directory (default), URL, or `registerGovernanceRuleSourceBackend`; each service refreshes independently and keeps its last valid set
 - [x] Human approval over MCP 2026-07-28 (`input_required` + form elicitation + HMAC-sealed `requestState`), with an owner-bound HTTP fallback (`/executions/{id}`, `/executions/{id}/approvals/{approvalId}`)
 - [x] Execution stores: in-memory, file, memcache (shared across pods), or `registerExecutionStoreBackend`; retention of terminal executions and their program text
 - [x] Audit sink interface and pipeline (`AUDIT_SINKS`, `registerAuditSinkBackend`) — audit records and execution-state events

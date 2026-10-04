@@ -131,6 +131,9 @@ async function dump(ctx: TestContext, s: Scenario, clients: McpClient[], executi
         downstreamCorrelationIds: Array.isArray(mockRequests) ? (mockRequests as Array<{
             headers: Record<string, unknown>
         }>).map(r => r.headers['x-correlation-id']) : [],
+        downstreamExecutionIds: Array.isArray(mockRequests) ? (mockRequests as Array<{
+            headers: Record<string, unknown>
+        }>).map(r => r.headers['x-harbor-execution-id']).filter(v => v !== undefined) : [],
         notes,
         env: {mcpBaseUrl: env.mcpBaseUrl, strictBaseUrl: env.strictBaseUrl, mockApiUrl: env.mockApiUrl}
     }

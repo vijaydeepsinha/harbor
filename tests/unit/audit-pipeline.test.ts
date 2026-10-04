@@ -169,8 +169,8 @@ describe('audit pipeline', () => {
         const {sink, events} = capturingSink()
         const governanceRuntime = await buildGovernanceRuntime({
             store: {type: 'in-memory'},
-            governance: {rulesDir: '/nonexistent', defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600}
-        }, silent, new AuditPipeline([sink], silent))
+            governance: {defaultDecision: GOVERNANCE_DECISION.DENY, approvalTtlSec: 600}
+        }, [], silent, new AuditPipeline([sink], silent))
         const rec = await governanceRuntime.executionManager.create({service: 'svc', code: 'c', userIdHash: 'h'})
         await governanceRuntime.executionManager.beginRun(rec.executionId)
         await governanceRuntime.executionManager.endRun(rec.executionId, {kind: 'waitingApproval', approvalId: 'ap-1'})

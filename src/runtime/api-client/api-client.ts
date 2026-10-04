@@ -62,6 +62,7 @@ const PROGRAM_FORBIDDEN_HEADERS: ReadonlySet<string> = new Set([
     HTTP_HEADER.AUTHORIZATION, HTTP_HEADER.REQUEST_SOURCE, HTTP_HEADER.MCP_TOOL, HTTP_HEADER.MCP_SERVICE,
     HTTP_HEADER.MCP_VERSION, HTTP_HEADER.SESSION_ID, HTTP_HEADER.IDEMPOTENCY_KEY,
     HTTP_HEADER.CORRELATION_ID, HTTP_HEADER.HARBOR_SERVER_ID, HTTP_HEADER.HARBOR_CLIENT_ID,
+    HTTP_HEADER.HARBOR_EXECUTION_ID,
     'Host', 'Content-Length', 'Transfer-Encoding', 'Connection', 'Keep-Alive', 'Upgrade', 'TE', 'Trailer',
     'Proxy-Authorization', 'Proxy-Connection', 'Cookie', 'Forwarded',
     'X-Forwarded-For', 'X-Forwarded-Host', 'X-Forwarded-Proto', 'X-Forwarded-Port', 'X-Forwarded-Prefix', 'X-Real-IP',
@@ -115,7 +116,7 @@ export class ApiClient implements ConnectorAPI {
     }
 
     async executeRequest(apiRequest: ApiRequest, ctx: ExecuteRequestContext): Promise<ApiResponse> {
-        const {tokenPayload, invalidate, idempotencyKey, correlationId, clientId, signal} = ctx
+        const {tokenPayload, invalidate, idempotencyKey, correlationId, executionId, clientId, signal} = ctx
         const {path: apiPath, method, params, body} = apiRequest
         const breakerKey = ctx.endpoint ?? normalizeEndpointPath(apiPath)
 
@@ -137,7 +138,8 @@ export class ApiClient implements ConnectorAPI {
             [HTTP_HEADER.IDEMPOTENCY_KEY]: idempotencyKey,
             [HTTP_HEADER.CORRELATION_ID]: correlationId,
             [HTTP_HEADER.HARBOR_SERVER_ID]: this.context.serverId ?? DEFAULT_HARBOR_SERVER_ID,
-            ...(clientId !== undefined ? {[HTTP_HEADER.HARBOR_CLIENT_ID]: clientId} : {})
+            ...(clientId !== undefined ? {[HTTP_HEADER.HARBOR_CLIENT_ID]: clientId} : {}),
+            ...(executionId !== undefined ? {[HTTP_HEADER.HARBOR_EXECUTION_ID]: executionId} : {})
         }
 
         let lastError: Error | undefined

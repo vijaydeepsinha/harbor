@@ -99,7 +99,7 @@ This is a greenfield pre-release cleanup: former implementation and core-contrac
 | `src/spi/auth/token-cache.ts` | `TokenCacheStrategy` | in-memory adapter; shared base in `src/adapters/auth/abstract-token-cache.ts` |
 | `src/spi/connector/connector-api.ts` | `ConnectorAPI` | `ApiClient` (HTTP/axios) |
 | `src/spi/execution/execution-store.ts` | `ExecutionPersistence` — executions, activities, approvals, decisions, run lock | in-memory adapter |
-| `src/spi/governance/rule-source.ts` | `GovernanceRuleSource` | `DirectoryRuleSourceStrategy` (`dir`); `UrlRuleSourceStrategy` (`url`) — both in `src/adapters/governance/strategies/` |
+| `src/spi/governance/rule-source.ts` | `GovernanceRuleSource` | `DirectoryRuleSourceStrategy` (`file`); `UrlRuleSourceStrategy` (`url`) — both in `src/adapters/governance/strategies/` |
 | `src/spi/observability/audit-sink.ts` | `AuditSink`, `AuditEvent`, `ExecutionStateSnapshot` | `ConsoleAuditSink` (adapter) |
 | `src/spi/idempotency/idempotency-strategy.ts` | `IdempotencyStrategy` | `NoopIdempotencyStrategy` in `src/adapters/idempotency/strategies/` |
 | `src/spi/permissions/permission-guard.ts` | `PermissionGuard` | `ForwardTokenPermissionGuardStrategy` in `src/adapters/permissions/strategies/` (admits everything) |
@@ -189,7 +189,8 @@ registerTokenCacheBackend('redis', (config, ttlMs, logger) => new RedisTokenCach
 registerIdempotencyBackend('postgres', (config, logger) => new PostgresIdempotency(config))
 registerExecutionStoreBackend('postgres', (config, logger) => new PostgresExecutionStore(config))
 ```
-`TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept a built-in type or any kebab-case name (`^[a-z][a-z0-9-]*$`); a per-service `config.json` `idempotency.type` may name a registered backend too. The builder checks the registry before its built-in switch and refuses a name nothing registered: at boot for the env vars, by skipping the service for `config.json`. `AUDIT_SINKS` and `GOVERNANCE_RULES_SOURCE` resolve the same way.
+`TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept a built-in type or any kebab-case name (`^[a-z][a-z0-9-]*$`); a per-service `config.json` `idempotency.type` may name a registered backend too. The builder checks the registry before its built-in switch and refuses a name nothing registered: at boot for the env vars, by skipping the service for `config.json`. `AUDIT_SINKS` resolves the same way. Governance Rule sources are registered
+centrally but selected per service through `config.json`'s `governance` block.
 
 ---
 
@@ -211,14 +212,14 @@ src/runtime/
 │   ├── approval-service.ts        human approvals bound to one activity; decide() exactly once
 │   ├── request-state.ts           HMAC-sealed MRTR requestState codec (TTL, bound to the JSON-RPC method)
 │   ├── execution-retention.ts     sweeps terminal executions after EXECUTION_RETENTION_SEC
-│   └── governance-runtime.ts       process-wide wiring of store, manager, approvals, rules, codec
+│   └── governance-runtime.ts       process-wide execution/approval wiring plus per-service rule stores
 ├── governance/
 │   ├── operation-resolver.ts      canonical path + method → OpenAPI template, operationId, path params
 │   ├── rule-schema.ts             Zod schema of a Governance Rule (match, conditions, levels, final)
 │   ├── rule-loader.ts             parses and validates rule documents; all-or-nothing
 │   ├── rule-store.ts              the rule set in force; atomic swap
 │   ├── rule-evaluator.ts          pure evaluateGovernance(): ALLOW | DENY | REQUIRE_APPROVAL + reason
-│   └── rule-refresher.ts          GOVERNANCE_RULES_REFRESH_SEC reloads; a failed or emptying refresh keeps the set
+│   └── rule-refresher.ts          per-service config reloads; a failed or emptying refresh keeps that service's set
 ├── http/
 │   ├── http-gateway.ts            node:http server: /mcp, /health, protected-resource metadata, /executions
 │   ├── read-body.ts               bounded body reader (413 PAYLOAD_TOO_LARGE + Connection: close)
@@ -423,12 +424,12 @@ src/runtime/server-factory.ts
   │
   ├─ 4. AuditPipeline — buildAuditSinks(AUDIT_SINKS) when ENABLE_AUDIT, else no sinks
   │
-  ├─ 5. buildGovernanceRuntime(globalConfig.execution, logger, auditPipeline)
+  ├─ 5. buildGovernanceRuntime(globalConfig.execution, registeredServices, logger, auditPipeline)
   │         ├─ buildExecutionStore(EXECUTION_STORE_TYPE)
   │         ├─ ExecutionManager (state changes → audit pipeline) · retention sweeper · ApprovalService
-  │         ├─ Governance Rules: buildGovernanceRuleSource → load → validate
-  │         │     unreadable source or invalid rule ⇒ boot fails; rules directory absent ⇒ WARN, no rules
-  │         ├─ GovernanceRuleRefresher (GOVERNANCE_RULES_REFRESH_SEC; 0 = boot only)
+  │         ├─ for each registered service: build its GovernanceRuleSource → load → validate
+  │         │     unreadable source or invalid rule ⇒ boot fails; missing default directory ⇒ WARN for that service
+  │         ├─ per-service GovernanceRuleRefresher (`config.json` `rulesRefreshSec`; 0 = boot only)
   │         └─ requestState codec (GOVERNANCE_REQUEST_STATE_KEY, else a per-process random key)
   │
   ├─ 6. buildMcpServerFactory({ registry, globalConfig, logger, metrics, stdioToken, governanceRuntime, auditPipeline })
@@ -488,9 +489,9 @@ A throw becomes a FAILED activity with an unknown outcome. The run stops there a
 | `registerIdempotencyBackend(type, factory)` | `IDEMPOTENCY_TYPE`, or `config.json` `idempotency.type` | `IdempotencyStrategy` |
 | `registerExecutionStoreBackend(type, factory)` | `EXECUTION_STORE_TYPE` | `ExecutionPersistence`; run the contract suite in `tests/unit/execution-store.test.ts` |
 | `registerAuditSinkBackend(type, factory)` | an entry of `AUDIT_SINKS` | `AuditSink` |
-| `registerGovernanceRuleSourceBackend(type, factory)` | `GOVERNANCE_RULES_SOURCE` | `GovernanceRuleSource` (`load()` throws rather than return part of a set) |
+| `registerGovernanceRuleSourceBackend(type, factory)` | per-service `config.json` `governance.rulesSource` | `GovernanceRuleSource` (`load()` throws rather than return part of a set) |
 
-Register before `createMcpGateway()`. Built-in types (in-memory, memcache, couchbase, noop, file, dir, url, console) keep working unchanged. An unregistered name stops boot, or skips the service for a `config.json` idempotency type. See `docs/adapter-guide.md`.
+Register before `createMcpGateway()`. Built-in types (in-memory, memcache, couchbase, noop, file-backed execution store, file Governance Rule source, url Governance Rule source, console) remain available. An unregistered name stops boot, or skips the service for a `config.json` idempotency type. See `docs/adapter-guide.md`.
 
 ---
 

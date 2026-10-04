@@ -117,9 +117,11 @@ The gateway factory runs these steps once at startup:
    `ENABLE_AUDIT` is on (`true`/`1`, the default); none when it is `false`/`0`.
 
 5. **Builds the Code Mode runtime** — the execution store (`EXECUTION_STORE_TYPE`), execution
-   manager, approval service, retention sweeper, `requestState` codec, and the Governance Rules
-   from `GOVERNANCE_RULES_SOURCE`. An unreadable source or an invalid rule stops boot; a rules
-   directory that does not exist boots with no rules and a WARN (every call is then ungoverned).
+   manager, approval service, retention sweeper, `requestState` codec, and a rule source/store/
+   refresher for each registered service. Sources and refresh intervals come from that service's
+   `config.json`. An unreadable configured source or invalid initial rule stops boot; a missing
+   default local directory boots that service with no rules and a WARN. Disabled services never
+   construct or load their rule source.
 
 6. **Creates the per-request `McpServer` factory** with the five tools wired to the shared
    registry: `discover_services`, `discover_skills`, `get_skill_details`, `search_code`,
@@ -442,14 +444,18 @@ circuitBreaker.recordSuccess(template)    any returned status (a 5xx has thrown 
   - `X-Request-Source` (`MCP_AGENT_NAME`, default `mcp-agent`), `X-MCP-Tool: api_execute`,
     `X-MCP-Service`, `X-MCP-Version` (no session header: MCP 2026-07-28 is stateless)
   - `X-Idempotency-Key`
-  - `X-Correlation-ID` — the execution id (the same on every call of one script, across approval
-    resumes); the MCP request id on the legacy path
+  - `X-Correlation-ID` — the MCP request id, shared by calls in this sandbox run on both legacy
+    and governed paths; each approval resume gets a new request id. The durable execution id is
+    tracked separately by governance and in the execution-specific idempotency key
+  - `X-Harbor-Execution-ID` — the durable execution id on governed calls, stable across approval
+    resumes; absent on legacy calls
   - `X-Harbor-Server-ID` — the gateway's stamp (`HARBOR_SERVER_ID`, default `HARBOR_GATEWAY`)
   - `X-Harbor-Client-ID` — the caller's own id, forwarded when the `/mcp` request carried a
     safe one
 - **What a program may not set**, in any letter case (its copies are dropped): `Authorization`,
   `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID` (no longer sent, still reserved),
-  `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `Host`,
+  `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`,
+  `X-Harbor-Execution-ID`, `Host`,
   `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `TE`, `Trailer`,
   `Proxy-Authorization`, `Proxy-Connection`, `Cookie`, `Forwarded`, `X-Forwarded-For`/`-Host`/
   `-Proto`/`-Port`/`-Prefix`, `X-Real-IP`, `X-HTTP-Method-Override`, `X-HTTP-Method`,

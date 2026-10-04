@@ -53,7 +53,7 @@ services:
       MCP_HOST: 0.0.0.0
       MCP_PORT: "3333"
       SERVICES_DIR: /app/e2e/services
-      GOVERNANCE_RULES_DIR: /app/e2e/governance
+      GATEWAY_GOVERNANCE_RULES_DIR: /app/e2e/gateway-governance
       GOVERNANCE_DEFAULT_DECISION: ALLOW
       GOVERNANCE_APPROVAL_TTL_SEC: "600"
       GOVERNANCE_REQUEST_STATE_KEY: e2e-request-state-key-0123456789abcdef0123456789
@@ -64,7 +64,9 @@ services:
       ENVIRONMENT: dev
     volumes:
       - ../../tests/e2e/fixtures/services:/app/e2e/services:ro
-      - ../../tests/e2e/fixtures/governance/default:/app/e2e/governance:ro
+      - ../../tests/e2e/fixtures/governance/default/commerce:/app/e2e/services/commerce/governance/rules:ro
+      - ../../tests/e2e/fixtures/governance/default/ops:/app/e2e/services/ops/governance/rules:ro
+      - ../../tests/e2e/fixtures/governance/gateway:/app/e2e/gateway-governance:ro
       # Bind mount (not a named volume) so the runner can archive the store on
       # failure and so the non-root `harbor` user can write to it (the
       # orchestrator creates the directory world-writable before `up`).
@@ -80,7 +82,7 @@ services:
       MCP_HOST: 0.0.0.0
       MCP_PORT: "3333"
       SERVICES_DIR: /app/e2e/services
-      GOVERNANCE_RULES_DIR: /app/e2e/governance
+      GATEWAY_GOVERNANCE_RULES_DIR: /app/e2e/gateway-governance
       GOVERNANCE_DEFAULT_DECISION: DENY
       GOVERNANCE_APPROVAL_TTL_SEC: "3"
       GOVERNANCE_REQUEST_STATE_KEY: e2e-strict-request-state-key-0123456789abcdef01234
@@ -90,6 +92,8 @@ services:
       ENVIRONMENT: dev
     volumes:
       - ../../tests/e2e/fixtures/services:/app/e2e/services:ro
-      - ../../tests/e2e/fixtures/governance/strict:/app/e2e/governance:ro
+      - ../../tests/e2e/fixtures/governance/strict/commerce:/app/e2e/services/commerce/governance/rules:ro
+      - ../../tests/e2e/fixtures/governance/strict/ops:/app/e2e/services/ops/governance/rules:ro
+      - ../../tests/e2e/fixtures/governance/gateway:/app/e2e/gateway-governance:ro
     ports:
       - "${E2E_HARBOR_STRICT_PORT:-3334}:3333"

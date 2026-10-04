@@ -1,0 +1,15 @@
+# Gateway-owned example. Place this file in the directory configured by
+# GATEWAY_GOVERNANCE_RULES_DIR to apply the policy across all services.
+# Ownership comes from the source that loads this rule, not its match clauses.
+name: no-bulk-deletes-anywhere
+description: Deny collection-wide DELETE requests for every service
+match:
+  method: DELETE
+  path: '*'
+conditions:
+  query.all:
+    equals: true
+final: true
+action:
+  type: DENY
+  reason: Bulk deletes are not permitted through agents
