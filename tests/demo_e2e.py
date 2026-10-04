@@ -133,7 +133,12 @@ def _find_node() -> str:
 def start_services(extra_env: Optional[dict] = None):
     node = _find_node()
     demo = ROOT / "examples" / "demo"
-    env = {**os.environ, "NODE_PATH": str(ROOT / "node_modules"), **(extra_env or {})}
+    env = {
+        **os.environ,
+        "NODE_PATH": str(ROOT / "node_modules"),
+        **(extra_env or {}),
+        "GATEWAY_GOVERNANCE_RULES_DIR": str(ROOT / "tests" / "e2e" / "fixtures" / "governance" / "gateway"),
+    }
 
     for script, port in [
         ("product-service.js", 3001),
@@ -278,6 +283,7 @@ def _start_harbor_oauth(oauth_env: dict):
         "SERVICES_DIR": str(ROOT / "services"),
         "LOG_LEVEL": "error",
         **oauth_env,
+        "GATEWAY_GOVERNANCE_RULES_DIR": str(ROOT / "tests" / "e2e" / "fixtures" / "governance" / "gateway"),
     }
     _oauth_harbor_proc = subprocess.Popen(
         [node, str(tsx), "src/index.ts"],
@@ -874,21 +880,22 @@ def test_task_service():
         r = api_exec("tasks",
                      f'async () => {{ const r = await api.request({{ method: "DELETE", path: "/api/v1/tasks/{task_id}" }}); return {{ status: r.status, ok: r.ok }}; }}',
                      506)
-        if assert_no_error(r, f"DELETE /api/v1/tasks/{task_id} succeeded"):
-            assert_eq(r.get("status"), 204, "status 204")
-            assert_eq(r.get("ok"), True, "ok true")
+        if assert_no_error(r, f"DELETE /api/v1/tasks/{task_id} was denied by gateway policy"):
+            assert_eq(r.get("code"), "GOVERNANCE_DENIED", "gateway denies DELETE")
+            assert_true("deny-all-delete" in r.get("error", ""), "denial names gateway rule")
 
         r = api_exec("tasks",
                      f'async () => {{ const r = await api.request({{ method: "GET", path: "/api/v1/tasks/{task_id}" }}); return {{ status: r.status }}; }}',
                      507)
-        if assert_no_error(r, "GET deleted task returns 404"):
-            assert_eq(r.get("status"), 404, "status 404 after delete")
+        if assert_no_error(r, "GET task after denied DELETE succeeds"):
+            assert_eq(r.get("status"), 200, "task remains after denied DELETE")
 
     r = api_exec("tasks",
                  'async () => { const r = await api.request({ method: "GET", path: "/api/v1/tasks" }); return r.data; }',
                  508)
     if assert_no_error(r, "GET /api/v1/tasks final count correct"):
-        assert_eq(r.get("total"), initial_count, f"total back to {initial_count} after delete")
+        expected_count = initial_count + (1 if task_id else 0)
+        assert_eq(r.get("total"), expected_count, f"total remains {expected_count} after denied delete")
 
 
 # ── OAuth 2.1 tests — metadata + backward compat (fake AS URL) ───────────────

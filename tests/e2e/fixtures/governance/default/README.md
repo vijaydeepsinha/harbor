@@ -1,5 +1,12 @@
 # E2E Governance Rule fixtures
 
+The shared test-only gateway policy lives in `../gateway/10-deny-delete.yaml`.
+Both E2E gateway profiles load it through `GATEWAY_GOVERNANCE_RULES_DIR`,
+independently of the repository's deployable `governance/rules/` directory.
+It denies all DELETE activities with `final: true`, so service-level fixtures
+cannot override it. The Python demo E2E uses the same fixture and asserts that
+a task DELETE is denied and the task remains present.
+
 The `harbor` E2E profile assigns the `commerce/` policy directory to its
 commerce service and `ops/` to its operations service through each generated
 service's `config.json`. These sets are loaded independently. Files load in
@@ -22,7 +29,7 @@ allowed (`NO_GOVERNANCE`) whatever the default says.
 | `updateOrder {status: shipped}`   | allow-update-order                             | ALLOW                               |
 | `updateOrder {status: cancelled}` | allow-update-order, deny-cancel-via-update     | DENY (precedence)                   |
 | `updateOrder {expedite: true}`    | allow-update-order, expedite-requires-approval | REQUIRE_APPROVAL (precedence)       |
-| `deleteOrder`                     | deny-delete-order                              | DENY                                |
+| `deleteOrder`                     | deny-delete-order, gateway `deny-all-delete` (final) | DENY (gateway final)               |
 | `createPayment`                   | charge-payment-requires-approval               | REQUIRE_APPROVAL                    |
 | `sendNotification`                | allow-notifications                            | ALLOW                               |
 | `unstableOperation`, `ping`       | —                                              | ALLOW (ungoverned, `NO_GOVERNANCE`) |

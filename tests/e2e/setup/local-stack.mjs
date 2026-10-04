@@ -30,6 +30,7 @@ const STRICT_PORT = Number(process.env['E2E_HARBOR_STRICT_PORT'] ?? 3334)
 const MOCK_PORT = Number(process.env['E2E_MOCK_API_PORT'] ?? 4010)
 const CONTROL_PORT = Number(process.env['E2E_LOCAL_CONTROL_PORT'] ?? 4099)
 const FIXTURES = join(ROOT, 'tests', 'e2e', 'fixtures')
+const GATEWAY_RULES = join(FIXTURES, 'governance', 'gateway')
 // One process per gateway (`node --import tsx`), so SIGKILL really kills it — the tsx CLI would spawn a child that outlives it.
 const TSX_ARGS = ['--import', 'tsx', 'src/index.ts']
 
@@ -67,6 +68,7 @@ function start(name, cmd, args, env) {
 const harborEnv = (extra) => ({
     MCP_HOST: '127.0.0.1',
     SERVICES_DIR: servicesDir,
+    GATEWAY_GOVERNANCE_RULES_DIR: GATEWAY_RULES,
     ENABLE_AUDIT: 'true',
     LOG_LEVEL: 'info',
     ENVIRONMENT: 'dev',
