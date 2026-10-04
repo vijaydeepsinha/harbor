@@ -45,7 +45,10 @@ export async function createMcpGateway(
     // ── 3. Build service registry from scanned results ──────────────────────
     // One failing service must not take down the gateway: log, skip, continue.
     const registry = new ServiceRegistry()
-    const activeGovernanceServices: Array<{name: string; governance: (typeof scannedServices)[number]['governance']}> = []
+    const activeGovernanceServices: Array<{
+        name: string;
+        governance: (typeof scannedServices)[number]['governance']
+    }> = []
     for (const svc of scannedServices) {
         try {
             const resources = await buildServiceResources(svc, globalConfig, tokenCacheStrategy)

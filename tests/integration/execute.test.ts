@@ -147,7 +147,11 @@ describe('execute integration', () => {
         })
 
         it('the sandboxed program cannot set or forge them (any letter case); its other headers pass through', async () => {
-            const headers = await sentHeaders({correlationId: 'rpc-1', executionId: 'execution-42', clientId: 'agent-7'}, {
+            const headers = await sentHeaders({
+                correlationId: 'rpc-1',
+                executionId: 'execution-42',
+                clientId: 'agent-7'
+            }, {
                 'x-correlation-id': 'forged',
                 'X-HARBOR-SERVER-ID': 'forged',
                 'x-harbor-client-id': 'forged',

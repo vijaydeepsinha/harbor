@@ -9,8 +9,8 @@ import type {OpenAPISpec} from '../../core/types/spec.types.js'
 import type {AuthStrategy} from '../../spi/auth/auth-strategy.js'
 import type {CircuitBreakerStrategy} from '../../spi/resilience/circuit-breaker.js'
 import type {
-    IdempotencyBackendConfig,
     GovernanceRuleSourceConfig,
+    IdempotencyBackendConfig,
     SandboxOverride,
     ServiceAuthConfig,
     ServiceCircuitBreakerConfig

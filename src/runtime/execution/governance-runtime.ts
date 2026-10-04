@@ -2,14 +2,13 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import {resolve} from 'node:path'
-import type {ExecutionConfig} from '../../core/types/config.types.js'
+import type {ExecutionConfig, GovernanceRuleSourceConfig} from '../../core/types/config.types.js'
 import type {Logger} from '../../core/types/logger.types.js'
 import type {ExecutionPersistence} from '../../spi/execution/execution-store.js'
-import type {GovernanceRuleSourceConfig} from '../../core/types/config.types.js'
 import {
     buildExecutionStore,
-    buildGovernanceRuleSource,
     buildGatewayGovernanceRuleSource,
+    buildGovernanceRuleSource,
     GovernanceRulesDirectoryAbsentError
 } from '../../wiring/strategy-builders.js'
 import type {GovernanceRuleDocument, GovernanceRuleSource} from '../../spi/governance/rule-source.js'
@@ -18,11 +17,11 @@ import {ExecutionRetentionSweeper} from './execution-retention.js'
 import {ApprovalService} from './approval-service.js'
 import {createResumeStateCodec, type ResumeStateCodec} from './request-state.js'
 import {GovernanceRuleStore} from '../governance/rule-store.js'
+import type {LoadedRule} from '../governance/rule-loader.js'
 import {parseRuleDocuments} from '../governance/rule-loader.js'
 import {GovernanceRuleRefresher} from '../governance/rule-refresher.js'
 import {AuditPipeline, executionStateOf} from '../observability/audit-pipeline.js'
 import {errorMessage} from '../../core/utils/errors.js'
-import type {LoadedRule} from '../governance/rule-loader.js'
 
 /**
  * Shared governance runtime dependencies for execution, approvals and rules, built once per
@@ -33,12 +32,14 @@ export interface GovernanceRuntime {
     persistence: ExecutionPersistence
     executionManager: ExecutionManager
     approvals: ApprovalService
-    /** Returns the gateway-owned rules shared by calls to every enabled service. */
-    gatewayRules(): readonly LoadedRule[]
-    /** Returns the active rules for a registered service; throws for an unknown service. */
-    rulesForService(service: string): readonly LoadedRule[]
     requestState: ResumeStateCodec
     executionConfig: ExecutionConfig
+
+    /** Returns the gateway-owned rules shared by calls to every enabled service. */
+    gatewayRules(): readonly LoadedRule[]
+
+    /** Returns the active rules for a registered service; throws for an unknown service. */
+    rulesForService(service: string): readonly LoadedRule[]
 
     shutdown(): Promise<void>
 }

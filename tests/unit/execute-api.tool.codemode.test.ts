@@ -456,7 +456,7 @@ describe('api_execute under the Code Mode governance layer', () => {
             ['billing', billing, ['gateway/gateway-no-deletes']]
         ] as const) {
             const result = await handler({service, code: program}, makeCtx())
-            expect((parseContent(result) as {code: string}).code).toBe(ERR.GOVERNANCE_DENIED)
+            expect((parseContent(result) as { code: string }).code).toBe(ERR.GOVERNANCE_DENIED)
             const executionId = (result['_meta'] as Record<string, unknown>)[EXECUTION_ID_META_KEY] as string
             expect(await governanceRuntime.persistence.listDecisions(executionId)).toMatchObject([{
                 decision: 'DENY',

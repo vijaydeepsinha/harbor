@@ -18,8 +18,8 @@ import {GovernanceRuleLoadError, parseRuleDocuments} from '../../src/runtime/gov
 import {GovernanceRuleStore} from '../../src/runtime/governance/rule-store.js'
 import {GovernanceRuleRefresher} from '../../src/runtime/governance/rule-refresher.js'
 import {
-    buildGovernanceRuleSource,
     buildGatewayGovernanceRuleSource,
+    buildGovernanceRuleSource,
     registerGovernanceRuleSourceBackend
 } from '../../src/wiring/strategy-builders.js'
 import {buildGovernanceRuntime} from '../../src/runtime/execution/governance-runtime.js'
@@ -396,8 +396,14 @@ describe('Governance Rule sources', () => {
         })
 
         it('keeps each service policy isolated in the central runtime, including duplicate names and independent refresh', async () => {
-            const {source: sourceA, set: setA} = mutableSource([doc('same.yaml', ruleYaml('shared', 'DENY').replace('service: s', 'service: a'))])
-            const {source: sourceB, set: setB} = mutableSource([doc('same.yaml', ruleYaml('shared', 'ALLOW').replace('service: s', 'service: b'))])
+            const {
+                source: sourceA,
+                set: setA
+            } = mutableSource([doc('same.yaml', ruleYaml('shared', 'DENY').replace('service: s', 'service: a'))])
+            const {
+                source: sourceB,
+                set: setB
+            } = mutableSource([doc('same.yaml', ruleYaml('shared', 'ALLOW').replace('service: s', 'service: b'))])
             registerGovernanceRuleSourceBackend('test-service-isolated', config => (
                 config.rulesDir === '/policy-a' ? sourceA : sourceB
             ))
@@ -409,11 +415,21 @@ describe('Governance Rule sources', () => {
                 }, [
                     {
                         name: 'a',
-                        governance: {rulesDir: '/policy-a', rulesSource: 'test-service-isolated', rulesUrlTimeoutMs: 5000, rulesRefreshSec: 5}
+                        governance: {
+                            rulesDir: '/policy-a',
+                            rulesSource: 'test-service-isolated',
+                            rulesUrlTimeoutMs: 5000,
+                            rulesRefreshSec: 5
+                        }
                     },
                     {
                         name: 'b',
-                        governance: {rulesDir: '/policy-b', rulesSource: 'test-service-isolated', rulesUrlTimeoutMs: 5000, rulesRefreshSec: 10}
+                        governance: {
+                            rulesDir: '/policy-b',
+                            rulesSource: 'test-service-isolated',
+                            rulesUrlTimeoutMs: 5000,
+                            rulesRefreshSec: 10
+                        }
                     }
                 ], silent)
                 const request = (service: string) => ({
@@ -471,11 +487,21 @@ describe('Governance Rule sources', () => {
             const runtime = await buildGovernanceRuntime(configuredRuntime, [
                 {
                     name: 'a',
-                    governance: {rulesDir: serviceADir, rulesSource: 'file', rulesUrlTimeoutMs: 5000, rulesRefreshSec: 0}
+                    governance: {
+                        rulesDir: serviceADir,
+                        rulesSource: 'file',
+                        rulesUrlTimeoutMs: 5000,
+                        rulesRefreshSec: 0
+                    }
                 },
                 {
                     name: 'b',
-                    governance: {rulesDir: serviceBDir, rulesSource: 'file', rulesUrlTimeoutMs: 5000, rulesRefreshSec: 0}
+                    governance: {
+                        rulesDir: serviceBDir,
+                        rulesSource: 'file',
+                        rulesUrlTimeoutMs: 5000,
+                        rulesRefreshSec: 0
+                    }
                 }
             ], silent)
             try {

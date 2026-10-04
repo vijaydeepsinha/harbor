@@ -236,7 +236,10 @@ async function respond(apiExecuteResult: ApiExecuteResult, responder: Responder)
             const collector = new AuditCollector(calls)
             responder.logger.info(
                 {
-                    correlationId: responder.request.correlationId, service: responder.service, executionId, step: '4/4 done',
+                    correlationId: responder.request.correlationId,
+                    service: responder.service,
+                    executionId,
+                    step: '4/4 done',
                     durationMs: Date.now() - responder.startTime,
                     apiCallCount: collector.getCallCount(),
                     endpointsAccessed: collector.getEndpoints()
@@ -275,8 +278,15 @@ async function respondToFailure(apiExecuteResult: Extract<ApiExecuteResult, {
     const {correlationId} = responder.request
 
     if (failure.openedCircuit !== undefined) responder.metrics.increment(METRIC.CB_OPENS, {endpoint: failure.openedCircuit})
-    if (failure.sandboxError) responder.metrics.increment(METRIC.SANDBOX_ERRORS, {tool: TOOL.API_EXECUTE, errorType: errorCode})
-    responder.metrics.increment(METRIC.TOOL_CALLS, {tool: TOOL.API_EXECUTE, service: responder.service, outcome: failure.outcome})
+    if (failure.sandboxError) responder.metrics.increment(METRIC.SANDBOX_ERRORS, {
+        tool: TOOL.API_EXECUTE,
+        errorType: errorCode
+    })
+    responder.metrics.increment(METRIC.TOOL_CALLS, {
+        tool: TOOL.API_EXECUTE,
+        service: responder.service,
+        outcome: failure.outcome
+    })
 
     // Log raw cause server-side for internal errors; client response stays sanitized.
     if (error instanceof SandboxExecutionError && error.cause) {
@@ -302,7 +312,11 @@ async function respondToFailure(apiExecuteResult: Extract<ApiExecuteResult, {
         }, `${TOOL.API_EXECUTE} failed`)
     }
 
-    audit(responder, apiExecuteResult, {outcome: failure.outcome, errorType: errObj.name, errorCode}, apiExecuteResult.program)
+    audit(responder, apiExecuteResult, {
+        outcome: failure.outcome,
+        errorType: errObj.name,
+        errorCode
+    }, apiExecuteResult.program)
 
     // A pause: hand the question to the client.
     if (error instanceof ApprovalRequiredError && responder.governanceRuntime && executionId !== undefined) {
@@ -382,7 +396,10 @@ async function approvalResult(
             approvalId: approvalRequiredError.approvalId
         }, 'Execution paused — approval requested via MCP elicitation')
         return buildInputRequired(governanceRuntime, request, approvalRequiredError.approvalId, {
-            executionId: approvalRequiredError.executionId, approvalId: approvalRequiredError.approvalId, activitySequence: approvalRequiredError.activitySequence, userIdHash
+            executionId: approvalRequiredError.executionId,
+            approvalId: approvalRequiredError.approvalId,
+            activitySequence: approvalRequiredError.activitySequence,
+            userIdHash
         })
     }
     logger.info({
