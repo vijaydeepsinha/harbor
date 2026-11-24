@@ -290,6 +290,60 @@ describe('governance rule loader', () => {
         ])
     })
 
+    it('the active gateway policy denies every delete by default', () => {
+        const gatewayRules = loadGovernanceRules(
+            join(process.cwd(), 'governance/rules')
+        )
+        expect(gatewayRules.find(({rule}) => rule.name === 'deny-all-delete')?.rule.final)
+            .toBe(true)
+        const outcome = evaluateGovernance({gatewayRules, serviceRules: []}, {
+            executionId: 'e',
+            activitySequence: 1,
+            service: 'example',
+            operationId: 'deleteItem',
+            method: 'DELETE',
+            specPath: '/items/{id}',
+            path: {id: 'item-1'}
+        }, GOVERNANCE_DECISION.ALLOW)
+
+        expect(outcome).toMatchObject({
+            decision: GOVERNANCE_DECISION.DENY,
+            decidingRule: 'gateway/deny-all-delete'
+        })
+    })
+
+    it('the demo order policy allows 5000 INR and approves anything above it', () => {
+        const serviceRules = loadGovernanceRules(
+            join(process.cwd(), 'services/order/governance/rules')
+        )
+        const request = (amountInr: number): GovernanceRequest => ({
+            executionId: 'e',
+            activitySequence: 1,
+            service: 'order',
+            operationId: 'placeOrder',
+            method: 'POST',
+            specPath: '/orders',
+            body: {productId: 'p001', quantity: 1, amountInr}
+        })
+
+        expect(evaluateGovernance(
+            {gatewayRules: [], serviceRules},
+            request(5000),
+            GOVERNANCE_DECISION.DENY
+        )).toMatchObject({
+            decision: GOVERNANCE_DECISION.ALLOW,
+            decidingRule: 'order/allow-orders-up-to-5000-inr'
+        })
+        expect(evaluateGovernance(
+            {gatewayRules: [], serviceRules},
+            request(5001),
+            GOVERNANCE_DECISION.DENY
+        )).toMatchObject({
+            decision: GOVERNANCE_DECISION.REQUIRE_APPROVAL,
+            decidingRule: 'order/approve-orders-over-5000-inr'
+        })
+    })
+
     it('the separate gateway example is final across services', () => {
         const gatewayRules = loadGovernanceRules(join(process.cwd(), 'governance/rules/examples/gateway'))
         const serviceAllow = rule({

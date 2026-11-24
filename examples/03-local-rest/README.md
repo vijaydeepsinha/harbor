@@ -4,16 +4,15 @@ Connect the gateway to a backend running on localhost.
 
 ## Demo backends
 
-The `examples/demo/` folder already has four local backends:
+The `examples/demo/` folder already has three local backends:
 
 | Backend | Port | What it serves |
 |---------|------|---------------|
 | `product-service.js` | 3001 | Product catalog |
 | `order-service.js` | 3002 | Order management |
 | `task-service.js` | 3003 | Task CRUD with 4 seeded tasks |
-| `irctc/` (Python FastAPI) | 3005 | Railway booking — needs its `.venv`, see [`irctc/README.md`](../demo/irctc/README.md) |
 
-Start all four with the gateway: `bash examples/demo/start.sh`
+Start all three with the gateway: `bash examples/demo/start.sh`
 
 ## How to connect your own backend
 

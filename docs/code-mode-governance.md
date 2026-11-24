@@ -679,7 +679,9 @@ call rather than a fix.
   the rules in force). A stored approval never expires — only the
   `requestState` carrying it does (`GOVERNANCE_APPROVAL_TTL_SEC`), and a
   resume via `_meta["harbor/execution-id"]` is asked the same question again.
-- No active rule files ship by default. Top-level files under
+- Harbor ships an active gateway-owned `final` rule that denies every
+  `DELETE`. The demo order service ships a service-owned INR threshold policy.
+  Top-level files under
   `GATEWAY_GOVERNANCE_RULES_DIR` are loaded once as the shared gateway policy;
   each enabled service also loads its configured service-owned source. The
   gateway source is file-only and a missing/unreadable gateway directory fails

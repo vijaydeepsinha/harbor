@@ -1,9 +1,9 @@
 # Service-owned examples for the order service. Put these rules in the
 # governance source configured for the service named `order`.
 #
-# The demo order API currently accepts productId and quantity. `amount`,
-# `currency`, and `items` below are illustrative request fields: add them to
-# the API contract and backend before using these policies in production.
+# The runnable demo uses `services/order/governance/rules/` for its INR
+# threshold. These examples illustrate additional rule operators; `amount`,
+# `currency`, and `items` below are not the active demo contract.
 rules:
   - name: high-value-order
     description: Orders over 1000 require human approval

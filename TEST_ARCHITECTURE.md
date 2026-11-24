@@ -23,7 +23,7 @@ Implementation report: [`docs/governance-e2e-report.md`](docs/governance-e2e-rep
 | Aspect | Finding | Where |
 |---|---|---|
 | Protocol revision | **2026-07-28 only**. `legacy: 'reject'` — a 2025-era client (or any request without the 2026-07-28 headers/envelope) is refused by the SDK before any Harbor code runs. | `src/runtime/http/http-gateway.ts`, `src/runtime/transport/stdio-gateway.ts` |
-| SDK | `@modelcontextprotocol/server` + `@modelcontextprotocol/node` **2.0.0** (GA). `createMcpHandler(factory, { legacy: 'reject' })` → `toNodeHandler`. | `package.json`, `http-gateway.ts` |
+| SDK | `@modelcontextprotocol/server` **2.4.0** + `@modelcontextprotocol/node` **2.1.2** (GA). `createMcpHandler(factory, { legacy: 'reject' })` → `toNodeHandler`. | `package.json`, `http-gateway.ts` |
 | Transport | Streamable HTTP, **stateless**. One `McpServer` instance per request; no `initialize` / `notifications/initialized`, no `Mcp-Session-Id`. The connection probe is `server/discover`. stdio is the second transport (same factory, `serveStdio`). | `mcp-server-factory.ts`, `docs/mcp-2026-07-28-compatibility.md` |
 | Required request shape | `POST /mcp`, headers `Authorization: Bearer …`, `Accept: application/json, text/event-stream`, `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method: <method>`, and `Mcp-Name: <tool>` for `tools/call`; JSON-RPC 2.0 body whose `params._meta` carries the envelope `io.modelcontextprotocol/protocolVersion`, `clientInfo`, `clientCapabilities`. Header/body mismatch → JSON-RPC `-32020`. The gateway reads the body itself, bounded by `MCP_MAX_BODY_BYTES` (default 4 MiB): over the limit ⇒ HTTP 413 `PAYLOAD_TOO_LARGE`; `/executions` bodies are capped at 64 KiB with the same readable 413. | `tests/demo_e2e.py` (`_mcp_headers`, `_mcp_envelope`), SDK |
 | Responses | JSON or `text/event-stream` (the SDK picks); every tool result carries `_meta` with `io.modelcontextprotocol/serverInfo` plus Harbor's application metadata. | `src/tools/tool-helpers.ts` |
@@ -103,8 +103,8 @@ Services are folders `services/<name>/` with `config.json` (`api.{protocol,host,
 |---|---|---|
 | Unit (vitest) | evaluator/loader (`governance-rules.test.ts`), resolver, journal/store contracts, execution manager, approval service, request-state, execution routes, tool handler under governance (`execute-api.tool.codemode.test.ts`), sandbox | Call internal classes directly with fake connectors. |
 | Integration (vitest) | `code-mode-replay.test.ts` (bridge + real isolate + counting connector), `code-mode-acceptance.test.ts` (§47 scenario through the tool handler with a fake `ServerContext`), `mcp-approval-wire.test.ts` (real SDK handler via `handler.fetch`, no HTTP listener, fake connector) | Governance path is real; **network, HTTP listener, service scanning, file store, container lifecycle and downstream HTTP are not exercised**. |
-| Since then (2026-09-27) | 58 unit + 8 integration files, 743 passed + 1 skipped. The review of main added `tests/unit/request-path.test.ts`, `tests/unit/api-client.test.ts` (real `ApiClient` against local listeners), `tests/unit/sandbox-core.test.ts`, `tests/unit/file-spec-loader.test.ts`, `tests/unit/filesystem-scanner.test.ts`, `tests/unit/server-factory.test.ts`, `tests/integration/run-lifecycle.test.ts` and `tests/integration/outbound-resilience.test.ts` (governed `api_execute` over the real `ApiClient` and a local listener: circuit breaker, idempotency keys). | Downstream HTTP is now also exercised below the E2E layer; the container lifecycle remains E2E-only. |
-| E2E (Python) | `tests/demo_e2e.py` — boots demo backends + gateway as local processes, 61 assertions on the five tools and auth strategies. **No governance coverage.** | Pre-governance; stays as is. |
+| Since then (2026-09-27) | 72 unit and integration files, 821 passed + 1 skipped. The review of main added `tests/unit/request-path.test.ts`, `tests/unit/api-client.test.ts` (real `ApiClient` against local listeners), `tests/unit/sandbox-core.test.ts`, `tests/unit/file-spec-loader.test.ts`, `tests/unit/filesystem-scanner.test.ts`, `tests/unit/server-factory.test.ts`, `tests/integration/run-lifecycle.test.ts` and `tests/integration/outbound-resilience.test.ts` (governed `api_execute` over the real `ApiClient` and a local listener: circuit breaker, idempotency keys). | Downstream HTTP is now also exercised below the E2E layer; the container lifecycle remains E2E-only. |
+| E2E (Python) | `tests/demo_e2e.py` — boots demo backends + gateway as local processes and checks the five tools, auth strategies, INR order totals and the ₹5,000 approval boundary. | Demo smoke coverage; remains separate from the dedicated governance E2E suite. |
 
 **Missing coverage the new suite adds:** the whole chain over a real listener and real downstream HTTP; approvals over the wire in both channels; multi-round approvals with intermediate state; isolate disposal/recreation observed from outside; file-store persistence across a real process restart; crash mid-call; requestState TTL expiry; the fail-closed default instance; boot refusal on invalid rules; malformed protocol input; concurrency; a Postman collection; CI.
 
@@ -251,7 +251,7 @@ tests/e2e/
   mock-api/      server.mjs
   setup/         run-governance.mjs (orchestrator) · local-stack.mjs · local-control.mjs (local restart/kill hooks)
                  · materialize-services.mjs (+ .d.mts) · wait-for.mjs · summary.mjs
-  governance/                                        tests at runtime (156)
+  governance/                                        tests at runtime (157)
     protocol.test.ts        RG-030, RG-022, RG-021    25  (incl. 413 on an oversized body)
     authentication.test.ts  RG-024                     9
     allow.test.ts           RG-007, RG-008, RG-011, RG-012   7
@@ -303,7 +303,7 @@ Replay & inspection · Idempotency · Error cases · Security · Audit · Review
 Hardening (folder 15, added 2026-09-27: path spellings, program-supplied
 headers, JSON-string bodies, malformed and conflicting approval answers, no
 silent POST retry, error classification, per-execution idempotency keys) —
-15 folders, 118 requests, 224 assertions. Requests
+15 folders, 118 requests, 232 assertions. Requests
 chain through variables (`executionId`, `approvalId`, `requestState`,
 `orderId`). Every request has `pm.test` assertions on semantic fields
 (`resultType`, tool error `code`, execution status, activity statuses,

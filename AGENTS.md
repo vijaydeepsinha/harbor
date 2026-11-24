@@ -51,7 +51,7 @@ src/           all gateway source (tsconfig rootDir; builds to dist/)
                (the run orchestrator) and execute-api-outcome (failure → audit outcome / status / metrics)
 governance/    Gateway-owned Governance Rule directory: top-level YAML/YML/JSON files in rules/ apply across enabled services;
                rules/README.md and nested rules/examples/ are documentation
-services/      demo services (product, order, tasks, irctc enabled; billing, billing-jwt, billing-introspection disabled)
+services/      demo services (product, order, tasks enabled; billing, billing-jwt, billing-introspection disabled)
 examples/demo/ mock backends + start.sh
 tests/unit, tests/integration (vitest) · tests/demo_e2e.py (Python, live gateway)
 tests/e2e/      governance E2E (real MCP client, mock backend, fixtures, orchestrator) · tests/postman/ (collection generator + runner)
@@ -67,7 +67,7 @@ npm run typecheck              # tsc --noEmit (strict, noUncheckedIndexedAccess)
 npm run lint                   # eslint — unused imports fail the build
 npm test                       # vitest: tests/**/*.test.ts except tests/e2e/** (isolated-vm sandbox tests included)
 npx vitest run tests/unit/x.test.ts   # targeted
-python3 tests/demo_e2e.py --start-services   # boots mock backends + gateway on :3333, 61 assertions
+python3 tests/demo_e2e.py --start-services   # boots mock backends + gateway on :3333
 npm run test:governance        # governance E2E: Docker Compose (production image) + real MCP calls + Postman; add -- --local for host processes
 npm run governance:up / down   # keep the E2E environment running; then npm run test:e2e / npm run test:postman
 npm run dev                    # tsx watch src/index.ts (env from .env; see .env.example)

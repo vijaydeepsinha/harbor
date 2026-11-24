@@ -3,6 +3,12 @@ import http from 'http'
 
 const orders = {}
 let orderCounter = 1
+const PRODUCTS = new Map([
+  ['p001', { price: 4999, inStock: true }],
+  ['p002', { price: 7999, inStock: true }],
+  ['p003', { price: 2499, inStock: true }],
+  ['p004', { price: 3499, inStock: false }]
+])
 
 function send(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' })
@@ -34,8 +40,34 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && path === '/orders') {
     const body = await readBody(req)
-    if (!body.productId || !body.quantity) {
-      send(res, 400, { error: 'productId and quantity are required' })
+    if (
+      typeof body.productId !== 'string'
+      || !Number.isInteger(body.quantity)
+      || body.quantity < 1
+      || !Number.isInteger(body.amountInr)
+      || body.amountInr < 0
+    ) {
+      send(res, 400, {
+        error: 'productId, a positive integer quantity and amountInr are required'
+      })
+      return
+    }
+
+    const product = PRODUCTS.get(body.productId)
+    if (!product) {
+      send(res, 404, { error: 'Product not found' })
+      return
+    }
+    if (!product.inStock) {
+      send(res, 409, { error: 'Product is out of stock' })
+      return
+    }
+
+    const expectedAmountInr = product.price * body.quantity
+    if (body.amountInr !== expectedAmountInr) {
+      send(res, 400, {
+        error: `amountInr must equal ${expectedAmountInr} for this product and quantity`
+      })
       return
     }
     const orderId = `ord-${String(orderCounter++).padStart(4, '0')}`
@@ -43,6 +75,8 @@ const server = http.createServer(async (req, res) => {
       orderId,
       productId: body.productId,
       quantity: body.quantity,
+      amountInr: body.amountInr,
+      currency: 'INR',
       status: 'confirmed',
       createdAt: new Date().toISOString(),
       estimatedDelivery: '3-5 business days'

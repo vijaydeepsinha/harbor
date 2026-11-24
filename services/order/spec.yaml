@@ -19,7 +19,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [productId, quantity]
+              required: [productId, quantity, amountInr]
               properties:
                 productId:
                   type: string
@@ -28,6 +28,10 @@ paths:
                   type: integer
                   minimum: 1
                   description: Number of units to order
+                amountInr:
+                  type: integer
+                  minimum: 1
+                  description: Total order amount in Indian rupees; must equal the product price times quantity
       responses:
         '201':
           description: Order created
@@ -36,7 +40,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/Order'
         '400':
-          description: Missing required fields
+          description: Missing required fields or amount does not match product price times quantity
+        '404':
+          description: Product not found
+        '409':
+          description: Product is out of stock
 
   /orders/{orderId}:
     get:
@@ -71,6 +79,12 @@ components:
           type: string
         quantity:
           type: integer
+        amountInr:
+          type: integer
+          description: Total order amount in Indian rupees
+        currency:
+          type: string
+          enum: [INR]
         status:
           type: string
           enum: [confirmed, processing, shipped, delivered]

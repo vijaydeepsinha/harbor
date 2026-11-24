@@ -205,7 +205,22 @@ Correct behavior. Circuit state is kept per endpoint: the OpenAPI path template 
 
 **Which calls are governed?**
 
-Out of the box, no active rule file ships in the demo services, so calls are allowed as `NO_GOVERNANCE`. Put YAML/JSON policy under that service's `governance/rules/` directory, or configure its URL/custom source and refresh interval in `config.json`. The service's rules are loaded independently and evaluated by Harbor centrally; a disabled service does not load policy. An invalid initial rule stops boot. A call some rule targets but no rule matches gets `GOVERNANCE_DEFAULT_DECISION` (default `DENY`). A call no rule targets is allowed — including a path the spec does not describe, unless a `*` or `/**` rule covers it.
+The product and task demos have no active service policy, so their calls are
+allowed as `NO_GOVERNANCE`. The order demo includes a service-owned rule:
+`amountInr <= 5000` is allowed and `amountInr > 5000` requires approval. Put
+YAML/JSON policy under a service's `governance/rules/` directory, or configure
+its URL/custom source and refresh interval in `config.json`. The service's
+rules are loaded independently and evaluated by Harbor centrally; a disabled
+service does not load policy. An invalid initial rule stops boot. A call some
+rule targets but no rule matches gets `GOVERNANCE_DEFAULT_DECISION` (default
+`DENY`). A call no rule targets is allowed — including a path the spec does
+not describe, unless a `*` or `/**` rule covers it.
+
+Harbor's active gateway-owned `deny-all-delete.yaml` is an exception to the
+un-governed default: every `DELETE` is targeted and denied by a `final` rule.
+That is why an agent sees `GOVERNANCE_DENIED` for delete operations. To allow
+deletes, configure a reviewed gateway policy directory that does not contain
+the rule.
 
 ---
 

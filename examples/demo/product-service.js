@@ -2,10 +2,10 @@
 import http from 'http'
 
 const PRODUCTS = [
-  { id: 'p001', name: 'Wireless Headphones', price: 79.99, category: 'electronics', inStock: true },
-  { id: 'p002', name: 'Mechanical Keyboard', price: 129.99, category: 'electronics', inStock: true },
-  { id: 'p003', name: 'Desk Lamp', price: 34.99, category: 'home', inStock: true },
-  { id: 'p004', name: 'USB-C Hub', price: 49.99, category: 'electronics', inStock: false }
+  { id: 'p001', name: 'Wireless Headphones', price: 4999, currency: 'INR', category: 'electronics', inStock: true },
+  { id: 'p002', name: 'Mechanical Keyboard', price: 7999, currency: 'INR', category: 'electronics', inStock: true },
+  { id: 'p003', name: 'Desk Lamp', price: 2499, currency: 'INR', category: 'home', inStock: true },
+  { id: 'p004', name: 'USB-C Hub', price: 3499, currency: 'INR', category: 'electronics', inStock: false }
 ]
 
 function send(res, status, body) {

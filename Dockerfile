@@ -24,7 +24,7 @@ FROM node:${NODE_VERSION}-alpine AS runtime
 
 LABEL org.opencontainers.image.title="Harbor" \
       org.opencontainers.image.description="MCP gateway that connects AI agents to backend APIs" \
-      org.opencontainers.image.version="0.1.0" \
+      org.opencontainers.image.version="1.0.0" \
       org.opencontainers.image.authors="Vijaydeep Sinha" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.source="https://github.com/vijaydeepsinha/harbor"
@@ -61,6 +61,6 @@ ENV MCP_HOST=0.0.0.0 \
 EXPOSE 3333
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD wget -qO- http://localhost:3333/health || exit 1
+    CMD wget -qO- http://127.0.0.1:3333/health || exit 1
 
 CMD ["node", "dist/index.js"]

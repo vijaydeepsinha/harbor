@@ -29,7 +29,6 @@ const NOT_A_PATH = new Map<string, string>([
     ['services/weather/', 'good-first-issue: service to create'],
     ['services/my-service/', 'getting-started walkthrough: folder the reader creates'],
     ['examples/demo/docker-compose.yml', 'good-first-issue: file to create'],
-    ['examples/demo/irctc-agent/', 'untracked owner folder named in the E2E report'],
     ['src/spi/transport/protocol-adapter.ts', 'proposed SPI (architecture.md, not yet implemented)'],
     ['src/spi/skill/skill-provider.ts', 'proposed SPI (architecture.md, not yet implemented)'],
     ['src/spi/tool/tool-resolver.ts', 'proposed SPI (architecture.md, not yet implemented)']

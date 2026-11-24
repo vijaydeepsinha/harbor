@@ -215,7 +215,17 @@ Example:
 
 Each enabled and successfully registered service gets an isolated ruleset and refresher; the central runtime also owns the shared gateway rules and evaluates both scopes. Disabled services are skipped before their governance config is validated or their source is constructed. Invalid URL/refresh config found during scanning skips that service (and startup exits if no services remain); after registration, an unknown source type, unreadable initial source, or invalid initial rules stop gateway boot. The URL source is fetched and validated once before startup completes, so the gateway starts with the latest available rules rather than waiting for the first timer tick. A missing default service file-source directory starts that service with no rules and a warning; failed refreshes, invalid updates, and empty refreshes replacing active rules retain the corresponding last-known-good set. A missing or unreadable gateway rule directory, or an invalid initial gateway rule, fails startup; an existing empty gateway directory is allowed.
 
-**No active policy files ship by default.** The root `governance/rules/` is the live gateway-owned file directory (the README and nested `examples/` are not loaded). Put cross-service guardrails there. Put a service's local policy under `services/<name>/governance/rules/`, mount the configured service directory, or configure a service URL/custom source. The production Docker image includes both the gateway directory and service directories; no policy rule files ship in them by default.
+**Harbor blocks DELETE by default.** The root `governance/rules/` is the live
+gateway-owned file directory and ships `deny-all-delete.yaml` as an active
+`final DENY` rule (the README and nested `examples/` are not loaded). An agent
+that receives `GOVERNANCE_DENIED` for `DELETE` is seeing this expected safety
+default. Deployments that allow deletes must configure a reviewed
+`GATEWAY_GOVERNANCE_RULES_DIR` without that rule. The demo `order` service
+intentionally ships one service-owned policy that allows totals through ₹5,000
+and requires approval above that amount. Put other service policies under
+`services/<name>/governance/rules/`, mount a configured service directory, or
+configure a service URL/custom source. The production Docker image includes
+both the gateway and service policy directories.
 
 **Several pods:** use `EXECUTION_STORE_TYPE=memcache`, one shared `GOVERNANCE_REQUEST_STATE_KEY`, and the same rule set on every pod.
 

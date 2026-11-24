@@ -22,8 +22,12 @@ Each service may also own its own rule source, selected in that service's
 `<serviceDir>/governance/rules/` (where `serviceDir` is that service's
 directory under `SERVICES_DIR`). Every top-level `*.yaml` / `*.yml` / `*.json`
 file is loaded; nested folders are not. Service sources may independently use
-`file`, `url`, or a registered source and refresh schedule. **No active rule
-files ship by default.**
+`file`, `url`, or a registered source and refresh schedule. Harbor ships
+`deny-all-delete.yaml` as an active gateway-owned `final` rule: every `DELETE`
+call is denied before it reaches a backend. Deployments that intentionally
+allow deletes must set `GATEWAY_GOVERNANCE_RULES_DIR` to a reviewed policy
+directory without this rule. The demo `order` service also ships a
+service-owned INR purchase threshold so the approval flow works out of the box.
 
 Each service may select its own source and refresh interval in its
 `config.json`:

@@ -15,8 +15,8 @@ Documentation paths and anchors are checked by `tests/unit/doc-paths.test.ts`.
 
 | Layer | Command | What it exercises | Needs |
 |---|---|---|---|
-| Unit + integration | `npm test` | evaluator, journal, store contracts, tool handler, sandbox bridge, API client, request-path canonicalisation (fake connectors or local listeners) — 66 files, 743 passed + 1 skipped | nothing |
-| **Governance E2E** | `npm run test:governance` | **real MCP 2026-07-28 calls → real gateway (production image) → real rules → real V8 isolate → real HTTP → deterministic mock backend** (156 tests in 15 files), plus the Postman collection (15 folders, 118 requests, 224 assertions) | Docker (or `-- --local`) |
+| Unit + integration | `npm test` | evaluator, journal, store contracts, tool handler, sandbox bridge, API client, request-path canonicalisation (fake connectors or local listeners) — 72 files, 821 passed + 1 skipped | nothing |
+| **Governance E2E** | `npm run test:governance` | **real MCP 2026-07-28 calls → real gateway (production image) → real rules → real V8 isolate → real HTTP → deterministic mock backend** (157 tests in 15 files), plus the Postman collection (15 folders, 118 requests, 232 assertions) | Docker (or `-- --local`) |
 | Demo smoke | `python3 tests/demo_e2e.py --start-services` | the five tools and the auth strategies against the demo services | Python 3.9+, Node 22 |
 
 Focused PR #8 follow-up regressions:
@@ -46,6 +46,8 @@ consumes it and nothing is forwarded. `governance:up` accepts
 `--local` and `--no-build`; `governance:down` accepts `--local`. The last full
 Compose run (2026-09-27, commit `035a261`) reported 380 passed: 156 E2E tests
 and 224 Postman assertions.
+The 2026-11-21 local release-readiness run reported 389 passed: 157 E2E tests
+and 232 Postman assertions.
 
 Exit code is non-zero if the image fails to build, a container never becomes
 healthy, any E2E test fails, any Postman assertion fails, or the setup itself

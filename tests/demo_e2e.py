@@ -777,6 +777,8 @@ def test_product_service():
     if assert_no_error(r, "GET /products/p001 succeeded"):
         assert_eq(r.get("id"), "p001", "id is p001")
         assert_eq(r.get("name"), "Wireless Headphones", "name correct")
+        assert_eq(r.get("price"), 4999, "price is INR amount")
+        assert_eq(r.get("currency"), "INR", "currency is INR")
         assert_eq(r.get("inStock"), True, "in stock")
 
     r = api_exec("product",
@@ -790,7 +792,7 @@ def test_order_service():
     section("api_execute → order service")
 
     r = api_exec("order",
-                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001", quantity: 1 } }); return r.data; }',
+                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001", quantity: 1, amountInr: 4999 } }); return r.data; }',
                  400)
     order_id = None
     if assert_no_error(r, "POST /orders succeeded"):
@@ -798,6 +800,8 @@ def test_order_service():
         assert_true(bool(order_id), "orderId present")
         assert_eq(r.get("productId"), "p001", "productId correct")
         assert_eq(r.get("quantity"), 1, "quantity correct")
+        assert_eq(r.get("amountInr"), 4999, "amountInr correct")
+        assert_eq(r.get("currency"), "INR", "currency correct")
         assert_eq(r.get("status"), "confirmed", "status confirmed")
         assert_true(bool(r.get("estimatedDelivery")), "estimatedDelivery present")
 
@@ -811,14 +815,25 @@ def test_order_service():
             assert_eq(r.get("productId"), "p001", "productId matches")
 
     r = api_exec("order",
-                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001" } }); return { status: r.status, ok: r.ok }; }',
+                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p002", quantity: 1, amountInr: 7999 } }); return r.data; }',
                  402)
+    assert_eq(r.get("code"), "APPROVAL_REQUIRED", "orders above 5000 INR require approval")
+
+    r = api_exec("order",
+                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001" } }); return { status: r.status, ok: r.ok }; }',
+                 403)
     if assert_no_error(r, "POST /orders missing quantity returns 400"):
         assert_eq(r.get("status"), 400, "status is 400")
 
     r = api_exec("order",
+                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001", quantity: 1, amountInr: 100 } }); return { status: r.status, ok: r.ok }; }',
+                 404)
+    if assert_no_error(r, "POST /orders rejects an understated total"):
+        assert_eq(r.get("status"), 400, "mismatched total returns 400")
+
+    r = api_exec("order",
                  'async () => { const r = await api.request({ method: "GET", path: "/orders/ord-9999" }); return { status: r.status, ok: r.ok }; }',
-                 403)
+                 405)
     if assert_no_error(r, "GET /orders/ord-9999 returns 404"):
         assert_eq(r.get("status"), 404, "status is 404")
 

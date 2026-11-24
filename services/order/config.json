@@ -1,5 +1,5 @@
 {
-  "description": "Order management service — place and track orders. Use this service to create new orders for products and check the status of existing orders.",
+  "description": "Commerce order service — place and track INR orders. Orders up to 5000 INR are allowed directly; higher-value orders require human approval.",
   "api": {
     "protocol": "http",
     "host": "localhost",

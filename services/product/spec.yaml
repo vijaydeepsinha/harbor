@@ -69,6 +69,11 @@ components:
           type: string
         price:
           type: number
+          description: Product price in INR
+        currency:
+          type: string
+          enum: [INR]
+          description: Currency used for price
         category:
           type: string
         inStock:

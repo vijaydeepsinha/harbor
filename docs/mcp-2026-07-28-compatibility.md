@@ -13,7 +13,7 @@ This document is the compatibility audit and the record of what changed.
 ## A. Summary
 
 The upgrade moves Harbor onto the MCP SDK v2 packages
-(`@modelcontextprotocol/server`, `@modelcontextprotocol/node`, both `2.0.0`)
+(`@modelcontextprotocol/server` `2.4.0`, `@modelcontextprotocol/node` `2.1.2`)
 whose `createMcpHandler` / `serveStdio` entry points are stateless and speak
 2026-07-28 only (`legacy: 'reject'`). The SDK owns the protocol wire layer
 (HTTP header validation, version negotiation, request-envelope lifting,

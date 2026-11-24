@@ -17,7 +17,10 @@
 ## Checklist
 
 - [ ] `npm run typecheck` passes
+- [ ] `npm run lint` passes
 - [ ] `npm test` passes (all existing tests green)
+- [ ] `npm run test:governance` passes when governance or execution behavior changed
+- [ ] Documentation and package metadata match the behavior
 - [ ] New tests added for new behavior
 - [ ] Apache-2.0 SPDX header on every new `.ts` file
 - [ ] No internal company names, hostnames, or credentials introduced

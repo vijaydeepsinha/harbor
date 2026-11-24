@@ -41,6 +41,7 @@ AI client  →  Harbor  →  Your backend APIs
 - **Pluggable auth** — `static-token`, `oauth-introspection`, `jwt-validation` (local JWKS, no AS round-trip), `oauth-2.1` (RFC 8414/OIDC auto-discovery)
 - **OAuth 2.1 Protected Resource** — RFC 9728 discovery metadata, `WWW-Authenticate` on a 401 for a missing or malformed bearer (an invalid token is refused per tool call; see [`docs/mcp-2026-07-28-compatibility.md`](docs/mcp-2026-07-28-compatibility.md))
 - **Code Mode governance** — durable executions, an activity journal with replay, and declarative Governance Rules evaluated before every backend call. Rules can be **gateway-owned** for cross-service policy or **service-owned** for one service; matching rules apply together with gateway/service/endpoint precedence and optional `final` overrides. Decisions support ALLOW / DENY / REQUIRE_APPROVAL and human approval over MCP ([`docs/code-mode-governance.md`](docs/code-mode-governance.md), [rule format and ownership](governance/rules/README.md))
+- **Safe DELETE default** — Harbor ships an active gateway-owned `final` rule that blocks every `DELETE` call by default. If an agent receives `GOVERNANCE_DENIED` for a delete, this is the expected source; deployments that allow deletes must provide a reviewed policy directory instead of Harbor's default [`deny-all-delete.yaml`](governance/rules/deny-all-delete.yaml)
 - **Pluggable backends** — register token-cache, idempotency, execution-store, audit-sink and rule-source backends in your entry point and select them by name, without forking the codebase
 - **Per-service configuration** — each service declares its own auth, circuit breaker, and spec source
 - **Zero API changes** — your backend never changes; Harbor is a pure adapter
@@ -61,13 +62,16 @@ cd harbor
 npm install
 ```
 
-**Run the demo** (four local backends — product, order, tasks, IRCTC — plus the MCP gateway):
+**Run the demo** (three local commerce/task backends plus the MCP gateway):
 
 ```bash
 bash examples/demo/start.sh
 ```
 
-The IRCTC backend is a Python (≥ 3.13) FastAPI app: create its virtualenv once, as a `.venv` inside `examples/demo/irctc/` (that is the interpreter `start.sh` runs), as described in [`examples/demo/irctc/README.md`](examples/demo/irctc/README.md).
+The commerce demo uses INR. Its service-owned governance policy lets an order of
+₹5,000 or less execute directly, while an order above ₹5,000 pauses with
+`REQUIRE_APPROVAL`; the order backend rejects totals that do not match the
+product price multiplied by quantity.
 
 **Verify** (E2E smoke test, stdlib only):
 
@@ -125,6 +129,7 @@ Full setup guide → [`docs/getting-started.md`](docs/getting-started.md)
 | [`governance/rules/README.md`](governance/rules/README.md) | Governance Rule file format and operators |
 | [`docs/mcp-2026-07-28-compatibility.md`](docs/mcp-2026-07-28-compatibility.md) | MCP 2026-07-28 protocol support |
 | [`TESTING.md`](TESTING.md) | Test layers and how to run each |
+| [`SUPPORT.md`](SUPPORT.md) | Support scope and where to report issues |
 | [`ROADMAP.md`](ROADMAP.md) | Planned features and milestones |
 
 ---
@@ -145,7 +150,7 @@ protocol edge cases — plus a Postman collection. See [`TESTING.md`](TESTING.md
 
 ```bash
 npm run dev          # tsx watch — live reload
-npm test             # vitest — unit + integration (743 passing, 1 skipped)
+npm test             # vitest — unit + integration (821 passing, 1 skipped)
 npm run typecheck    # tsc --noEmit (strict)
 npm run lint         # eslint
 npm run build        # tsc → dist/

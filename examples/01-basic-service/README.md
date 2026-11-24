@@ -10,7 +10,7 @@ Each service is a folder under `SERVICES_DIR` (default: the repo's `services/`);
 - `config.json` — required, with at least an `auth` block; also host, port, circuit breaker, idempotency settings
 - `skills/<name>.md` — optional guidance the AI reads before making calls
 
-The demo already has complete examples of this pattern under `services/`: four enabled (product, order, tasks, irctc) and three `billing` variants disabled for the OAuth mode. Start there.
+The demo already has complete examples of this pattern under `services/`: three enabled (product, order, tasks) and three `billing` variants disabled for the OAuth mode. Start there.
 
 ## What the AI sees after discovery
 

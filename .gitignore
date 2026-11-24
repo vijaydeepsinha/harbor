@@ -11,6 +11,7 @@ var/
 node_modules/
 .next/
 out/
+**/.venv/
 
 # Env
 .env
@@ -36,7 +37,12 @@ bench/*.log
 
 # Test / coverage
 .pytest_cache/
+**/.pytest_cache/
+**/.ruff_cache/
 coverage/
+*.db
+*.sqlite
+*.sqlite3
 
 # Internal working files — not for public repo
 .internal/

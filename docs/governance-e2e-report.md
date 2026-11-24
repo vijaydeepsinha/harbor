@@ -21,11 +21,14 @@ this branch. Companion documents: [`TEST_ARCHITECTURE.md`](../TEST_ARCHITECTURE.
 Last full run: `npm run test:governance` (Docker Compose), commit `035a261`, after the
 review of main.
 
+Release-readiness rerun on 2026-11-21 (`--local`): 157 governance E2E tests and
+232 Postman assertions passed.
+
 | Suite | Then (2026-09-21) | Now (2026-09-27) |
 |---|--:|--:|
 | Governance E2E (vitest, 15 files) | 138 tests | 156 tests, all passed |
 | Postman `mcp-governance` | 14 folders, 84 requests, 177 assertions | 15 folders, 118 requests, 224 assertions, all passed |
-| Unit + integration (`npm test`) | 444 tests | 66 files: 743 passed + 1 skipped |
+| Unit + integration (`npm test`) | 444 tests | 72 files: 821 passed + 1 skipped |
 
 The §K findings for the owner:
 
@@ -74,15 +77,15 @@ Commits on the branch (local increments, in order):
 | `cbdbc5d` | `governance-e2e.yml` GitHub Actions workflow |
 | `09f631b` | TEST_ARCHITECTURE, TESTING, REQUIREMENT_COVERAGE; AGENTS/README/CHANGELOG pointers |
 
-No production source was changed. The three pre-existing untracked owner files
-(`GOVERNANCE-REVIEW-AND-BUILD-PLAN.md`, `PROJECT-GOALS.md`, `examples/demo/irctc-agent/`)
-were left untracked on purpose.
+No production source was changed. The two pre-existing untracked owner files
+(`GOVERNANCE-REVIEW-AND-BUILD-PLAN.md`, `PROJECT-GOALS.md`) were left
+untracked on purpose.
 
 ---
 
 ## A. Repository understanding
 
-- **Protocol.** MCP revision 2026-07-28 only (`legacy: 'reject'`), SDK v2 `@modelcontextprotocol/server` 2.0.0. Stateless Streamable HTTP: one `McpServer` per request, no `initialize`, no session id; `server/discover` is the probe. Every `POST /mcp` needs `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` (for `tools/call`) and the `_meta` envelope; the SDK answers `-32022` (unsupported version), `-32602` (missing envelope), `-32020` (header/body mismatch), `-32600` (batches) before Harbor runs. Tool-argument validation failures are `isError` tool results, not JSON-RPC errors.
+- **Protocol.** MCP revision 2026-07-28 only (`legacy: 'reject'`), SDK v2 `@modelcontextprotocol/server` 2.4.0. Stateless Streamable HTTP: one `McpServer` per request, no `initialize`, no session id; `server/discover` is the probe. Every `POST /mcp` needs `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` (for `tools/call`) and the `_meta` envelope; the SDK answers `-32022` (unsupported version), `-32602` (missing envelope), `-32020` (header/body mismatch), `-32600` (batches) before Harbor runs. Tool-argument validation failures are `isError` tool results, not JSON-RPC errors.
 - **Tools.** Exactly five, frozen; `api_execute { service, code }`.
 - **Auth.** Bearer format enforced at the transport (JWT or ≥ 32 base64url chars, else 401 with a `reason`). The E2E services use `static-token`, which forwards the client bearer unchanged and derives the principal as `sha256(bearer)` — distinct bearers are distinct principals.
 - **Governance.** At the host bridge, before every outbound call: resolve the OpenAPI operation → evaluate YAML rules (`match` on service/operation/method/path template, `conditions` on body/query/path values, `DENY > REQUIRE_APPROVAL > ALLOW`, configurable default) → persist the decision with `name@version#hash12` tags → execute / stop / pause. Invalid rule files stop boot. Rules carry **no principal attributes** (still true on main).

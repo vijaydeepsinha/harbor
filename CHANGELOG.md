@@ -63,11 +63,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Resilience.** The circuit breaker records failures under the key it checks (the OpenAPI template), counts one failure per call, and admits one half-open probe. Background token refresh works (it always threw), never extends how long the caller's own token is trusted, and keeps the caller's identity; a non-scalar `metadata.userId` no longer collapses callers into one principal.
 - **Configuration.** `ENABLE_AUDIT=false` disables audit (every non-empty value used to read as true); empty `AUDIT_SINKS` with audit on, and non-numeric cache ports/timeouts, stop boot. `IDEMPOTENCY_TYPE` is the default for services without an `idempotency` block (it was never read). `TOKEN_CACHE_TYPE`, `IDEMPOTENCY_TYPE` and `EXECUTION_STORE_TYPE` accept the name of a registered backend.
 - **Registry and tools.** A dangling symlink or one bad skill file no longer takes the gateway or the service down; out-of-range refresh intervals are refused; spec and skills refresh together and never overlap; relative `$ref`s in file specs resolve beside the spec; a `servers` URL without a port means port 80 for http. `UNKNOWN_SERVICE` is not retryable and does not create a metric series per name. Resumed runs are audited with the program that ran, and answers that end a resume are audited. A backend timeout that reaches the program uncaught is `SANDBOX_RUNTIME`, not a retryable `SANDBOX_TIMEOUT`. The RFC 9728 path-inserted metadata URL is served; an unusable stdio `MCP_TOKEN` stops boot.
-- **Tests.** Unit and integration: 743 passed (was 604). Governance E2E: 156 (was 139). Postman: 15 folders, 118 requests, 224 assertions (was 14 / 88 / 183); folder 15 covers the cases above.
+- **Tests.** Unit and integration: 821 passed, 1 skipped (was 604). Governance E2E: 157 (was 139). Postman: 15 folders, 118 requests, 232 assertions (was 14 / 88 / 183); folder 15 covers the cases above.
 
 
 ### Security
-- Bumped `axios` and `js-yaml` to non-vulnerable versions via `npm audit fix`. No remaining high-severity `npm audit` advisories; `npm audit --audit-level=high` CI gate passes. Two moderate (`vitest`/`@vitest/mocker`) and one low (`esbuild`, Windows-only dev-server path) advisories remain — all three are dev-only dependencies (test runner / build tool), not shipped in the published package, and below the CI gate's `high` threshold.
+- Updated `@modelcontextprotocol/server` to 2.4.0, `@modelcontextprotocol/node` to 2.1.2 and Zod to 4.6.7, then applied safe transitive lockfile updates. `npm audit --omit=dev` reports no production vulnerabilities.
 
 ---
 

@@ -53,7 +53,7 @@ Modes control which services Harbor loads. `examples/demo/start-oauth-mode.sh` s
 | oauth | `true` | `false` |
 | token | `false` | `true` |
 
-`irctc` stays enabled in both modes. `billing-introspection` also needs the mock introspection server (`node examples/demo/mock-introspection-server.js`, port 3008), and all three need the billing backend (`node examples/demo/billing-service.js`, port 3004). Harbor must be restarted after switching.
+`billing-introspection` also needs the mock introspection server (`node examples/demo/mock-introspection-server.js`, port 3008), and all three need the billing backend (`node examples/demo/billing-service.js`, port 3004). Harbor must be restarted after switching.
 
 ## Service config reference — `oauth-2.1` auth type
 

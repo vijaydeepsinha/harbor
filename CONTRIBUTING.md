@@ -28,7 +28,7 @@ Thank you for your interest in contributing. This guide covers setup, developmen
 | Node.js | 22+ |
 | npm | 10+ |
 | Native build tools | Xcode CLT (macOS): `xcode-select --install`; `build-essential` (Debian/Ubuntu) |
-| Python | 3.13+ for the demo IRCTC backend; 3.9+ for `tests/demo_e2e.py` |
+| Python | 3.9+ for `tests/demo_e2e.py` |
 | Docker | only for the governance E2E suite's default mode and the OAuth E2E |
 
 > Native build tools are required by `isolated-vm` (V8 sandbox).
@@ -46,18 +46,15 @@ npm install
 ```bash
 npm run typecheck     # TypeScript strict — must be clean
 npm run lint          # eslint — unused imports fail it
-npm test              # unit + integration: 743 passing, 1 skipped — none may fail
+npm test              # unit + integration: 821 passing, 1 skipped — none may fail
 ```
 
 ---
 
 ## 2. Running the Examples
 
-The demo runs four local services (product on 3001, order on 3002, tasks on 3003, IRCTC on 3005) plus the MCP gateway on 3333. IRCTC is a Python FastAPI app; create its virtualenv once (see [`examples/demo/irctc/README.md`](examples/demo/irctc/README.md)):
-
-```bash
-cd examples/demo/irctc && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cd -
-```
+The demo runs three local services (product on 3001, order on 3002, tasks on
+3003) plus the MCP gateway on 3333.
 
 ```bash
 # One-command start (kills old backend processes, starts all services + gateway, registers cleanup trap)
@@ -71,7 +68,6 @@ bash examples/demo/start.sh
 node examples/demo/product-service.js &
 node examples/demo/order-service.js &
 node examples/demo/task-service.js &
-(cd examples/demo/irctc && .venv/bin/python3 -m app.main) &
 
 # Terminal 2 — gateway
 npm run dev
@@ -79,7 +75,7 @@ npm run dev
 
 OAuth mode (billing services behind `oauth-2.1`, `jwt-validation` and `oauth-introspection`; needs Docker): `bash examples/demo/start-oauth-mode.sh`.
 
-**Smoke test (61 assertions)**
+**Smoke test**
 
 ```bash
 python3 tests/demo_e2e.py --start-services
@@ -131,7 +127,7 @@ src/              All gateway source; tsconfig rootDir, compiled to dist/.
 services/         Service definitions — spec + config.json + skills/*.md (add yours here)
 governance/rules/ Governance Rule files (README.md = format; examples/ is documentation, not loaded)
 examples/
-  demo/           Runnable local backends (Node + the Python IRCTC app), start.sh, start-oauth-mode.sh
+  demo/           Runnable Node backends, start.sh, start-oauth-mode.sh
   01-07/          Scenario guides (07-oauth also holds the mock AS docker-compose)
 tests/
   unit/, integration/   Vitest (npm test)
@@ -387,9 +383,11 @@ Violations get caught in review. When in doubt, check `docs/architecture.md`.
 
 3. Open a PR against `main`. Use the PR template — fill in **Summary**, **Test plan**, and the checklist.
 
-4. Ensure CI passes. Two workflows run:
+4. Ensure CI passes. The main workflows run:
    - `.github/workflows/ci.yml` — every push and PR: `npm audit --audit-level=high`, typecheck, lint, `npm test`, and the Python E2E (`tests/demo_e2e.py`) including OAuth mode with a real JWT via Docker.
    - `.github/workflows/governance-e2e.yml` — pushes and PRs that touch `src/`, `governance/`, the package or Docker files, `docker/governance-e2e/`, `tests/e2e/`, `tests/postman/` or the governance Postman collection: typechecks and lints the E2E suite, builds the production image and runs `npm run test:governance` (E2E + Postman).
+   - `.github/workflows/codeql.yml` — CodeQL analysis for TypeScript and Python.
+   - `.github/workflows/secrets.yml` — full-history Gitleaks scanning on pushes, pull requests and a weekly schedule.
 
 5. Address review feedback — push to the same branch; do not force-push after a review starts.
 
@@ -486,7 +484,7 @@ Example: a `bulk-task-reporter` skill that calls `GET /api/v1/tasks` and summari
 ### Docker / Infrastructure
 
 **`docker-compose.yml` for one-command demo** (`good-first-issue`, `enhancement`)
-Create `examples/demo/docker-compose.yml` that starts the four demo services (including the Python IRCTC app) + the gateway.
+Create `examples/demo/docker-compose.yml` that starts the three demo services plus the gateway.
 Acceptance: `docker compose up` from the repo root starts a working demo accessible on port 3333.
 
 **Node version guard in `start.sh`** (`good-first-issue`, `enhancement`)
