@@ -34,6 +34,54 @@ AI client  →  Harbor  →  Your backend APIs
 
 ---
 
+## Harbor Governance: Code Mode With Control
+
+Connecting an agent to an API is only the first step. Once AI-authored code
+can perform a write, the gateway must also answer: **may this exact operation
+run now, and does a human need to approve it?**
+
+Harbor Governance puts that decision in the host-side gateway, before every
+backend call:
+
+```text
+Agent program
+    ↓
+V8 isolate ── api.request() ──► Harbor bridge
+                                   ├─ resolve the OpenAPI operation
+                                   ├─ evaluate Governance Rules
+                                   ├─ journal the activity
+                                   └─ ALLOW / DENY / REQUIRE_APPROVAL
+```
+
+Governance Rules are declarative policies over services, operations, methods,
+paths, and request values. Gateway-owned rules can protect every service;
+service-owned rules let an API team define policy beside its own spec. The
+decisions are deterministic — `ALLOW`, `DENY`, or `REQUIRE_APPROVAL` — and a
+paused execution persists until a human decides.
+
+The key safety property is **durability, not prompt compliance**. Harbor
+persists the original program and journals each external call. If an approval
+is required, the isolate stops. On resume, Harbor reruns that original program
+in a fresh isolate and replays completed activities from the journal, so an
+already-completed `POST` is not sent twice. A changed request, divergent replay,
+or unknown side-effect outcome fails closed.
+
+For example, the included commerce service executes orders at or below
+₹5,000 directly and requires approval above ₹5,000. Harbor's active
+gateway-owned [`deny-all-delete.yaml`](governance/rules/deny-all-delete.yaml)
+also blocks every `DELETE` by default.
+
+**Skills and Governance Rules solve different problems:** Skills tell an agent
+*how* to complete a workflow; Governance Rules decide *whether* a concrete
+backend operation may execute. Use the Skill to explain the correct sequence,
+and the Governance Rule to enforce the boundary that must not depend on the
+model following instructions.
+
+See [`docs/code-mode-governance.md`](docs/code-mode-governance.md) for the
+execution lifecycle, replay contract, approval protocol, and threat model.
+
+---
+
 ## Features
 
 - **Five MCP tools** — `discover_services`, `discover_skills`, `get_skill_details`, `search_code`, `api_execute`
