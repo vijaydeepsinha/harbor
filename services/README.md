@@ -15,6 +15,10 @@ Six demo services are included — three enabled so the framework works out of t
 
 Start the token-mode demo backends and the gateway: `bash examples/demo/start.sh`.
 
+The npm package ships this directory's README as configuration guidance but
+does not bundle the demo services. Installed-package users must set
+`SERVICES_DIR` to a directory containing their own configured service folders.
+
 OAuth mode — enables the three `billing` variants, disables product/order/tasks, and starts the mock AS (Docker), the billing backend and the introspection server: `bash examples/demo/start-oauth-mode.sh`. Ctrl-C restores the token-mode configs.
 
 OAuth 2.1 end-to-end test (the same switch, automated; requires Docker): `python3 tests/demo_e2e.py --start-services --oauth --oauth-resource-uri "http://127.0.0.1:3333" --oauth-auth-servers "https://auth.example.com" --docker-oauth`

@@ -28,7 +28,7 @@ Verify everything compiles:
 
 ```bash
 npm run typecheck    # must exit 0
-npm test             # 821 passing, 1 skipped — none may fail
+npm test             # 822 passing, 1 skipped — none may fail
 ```
 
 ---

@@ -820,7 +820,7 @@ def test_order_service():
     assert_eq(r.get("code"), "APPROVAL_REQUIRED", "orders above 5000 INR require approval")
 
     r = api_exec("order",
-                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001" } }); return { status: r.status, ok: r.ok }; }',
+                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001", amountInr: 4999 } }); return { status: r.status, ok: r.ok }; }',
                  403)
     if assert_no_error(r, "POST /orders missing quantity returns 400"):
         assert_eq(r.get("status"), 400, "status is 400")

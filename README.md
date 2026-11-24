@@ -62,6 +62,18 @@ cd harbor
 npm install
 ```
 
+**Run from an installed package:**
+
+The npm package contains the gateway and its rule directory, but not the
+repository demo services. Supply your own service directory:
+
+```bash
+SERVICES_DIR=/absolute/path/to/services npx harbor-gateway
+```
+
+Each child folder must contain the service `config.json` and OpenAPI spec; see
+[`services/README.md`](services/README.md).
+
 **Run the demo** (three local commerce/task backends plus the MCP gateway):
 
 ```bash
@@ -150,7 +162,7 @@ protocol edge cases — plus a Postman collection. See [`TESTING.md`](TESTING.md
 
 ```bash
 npm run dev          # tsx watch — live reload
-npm test             # vitest — unit + integration (821 passing, 1 skipped)
+npm test             # vitest — unit + integration (822 passing, 1 skipped)
 npm run typecheck    # tsc --noEmit (strict)
 npm run lint         # eslint
 npm run build        # tsc → dist/

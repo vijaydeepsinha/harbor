@@ -28,7 +28,7 @@ Release-readiness rerun on 2026-11-21 (`--local`): 157 governance E2E tests and
 |---|--:|--:|
 | Governance E2E (vitest, 15 files) | 138 tests | 156 tests, all passed |
 | Postman `mcp-governance` | 14 folders, 84 requests, 177 assertions | 15 folders, 118 requests, 224 assertions, all passed |
-| Unit + integration (`npm test`) | 444 tests | 72 files: 821 passed + 1 skipped |
+| Unit + integration (`npm test`) | 444 tests | 72 files: 822 passed + 1 skipped |
 
 The §K findings for the owner:
 
