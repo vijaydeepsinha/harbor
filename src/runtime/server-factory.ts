@@ -33,7 +33,6 @@ export async function createMcpGateway(
     const scannedServices = await scanServicesDirectory(servicesDir, gatewayLogger)
     if (scannedServices.length === 0) {
         gatewayLogger.error(
-            {servicesDir},
             'No services found — set SERVICES_DIR to a directory containing configured service folders'
         )
         process.exit(1)

@@ -14,6 +14,7 @@ import {sendGatewayError, sendJson} from './send-response.js'
 import {HttpError} from './http-error.js'
 import {ERR, HTTP_ROUTES, MCP_DEFAULT_MAX_BODY_BYTES, MCP_PROTOCOL_VERSION} from '../../core/constants.js'
 import {errorMessage} from '../../core/utils/errors.js'
+import {redactUrl} from '../../core/utils/url.js'
 import type {GatewayMcpServerFactory} from './mcp-server-factory.js'
 import type {GovernanceRuntime} from '../execution/governance-runtime.js'
 import {handleExecutionRoutes} from './execution-routes.js'
@@ -162,8 +163,8 @@ export function startHttpGateway(opts: HttpGatewayOptions): HttpGatewayHandle {
     server.listen(port, host, () => {
         logger.info(
             {
-                endpoint: `http://${host}:${port}${HTTP_ROUTES.MCP}`,
-                health: `http://${host}:${port}${HTTP_ROUTES.HEALTH}`,
+                endpoint: redactUrl(`http://${host}:${port}${HTTP_ROUTES.MCP}`),
+                health: redactUrl(`http://${host}:${port}${HTTP_ROUTES.HEALTH}`),
                 services: registry.serviceNames()
             },
             '🚀 Harbor ready (Streamable HTTP, MCP 2026-07-28) — waiting for Clients to connect'
