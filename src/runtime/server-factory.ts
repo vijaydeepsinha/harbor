@@ -42,7 +42,7 @@ export async function createMcpGateway(
     const tokenCacheTtlMs = globalConfig.auth?.tokenCacheTtlMs ?? 300_000
     const tokenCacheConfig = globalConfig.auth?.tokenCacheBackend ?? {type: STORE_TYPE.IN_MEMORY}
     const tokenCacheStrategy = buildTokenCacheStrategy(tokenCacheConfig, tokenCacheTtlMs, gatewayLogger)
-    gatewayLogger.info({backend: tokenCacheStrategy.name, tokenCacheTtlMs}, 'Token cache initialized')
+    gatewayLogger.info({tokenCacheTtlMs}, 'Token cache initialized')
 
     // ── 3. Build service registry from scanned results ──────────────────────
     // One failing service must not take down the gateway: log, skip, continue.
