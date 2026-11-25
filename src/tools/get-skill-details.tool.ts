@@ -9,18 +9,19 @@ import type {MetricsCollector} from '../core/types/metrics.types.js'
 import {extractCorrelationId, isToolError, mcpError, mcpSuccess, resolveService, validateAuth} from './tool-helpers.js'
 import {ERR, LOG_PREFIX, METRIC, OUTCOME, TOOL, UNKNOWN_SERVICE_LABEL} from '../core/constants.js'
 
-const DESCRIPTION = `Retrieves the full Markdown SOP for a specific skill.
-If discover_skills() returned a relevant skill, read it here to understand business rules,
-required fields, and constraints BEFORE looking for technical API details with search_code().
+const DESCRIPTION = `Returns the Markdown instruction body for a specific Agent Skill name.
+Call only after discover_skills() gave you a skill_name. Read this BEFORE search_code() to learn business rules, required fields, and constraints.
 
-Using skills is recommended but not mandatory. If no skills matched, proceed directly
-to search_code().
+REQUIRED: "service" and "skill_name" (obtained from discover_skills() results).
 
-IMPORTANT: You MUST provide both "service" and "skill_id". The skill_id comes from
-the results of discover_skills().
+This call is optional for most tasks and most services — if discover_skills() found
+no relevant Skill, go directly to search_code(). Exception: some services declare one
+or more mandatory prerequisite Skills that must be read before any other service
+tool call. Check the service description from discover_services before treating Skill
+discovery or reading as optional.
+If skill_name is unknown or get_skill_details fails, go back to discover_skills() — search by keyword or list every skill name and description. Do not guess a skill_name, and do not expect the not-found error to provide descriptions.
 
-Returns the complete Markdown content of the skill document — including step-by-step
-instructions, business rules, required fields, and constraints.`
+Returns: complete Markdown with step-by-step instructions, business rules, and constraints.`
 
 export function registerGetSkillDetailsTool(
     server: McpServer,
@@ -33,12 +34,12 @@ export function registerGetSkillDetailsTool(
 
     server.registerTool(
         TOOL.GET_SKILL_DETAILS,
-        {description: DESCRIPTION, inputSchema: z.object({service: z.string(), skill_id: z.string()})},
-        async ({service, skill_id}, ctx) => {
+        {description: DESCRIPTION, inputSchema: z.object({service: z.string(), skill_name: z.string()})},
+        async ({service, skill_name: skillName}, ctx) => {
             const correlationId = extractCorrelationId(ctx)
 
             logger.info(
-                {correlationId, tool: TOOL.GET_SKILL_DETAILS, service, skill_id},
+                {correlationId, tool: TOOL.GET_SKILL_DETAILS, service, skill_name: skillName},
                 `${LOG_PREFIX.MCP_IN} ${TOOL.GET_SKILL_DETAILS} — fetching skill SOP`
             )
 
@@ -60,18 +61,18 @@ export function registerGetSkillDetailsTool(
             }
 
             const skills = svcResources.skillStore.getSkills()
-            const skill = skills.find(s => s.id === skill_id)
+            const skill = skills.find(s => s.name === skillName)
             if (!skill) {
-                const available = skills.map(s => s.id).join(', ')
+                const available = skills.map(s => s.name).join(', ')
                 metrics.increment(METRIC.TOOL_CALLS, {tool: TOOL.GET_SKILL_DETAILS, service, outcome: OUTCOME.ERROR})
                 return mcpError(
-                    `Skill "${skill_id}" not found in service "${service}". Available: ${available || '(none)'}`,
+                    `Skill "${skillName}" not found in service "${service}". Available: ${available || '(none)'}`,
                     ERR.UNKNOWN_SKILL
                 )
             }
 
             logger.info(
-                {correlationId, tool: TOOL.GET_SKILL_DETAILS, service, skill_id, contentLength: skill.content.length},
+                {correlationId, tool: TOOL.GET_SKILL_DETAILS, service, skill_name: skillName, contentLength: skill.content.length},
                 `${LOG_PREFIX.MCP_OUT} ${TOOL.GET_SKILL_DETAILS} — full SOP returned`
             )
 

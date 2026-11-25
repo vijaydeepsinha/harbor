@@ -1,7 +1,8 @@
 ---
-id: place-order
-title: Place and track an order
-tags: [order, purchase, buy, checkout, status]
+name: place-order
+description: Place and track orders, including product-price lookup, INR total calculation, and approval handling above 5,000 INR.
+metadata:
+  tags: "order, purchase, buy, checkout, status"
 ---
 
 # Place an Order

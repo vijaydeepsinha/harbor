@@ -19,24 +19,32 @@ services/
 
 ## Frontmatter
 
-Frontmatter is optional. When a file starts with YAML frontmatter, Harbor parses it
-(`src/runtime/registry/filesystem-scanner.ts`):
+Harbor uses the standard Agent Skills frontmatter contract while keeping
+Harbor's flat `skills/*.md` layout. The file name is the skill name; each file
+must begin with YAML frontmatter:
 
 ```markdown
 ---
-title: Create, update, and track tasks
-tags: [task, todo, project, assign, status, priority]
+name: manage-tasks
+description: Create, update, and track tasks with validated status, priority, and assignment fields.
+metadata:
+  tags: "task, todo, project, assign, status, priority"
 ---
 ```
 
 | Field | Required | Purpose |
 |-------|----------|---------|
-| `title` | No | Short description shown to the AI when selecting skills. Absent ⇒ the first `# ` heading, then the filename with hyphens as spaces. |
-| `tags` | No | A list of keywords the AI uses to match user intent to this skill. Include synonyms. |
-| `id` | No | Ignored. The skill id is always the filename without `.md` (`manage-tasks.md` ⇒ `manage-tasks`); it is what `get_skill_details` takes as `skill_id`. Kebab-case filenames read best. |
+| `name` | Yes | 1-64 lowercase alphanumeric/hyphen characters. It must equal the filename without `.md`; `discover_skills` and `get_skill_details` use it as `skill_name`. |
+| `description` | Yes | 1-1024 characters explaining what the skill does and when to use it. |
+| `license` | No | License name or reference for the Skill. |
+| `compatibility` | No | At most 500 characters describing environment or product requirements. |
+| `metadata` | No | A mapping whose values are strings. Use `metadata.tags` for a comma-separated routing vocabulary. |
+| `allowed-tools` | No | Optional standard Agent Skills tool declaration. Harbor does not use it to grant runtime capabilities. |
 
-A file whose frontmatter is not valid YAML is skipped with a warning; the service and its other
-skills still load. The agent receives the whole file, frontmatter included, as the skill's `content`.
+Unknown top-level fields, non-string metadata, an invalid `name`, a filename/name
+mismatch, or a missing description make that one file invalid. Harbor skips it
+with a warning while the service and other skills still load. The agent receives
+only the Markdown body, with frontmatter removed, as `content`.
 
 ## Body
 
@@ -46,9 +54,10 @@ Write plain Markdown. The AI reads this as instructions. Structure it as numbere
 
 ```markdown
 ---
-id: manage-tasks
-title: Create, update, and track tasks
-tags: [task, todo, project, assign, status, priority]
+name: manage-tasks
+description: Create, update, and track tasks with validated status, priority, and assignment fields.
+metadata:
+  tags: "task, todo, project, assign, status, priority"
 ---
 
 # Manage Tasks
@@ -183,9 +192,10 @@ Design skills to stay well under these. Bulk operations should paginate rather t
 requests. Calls the program starts without awaiting still count: they must finish within the run's
 time budget, or they are aborted.
 
-## Writing effective tags
+## Writing effective metadata tags
 
-Tags are the primary signal the AI uses to pick the right skill. Include:
+`metadata.tags` is the primary routing signal the AI uses to pick the right
+skill. Use a comma-separated string and include:
 
 - The core noun (`task`, `order`, `product`)
 - Action verbs (`create`, `update`, `delete`, `list`, `search`)

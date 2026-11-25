@@ -46,9 +46,13 @@ export function buildMcpServerOptions(governanceRuntime?: GovernanceRuntime): Mc
         instructions:
             'Harbor is an MCP gateway to backend services. Workflow: ' +
             '1) discover_services() to list backends; ' +
-            '2) discover_skills() + get_skill_details() for business SOPs (optional); ' +
+            '2) optionally use discover_skills() to find Agent Skill names, then optionally call ' +
+            'get_skill_details(service, skill_name) for each relevant Skill; ' +
             '3) search_code() to find exact endpoints; ' +
             '4) api_execute() to run an authenticated call against a chosen service. ' +
+            'If discover_skills() returns no match and the service has no mandatory Skill, ' +
+            'skip directly to search_code(); honor any mandatory Skills declared by the service, ' +
+            'and never invent a skill_name. ' +
             'Always pass the "service" parameter to api_execute and use only paths confirmed by search_code().',
         cacheHints: {
             'tools/list': {ttlMs: 0, cacheScope: 'private'},

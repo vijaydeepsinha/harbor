@@ -26,9 +26,11 @@ Available services: ${serviceNames.join(', ')}
 Run discover_services() first if you are unsure which service to use.
 
 ALWAYS call this before api_execute(). Never guess or assume endpoint paths.
-If skills are available for the task (check via discover_skills()), read them first to
-understand business rules. Otherwise, proceed directly here — skills are recommended but
-not required.
+Optionally check discover_skills() for relevant Agent Skills. If it returns a skill_name,
+call get_skill_details({ service, skill_name }) and follow those instructions before
+searching the spec. If discover_skills() returns no match and the service description
+does not require a Skill, proceed directly here. This tool only searches the OpenAPI
+spec; it does not discover Skills or infer a skill_name.
 
 spec structure:
   spec.paths                                    → object of all endpoints

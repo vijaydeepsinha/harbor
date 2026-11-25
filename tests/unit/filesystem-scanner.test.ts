@@ -43,15 +43,152 @@ describe('scanServicesDirectory — one bad entry never takes the others down', 
         expect(scanned.map(s => s.name)).toEqual(['good'])
     })
 
-    it('skips only the skill file that cannot be parsed; keeps the rest and reads a numeric title', async () => {
+    it('fetches a URL spec at startup when no local spec file exists', async () => {
+        const remoteSpec = `${SPEC}servers:\n  - url: http://remote.example/v1\n`
+        let remoteRequests = 0
+        const server = createServer((_req, res) => {
+            remoteRequests++
+            res.setHeader('Content-Type', 'application/yaml')
+            res.end(remoteSpec)
+        })
+        await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+        root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
+        try {
+            const dir = join(root, 'remote')
+            mkdirSync(join(dir, 'skills'), {recursive: true})
+            writeFileSync(join(dir, 'config.json'), JSON.stringify({
+                spec: {
+                    source: 'url',
+                    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/spec.yaml`
+                },
+                serviceRefreshIntervalMs: 0,
+                auth: {type: 'static-token', token: 'demo-token-123'}
+            }))
+
+            const [scanned] = await scanServicesDirectory(root, silent)
+
+            expect(scanned?.spec).toMatchObject({openapi: '3.0.0'})
+            expect(scanned?.apiConfig).toMatchObject({
+                protocol: 'http',
+                host: 'remote.example',
+                port: 80,
+                basePath: '/v1'
+            })
+            expect(remoteRequests).toBe(1)
+
+            const cache = new InMemoryTokenCache(60_000)
+            try {
+                const resources = await buildServiceResources(scanned!, globalConfig, cache)
+                resources.refresher.stop()
+                expect(resources.specStore.getSpec().info.title).toBe('t')
+                expect(remoteRequests).toBe(1)
+            } finally {
+                cache.destroy()
+            }
+        } finally {
+            await new Promise<void>(resolve => server.close(() => resolve()))
+        }
+    })
+
+    it('uses the fresh URL spec instead of a stale local spec at startup', async () => {
+        const remoteSpec = 'openapi: 3.0.0\ninfo: { title: remote, version: "2" }\npaths:\n  /remote: {}\n'
+        const server = createServer((_req, res) => {
+            res.setHeader('Content-Type', 'application/yaml')
+            res.end(remoteSpec)
+        })
+        await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+        root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
+        try {
+            service(root, 'remote', {
+                spec: {
+                    source: 'url-with-fallback',
+                    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/spec.yaml`
+                }
+            }, 'openapi: 3.0.0\ninfo: { title: local, version: "1" }\npaths:\n  /stale: {}\n')
+
+            const [scanned] = await scanServicesDirectory(root, silent)
+
+            expect(scanned?.spec.info.title).toBe('remote')
+            expect(scanned?.spec.paths).toHaveProperty('/remote')
+            expect(scanned?.spec.paths).not.toHaveProperty('/stale')
+        } finally {
+            await new Promise<void>(resolve => server.close(() => resolve()))
+        }
+    })
+
+    it('allows URL-with-fallback to start without a local spec when the URL succeeds', async () => {
+        const remoteSpec = 'openapi: 3.0.0\ninfo: { title: remote-fallback, version: "2" }\npaths:\n  /remote: {}\n'
+        const server = createServer((_req, res) => {
+            res.setHeader('Content-Type', 'application/yaml')
+            res.end(remoteSpec)
+        })
+        await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+        root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
+        try {
+            const dir = join(root, 'remote-fallback')
+            mkdirSync(join(dir, 'skills'), {recursive: true})
+            writeFileSync(join(dir, 'config.json'), JSON.stringify({
+                spec: {
+                    source: 'url-with-fallback',
+                    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/spec.yaml`
+                },
+                auth: {type: 'static-token', token: 'demo-token-123'}
+            }))
+
+            const [scanned] = await scanServicesDirectory(root, silent)
+
+            expect(scanned?.spec.info.title).toBe('remote-fallback')
+            expect(scanned?.spec.paths).toHaveProperty('/remote')
+        } finally {
+            await new Promise<void>(resolve => server.close(() => resolve()))
+        }
+    })
+
+    it('falls back to the local spec when URL-with-fallback cannot fetch at startup', async () => {
+        root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
+        service(root, 'fallback', {
+            spec: {
+                source: 'url-with-fallback',
+                url: 'http://127.0.0.1:1/unavailable.yaml'
+            },
+            serviceRefreshTimeoutMs: 100
+        }, 'openapi: 3.0.0\ninfo: { title: local, version: "1" }\npaths:\n  /local: {}\n')
+
+        const [scanned] = await scanServicesDirectory(root, silent)
+
+        expect(scanned?.spec.info.title).toBe('local')
+        expect(scanned?.spec.paths).toHaveProperty('/local')
+    })
+
+    it('skips a URL-only service when the initial fetch fails', async () => {
+        root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
+        const dir = join(root, 'unavailable')
+        mkdirSync(join(dir, 'skills'), {recursive: true})
+        writeFileSync(join(dir, 'config.json'), JSON.stringify({
+            spec: {
+                source: 'url',
+                url: 'http://127.0.0.1:1/unavailable.yaml'
+            },
+            serviceRefreshTimeoutMs: 100,
+            auth: {type: 'static-token', token: 'demo-token-123'}
+        }))
+
+        await expect(scanServicesDirectory(root, silent)).resolves.toEqual([])
+    })
+
+    it('skips only the skill file that cannot be parsed; keeps the standard skills', async () => {
         root = mkdtempSync(join(tmpdir(), 'harbor-svcs-'))
         const dir = service(root, 'svc')
-        writeFileSync(join(dir, 'skills', 'good.md'), '---\ntitle: 2026 plan\n---\n# Heading\nbody')
-        writeFileSync(join(dir, 'skills', 'numeric.md'), '---\ntitle: 42\n---\nbody')
+        writeFileSync(join(dir, 'skills', 'good.md'), '---\nname: good\ndescription: 2026 plan\nmetadata:\n  tags: "plan"\n---\n# Heading\nbody')
+        writeFileSync(join(dir, 'skills', 'numeric.md'), '---\nname: numeric\ndescription: Numeric description\n---\nbody')
         writeFileSync(join(dir, 'skills', 'broken.md'), '---\ntitle: [unclosed\n---\nbody')
         mkdirSync(join(dir, 'skills', 'folder.md'))
         const skills = scanSkills(dir, silent)
-        expect(skills.map(s => [s.id, s.title]).sort()).toEqual([['good', '2026 plan'], ['numeric', '42']])
+        expect(skills.map(s => [s.name, s.description]).sort()).toEqual([
+            ['good', '2026 plan'],
+            ['numeric', 'Numeric description']
+        ])
+        expect(skills[0]?.content).not.toContain('---')
         const [scanned] = await scanServicesDirectory(root, silent)
         expect(scanned?.skills).toHaveLength(2)
     })

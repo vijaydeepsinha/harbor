@@ -157,11 +157,14 @@ Validates the bearer against the service's auth strategy, then runs AI-written c
 
 ```typescript
 skills: Array<{
-  id: string       // filename without extension — used as skill_id in get_skill_details
-  filename: string // full filename
-  title: string    // frontmatter title, else first # heading, else the filename
-  tags: string[]   // tags array from frontmatter (empty array if none)
-  content: string  // full markdown text including frontmatter
+  name: string
+  filename: string
+  description: string
+  content: string
+  license?: string
+  compatibility?: string
+  metadata?: Record<string, string>
+  "allowed-tools"?: string
 }>
 ```
 
@@ -169,8 +172,8 @@ skills: Array<{
 ```javascript
 async () => {
   return skills
-    .filter(s => s.content.toLowerCase().includes('task'))
-    .map(s => ({ skill_id: s.id, title: s.title }))
+    .filter(s => s.description.toLowerCase().includes('task'))
+    .map(s => ({ skill_name: s.name, description: s.description }))
 }
 ```
 
@@ -178,25 +181,29 @@ async () => {
 
 ### Tool 3: `get_skill_details`
 
-**Parameters:** `service` (string), `skill_id` (string)
+**Parameters:** `service` (string), `skill_name` (string returned by
+`discover_skills`)
 
-Direct lookup — no sandbox, no backend call. The bearer is validated against the service's auth strategy first (which may reach the auth server on a token-cache miss). An unknown `skill_id` returns `UNKNOWN_SKILL` with the available ids.
+Direct lookup — no sandbox, no backend call. The bearer is validated against
+the service's auth strategy first (which may reach the auth server on a
+token-cache miss). The `skill_name` value is the standard Agent Skill `name`.
+An unknown value returns `UNKNOWN_SKILL` with the available names.
 
 ```json
 {
   "name": "get_skill_details",
   "inputSchema": {
     "type": "object",
-    "required": ["service", "skill_id"],
+    "required": ["service", "skill_name"],
     "properties": {
       "service":  { "type": "string" },
-      "skill_id": { "type": "string" }
+      "skill_name": { "type": "string" }
     }
   }
 }
 ```
 
-**Response:** Raw Markdown text of the skill file, frontmatter included.
+**Response:** Raw Markdown instruction body with frontmatter removed.
 
 ---
 
@@ -447,7 +454,7 @@ Tool errors are returned as structured objects in the tool response (`isError: t
 | Code | Retryable | When |
 |------|-----------|------|
 | `UNKNOWN_SERVICE` | No | `service` names no registered service |
-| `UNKNOWN_SKILL` | No | `get_skill_details`: no skill with that `skill_id` |
+| `UNKNOWN_SKILL` | No | `get_skill_details`: no skill with that `skill_name` |
 | `MISSING_TOKEN` | No | No bearer (over HTTP this is a 401 before any tool runs) |
 | `TOKEN_INVALID` | No | The auth strategy rejected the token (inactive, bad signature or claims, wrong audience, unverifiable) |
 | `TOKEN_EXPIRED` | No | The token has expired |

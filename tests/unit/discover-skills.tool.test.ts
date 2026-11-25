@@ -14,6 +14,7 @@ import type {MetricsRegistry} from '../../src/runtime/observability/metrics.js'
 import type {TokenPayload} from '../../src/core/types/auth.types.js'
 import {MissingTokenError} from '../../src/core/types/auth.types.js'
 import {SandboxRuntimeError} from '../../src/core/types/sandbox-error.types.js'
+import type {SkillMetadata} from '../../src/runtime/registry/skill-parser.js'
 
 vi.mock('../../src/runtime/sandbox/skills-search-in-sandbox.js', () => ({
     runSkillsSearchInSandbox: vi.fn()
@@ -52,7 +53,7 @@ const goodToken: TokenPayload = {
 
 function makeResources(opts: {
     name?: string
-    skills?: Array<{ id: string; filename: string; title: string; tags: string[]; content: string }>
+    skills?: SkillMetadata[]
     validate?: (auth: string | undefined, cid: string) => Promise<TokenPayload>
 } = {}): ServiceResources {
     const innerValidate = opts.validate ?? (async () => goodToken)
@@ -112,6 +113,12 @@ describe('registerDiscoverSkillsTool', () => {
         const entry = server.handlers[TOOL.DISCOVER_SKILLS]
         expect(entry).toBeDefined()
         expect(entry!.def.description).toContain('tasks')
+        expect(entry!.def.description).toContain('Returns Agent Skill names')
+        expect(entry!.def.description).toContain('REQUIRED: "service" and "code"')
+        expect(entry!.def.description).toContain('OPTIONAL, although RECOMMENDED')
+        expect(entry!.def.description).toContain('skill_name')
+        expect(entry!.def.description).toContain('search_code() does not discover Skills')
+        expect(entry!.def.description).toContain('get_skill_details({ service, skill_name })')
         const schema = entry!.def.inputSchema as ZodObject
         expect(Object.keys(schema.shape)).toEqual(expect.arrayContaining(['service', 'code']))
     })
@@ -164,11 +171,11 @@ describe('registerDiscoverSkillsTool', () => {
 
     it('runs the sandbox with skills + limits and wraps the result in mcpSuccess', async () => {
         const skills = [
-            {id: 'a', filename: 'a.md', title: 'A', tags: ['alpha'], content: 'alpha'},
-            {id: 'b', filename: 'b.md', title: 'B', tags: [], content: 'beta'}
+            {name: 'a', filename: 'a.md', description: 'A', metadata: {tags: 'alpha'}, content: 'alpha'},
+            {name: 'b', filename: 'b.md', description: 'B', content: 'beta'}
         ]
         const svc = makeResources({name: 'tasks', skills})
-        vi.mocked(runSkillsSearchInSandbox).mockResolvedValue([{skill_id: 'a', title: 'A'}])
+        vi.mocked(runSkillsSearchInSandbox).mockResolvedValue([{skill_name: 'a', description: 'A'}])
 
         registerDiscoverSkillsTool(
             server as unknown as McpServer,
@@ -184,7 +191,7 @@ describe('registerDiscoverSkillsTool', () => {
         )
 
         expect(r.isError).toBeUndefined()
-        expect(JSON.parse(r.content[0]!.text)).toEqual([{skill_id: 'a', title: 'A'}])
+        expect(JSON.parse(r.content[0]!.text)).toEqual([{skill_name: 'a', description: 'A'}])
 
         expect(runSkillsSearchInSandbox).toHaveBeenCalledWith(
             'async () => skills.filter(...)',

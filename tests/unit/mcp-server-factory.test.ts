@@ -63,6 +63,11 @@ describe('buildMcpServerOptions (spec §15/§16)', () => {
         for (const tool of ['discover_services', 'discover_skills', 'get_skill_details', 'search_code', 'api_execute']) {
             expect(text).toContain(tool)
         }
+        expect(text).toContain('skill_name')
+        expect(text).toContain('optionally use discover_skills()')
+        expect(text).toContain('optionally call')
+        expect(text).toContain('get_skill_details(service, skill_name)')
+        expect(text).toContain('never invent a skill_name')
     })
 
     it('sets conservative, non-aggressive cache hints only for cacheable ops', () => {

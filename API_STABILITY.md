@@ -26,7 +26,7 @@ These surfaces are frozen as of 1.0.0. Any change to them is a breaking change a
 |------|----------|-------------|
 | Discover services | `discover_services` | (none) |
 | Discover skills | `discover_skills` | `service`, `code` |
-| Get skill details | `get_skill_details` | `service`, `skill_id` |
+| Get skill details | `get_skill_details` | `service`, `skill_name` |
 | Search code | `search_code` | `service`, `code` |
 | Execute API | `api_execute` | `service`, `code` |
 

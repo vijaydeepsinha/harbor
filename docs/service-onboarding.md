@@ -6,7 +6,7 @@ This guide covers everything needed to register a backend API with the MCP gatew
 
 ## How the Gateway Discovers Services
 
-At startup, the gateway scans the directory set by `SERVICES_DIR`. Unset, that is the `services/` folder at the install root (beside `src/` or `dist/`), whatever the working directory; a set value is resolved against the working directory (`src/index.ts`). Every subdirectory that contains a `spec.json`, `spec.yaml` or `spec.yml` is a candidate service (`src/runtime/registry/filesystem-scanner.ts`).
+At startup, the gateway scans the directory set by `SERVICES_DIR`. Unset, that is the `services/` folder at the install root (beside `src/` or `dist/`), whatever the working directory; a set value is resolved against the working directory (`src/index.ts`). A subdirectory is a candidate service when it contains a local `spec.json`, `spec.yaml` or `spec.yml`, or configures a valid `spec.source` that can be loaded from a URL (`src/runtime/registry/filesystem-scanner.ts`).
 
 ```
 services/
@@ -311,10 +311,17 @@ State machine: `CLOSED → (failureThreshold consecutive failed calls) → OPEN 
 | Source | Behavior |
 |--------|----------|
 | `file` (default) | Reads `spec.yaml` / `spec.json` from the service directory |
-| `url` | Startup still reads the local spec file; the URL is fetched on each refresh cycle |
-| `url-with-fallback` | Startup reads the local spec file; each refresh tries the URL first and falls back to the local file |
+| `url` | Fetches the URL at startup and on each refresh; no local spec is required |
+| `url-with-fallback` | Tries the URL first at startup and on refresh, then falls back to the local spec when the remote load fails |
 
-The URL is never fetched at startup (a known limitation): a service needs a local spec file to load, and with `serviceRefreshIntervalMs: 0` the URL is never fetched at all. A fetched spec is capped at 20 MB, may use only internal `#/…` `$ref`s, and its URL is redacted in logs: query parameter names and multiplicity are kept, but **every value** is replaced with `REDACTED`, including values under arbitrary names such as `code` or `session`. Userinfo and fragments are removed (`redactUrl` in `src/core/utils/url.ts`). The origin and path remain visible; do not embed credentials there or in parameter names. `url-with-fallback` with a refresh interval is the recommended production setting — the service stays up when the remote API is unavailable.
+The configured URL is fetched even when `serviceRefreshIntervalMs: 0`. A failed
+initial `url` fetch skips the service; `url-with-fallback` uses a local spec when
+available. A fetched spec is capped at 20 MB, may use only internal `#/…`
+`$ref`s, and its URL is redacted in logs: query parameter names and multiplicity
+are kept, but **every value** is replaced with `REDACTED`, including values
+under arbitrary names such as `code` or `session`. Userinfo and fragments are
+removed (`redactUrl` in `src/core/utils/url.ts`). The origin and path remain
+visible; do not embed credentials there or in parameter names.
 
 ### Governance Rules
 
@@ -398,22 +405,30 @@ Skills are Markdown files the AI reads before making API calls. They document bu
 
 Place them in `services/<name>/skills/` with `.md` extension.
 
-**Frontmatter** is optional; when present it is parsed:
+**Frontmatter** follows the Agent Skills contract and is required:
 
 ```markdown
 ---
-title: Create, update, and close tasks with proper field validation
-tags: [task, create, update, close, validation]
+name: manage-tasks
+description: Create, update, and close tasks with proper field validation.
+metadata:
+  tags: "task, create, update, close, validation"
 ---
 ```
 
 | Field | Effect |
 |-------|--------|
-| `title` | The skill's title. Absent ⇒ the first `# ` heading, then the filename with hyphens as spaces |
-| `tags` | A list; exposed as `tags` to `discover_skills` programs |
-| `id` | Ignored — the skill id is always the **filename without `.md`**; it is what `get_skill_details` takes as `skill_id` |
+| `name` | Required; kebab-case and exactly equal to the filename without `.md` |
+| `description` | Required; 1-1024 characters explaining what the skill does and when to use it |
+| `license` | Optional non-empty string |
+| `compatibility` | Optional non-empty string of at most 500 characters |
+| `metadata` | Optional mapping of string keys to string values; use `metadata.tags` for comma-separated tags |
+| `allowed-tools` | Optional standard Agent Skills field; informational in Harbor |
 
-`discover_skills` programs see each skill as `{ id, filename, title, tags, content }`, where `content` is the whole file, frontmatter included. A file that cannot be read or whose frontmatter does not parse is skipped with a warning (`Skipping skill "<file>" — it cannot be read or parsed`); the service and its other skills still load.
+`discover_skills` programs see `{ name, filename, description, metadata,
+content, ... }`, where `content` is the Markdown body without frontmatter. An
+invalid file is skipped with a warning (`Skipping skill "<file>" — it cannot be
+read or parsed`); the service and its other skills still load.
 
 **Body — what to include** (an illustrative skill, not one that ships):
 
@@ -545,9 +560,10 @@ and the start of its one skill, `services/tasks/skills/manage-tasks.md` (abridge
 
 ```markdown
 ---
-id: manage-tasks
-title: Create, update, and track tasks
-tags: [task, todo, project, assign, status, priority]
+name: manage-tasks
+description: Create, update, and track tasks with validated status and priority values.
+metadata:
+  tags: "task, todo, project, assign, status, priority"
 ---
 
 # Manage Tasks

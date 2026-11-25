@@ -1,7 +1,8 @@
 ---
-id: browse-products
-title: Browse and search products
-tags: [product, catalog, search, list]
+name: browse-products
+description: Browse and search the product catalog, inspect product details, and report availability and pricing.
+metadata:
+  tags: "product, catalog, search, list"
 ---
 
 # Browse Products

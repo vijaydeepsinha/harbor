@@ -63,7 +63,12 @@ In local development the file path does not exist; `dotenv` populates `process.e
 | -------------- | ------------ | ------------------------------------------------------------------ |
 | `SERVICES_DIR` | `<install root>/services` | Directory scanned at startup. Unset ⇒ the `services/` folder beside `src/` (under `tsx`) or `dist/` (built) — the repo or image root — whatever the working directory. A set value is resolved relative to `process.cwd()`. The Docker image sets `/app/services`. |
 
-Each sub-folder that contains a spec file is a service; it loads only if it also has a `config.json` with an `auth` block (see the per-service `config.json` section below). Entries that are not folders are ignored, an entry that cannot be read (e.g. a dangling symlink) is skipped with a warning, and one broken service is skipped without stopping the others. If no service loads, the gateway exits.
+Each sub-folder with a local spec file or a configured URL source is a service;
+it loads only if it also has a `config.json` with an `auth` block (see the
+per-service `config.json` section below). Entries that are not folders are
+ignored, an entry that cannot be read (e.g. a dangling symlink) is skipped with
+a warning, and one broken service is skipped without stopping the others. If
+no service loads, the gateway exits.
 
 ### MCP HTTP / stdio server
 
@@ -496,7 +501,10 @@ Opens after `failureThreshold` consecutive failed calls (default `5`) and refuse
 
 ## Spec loading
 
-Default when `spec` is omitted is **file**. Whatever the source, **boot always loads the local spec file**, and a service without one is skipped; the source decides what a [refresh](#service-refresh) reads.
+Default when `spec` is omitted is **file**. Harbor resolves and loads the
+configured source at startup before registering the service. A
+[refresh](#service-refresh) uses the same configured source again when its
+interval is greater than zero.
 
 ### `file` (default)
 
@@ -510,7 +518,13 @@ Local disk — `spec.json` / `spec.yaml` / `spec.yml` in the service folder. Rel
 
 ### `url`
 
-Fetched from an HTTP/HTTPS URL on each refresh (only when `serviceRefreshIntervalMs` > 0; the URL is not fetched at boot). A failed fetch keeps the current spec and skills. Internal `#/…` references are resolved; external `$ref`s in a fetched document are not, a response over 20 MB is refused, and logged URLs omit userinfo and fragments. Query parameter names remain, but every value is `REDACTED`. The origin and path remain visible: keep credentials out of paths and parameter names.
+Fetched from an HTTP/HTTPS URL immediately at startup and on each scheduled
+refresh. No local spec file is required. A failed initial fetch skips the
+service; a failed later fetch keeps the current spec and skills. Internal
+`#/…` references are resolved; external `$ref`s in a fetched document are not,
+a response over 20 MB is refused, and logged URLs omit userinfo and fragments.
+Query parameter names remain, but every value is `REDACTED`. The origin and path
+remain visible: keep credentials out of paths and parameter names.
 
 ```json
 {
@@ -523,7 +537,10 @@ Fetched from an HTTP/HTTPS URL on each refresh (only when `serviceRefreshInterva
 
 ### `url-with-fallback`
 
-On each refresh, tries the URL first and falls back to the local spec file when it is unreachable. Best for production services where the spec is also served live but you want resilience.
+At startup and on each refresh, tries the URL first and falls back to the local
+spec file when it is unreachable. A local file is therefore optional when the
+URL succeeds and required when it does not. This is the recommended production
+source when the service publishes a live spec but should retain a boot fallback.
 
 ```json
 {
@@ -534,7 +551,9 @@ On each refresh, tries the URL first and falls back to the local spec file when 
 }
 ```
 
-> `spec.url` is required for both `url` and `url-with-fallback`. Omitting it skips the service at startup.
+> `spec.url` is required for both `url` and `url-with-fallback`. Omitting it
+> skips the service at startup. `serviceRefreshTimeoutMs` bounds the initial URL
+> attempt as well as later reload attempts.
 
 ---
 

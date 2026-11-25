@@ -36,7 +36,12 @@ export async function buildServiceResources(
     const skillStore = new SkillStore()
     skillStore.swap(svc.skills)
 
-    const specLoader = buildSpecLoader(svc.specSource, svc.specPath, svcLogger)
+    const specLoader = buildSpecLoader(
+        svc.specSource,
+        svc.specPath,
+        svcLogger,
+        svc.serviceRefreshTimeoutMs
+    )
     const refresher = new ServiceRefresher(
         specLoader, specStore, skillStore, svc.serviceDir,
         {serviceRefreshIntervalMs: svc.serviceRefreshIntervalMs, serviceRefreshTimeoutMs: svc.serviceRefreshTimeoutMs},

@@ -12,10 +12,11 @@ import type {McpServer} from '@modelcontextprotocol/server'
 import type {MetricsRegistry} from '../../src/runtime/observability/metrics.js'
 import type {TokenPayload} from '../../src/core/types/auth.types.js'
 import {MissingTokenError, SessionExpiredError} from '../../src/core/types/auth.types.js'
+import type {SkillMetadata} from '../../src/runtime/registry/skill-parser.js'
 
 const silentLogger = pino({level: 'silent'})
 
-type Handler = (args: { service: string; skill_id: string }, extra: unknown) => Promise<{
+type Handler = (args: { service: string; skill_name: string }, extra: unknown) => Promise<{
     content: Array<{ type: string; text: string }>;
     isError?: boolean
 }>
@@ -46,7 +47,7 @@ const goodToken: TokenPayload = {
 
 function makeResources(opts: {
     name?: string
-    skills?: Array<{ id: string; filename: string; title: string; tags: string[]; content: string }>
+    skills?: SkillMetadata[]
     validate?: (auth: string | undefined, cid: string) => Promise<TokenPayload>
 } = {}): ServiceResources {
     const innerValidate = opts.validate ?? (async () => goodToken)
@@ -85,7 +86,7 @@ describe('registerGetSkillDetailsTool', () => {
         metrics = makeMetrics()
     })
 
-    it('registers under TOOL.GET_SKILL_DETAILS with service & skill_id input schema', () => {
+    it('registers under TOOL.GET_SKILL_DETAILS with service & skill_name input schema', () => {
         registerGetSkillDetailsTool(
             server as unknown as McpServer,
             makeRegistry({svc: makeResources()}),
@@ -96,8 +97,14 @@ describe('registerGetSkillDetailsTool', () => {
 
         const entry = server.handlers[TOOL.GET_SKILL_DETAILS]
         expect(entry).toBeDefined()
+        expect(entry!.def.description).toContain('Agent Skill name')
+        expect(entry!.def.description).toContain('REQUIRED: "service" and "skill_name"')
+        expect(entry!.def.description).toContain('This call is optional for most tasks')
+        expect(entry!.def.description).toContain('discover_skills() gave you a skill_name')
+        expect(entry!.def.description).toContain('Do not guess a skill_name')
+        expect(entry!.def.description).toContain('BEFORE search_code()')
         const schema = entry!.def.inputSchema as ZodObject
-        expect(Object.keys(schema.shape)).toEqual(expect.arrayContaining(['service', 'skill_id']))
+        expect(Object.keys(schema.shape)).toEqual(expect.arrayContaining(['service', 'skill_name']))
     })
 
     it('returns UNKNOWN_SERVICE mcpError and records TOOL_CALLS(error)', async () => {
@@ -110,7 +117,7 @@ describe('registerGetSkillDetailsTool', () => {
         )
 
         const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
-            {service: 'ghost', skill_id: 'x'},
+            {service: 'ghost', skill_name: 'x'},
             makeServerCtx('cid')
         )
         expect(r.isError).toBe(true)
@@ -139,7 +146,7 @@ describe('registerGetSkillDetailsTool', () => {
         )
 
         const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
-            {service: 'svc', skill_id: 'x'},
+            {service: 'svc', skill_name: 'x'},
             makeServerCtx('cid')
         )
         expect(r.isError).toBe(true)
@@ -170,19 +177,19 @@ describe('registerGetSkillDetailsTool', () => {
         )
 
         const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
-            {service: 'svc', skill_id: 'x'},
+            {service: 'svc', skill_name: 'x'},
             makeServerCtx('cid')
         )
         expect(r.isError).toBe(true)
         expect(JSON.parse(r.content[0]!.text).code).toBe(ERR.MISSING_TOKEN)
     })
 
-    it('returns UNKNOWN_SKILL mcpError with the list of available ids when skill_id is not found', async () => {
+    it('returns UNKNOWN_SKILL mcpError with the available names when skill_name is not found', async () => {
         const svc = makeResources({
             name: 'svc',
             skills: [
-                {id: 'alpha', filename: 'alpha.md', title: 'A', tags: [], content: '# A'},
-                {id: 'beta', filename: 'beta.md', title: 'B', tags: [], content: '# B'}
+                {name: 'alpha', filename: 'alpha.md', description: 'A', content: '# A'},
+                {name: 'beta', filename: 'beta.md', description: 'B', content: '# B'}
             ]
         })
         registerGetSkillDetailsTool(
@@ -194,7 +201,7 @@ describe('registerGetSkillDetailsTool', () => {
         )
 
         const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
-            {service: 'svc', skill_id: 'missing'},
+            {service: 'svc', skill_name: 'missing'},
             makeServerCtx('cid')
         )
         expect(r.isError).toBe(true)
@@ -220,7 +227,7 @@ describe('registerGetSkillDetailsTool', () => {
         )
 
         const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
-            {service: 'svc', skill_id: 'whatever'},
+            {service: 'svc', skill_name: 'whatever'},
             makeServerCtx('cid')
         )
         const body = JSON.parse(r.content[0]!.text)
@@ -232,7 +239,12 @@ describe('registerGetSkillDetailsTool', () => {
         const content = '# Manage Campaigns\n\n1. Do the thing.\n'
         const svc = makeResources({
             name: 'svc',
-            skills: [{id: 'manage-campaigns', filename: 'manage-campaigns.md', title: 'Manage', content}]
+            skills: [{
+                name: 'manage-campaigns',
+                filename: 'manage-campaigns.md',
+                description: 'Manage campaigns.',
+                content
+            }]
         })
         registerGetSkillDetailsTool(
             server as unknown as McpServer,
@@ -243,7 +255,7 @@ describe('registerGetSkillDetailsTool', () => {
         )
 
         const r = await server.handlers[TOOL.GET_SKILL_DETAILS]!.handler(
-            {service: 'svc', skill_id: 'manage-campaigns'},
+            {service: 'svc', skill_name: 'manage-campaigns'},
             makeServerCtx('cid')
         )
 

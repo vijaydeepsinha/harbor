@@ -75,9 +75,10 @@ variables already set win.
 The gateway factory runs these steps once at startup:
 
 1. **Scans the services directory** via `src/runtime/registry/filesystem-scanner.ts`. Each
-   subdirectory with a spec file (`spec.json`, `spec.yaml`, or `spec.yml`) is a candidate
+   subdirectory with a local spec file or a configured URL spec source is a candidate
    service. For each one it reads `config.json` (a service with `"enabled": false` is skipped),
-   dereferences the spec, derives the API base URL (`config.api`, else the spec's
+   loads the configured source immediately (remote first for URL sources), derives the API
+   base URL from the resulting spec (`config.api`, else the spec's
    `servers[0].url`), builds the auth strategy (`config.auth` is required), the circuit breaker
    and the idempotency config, and reads `skills/*.md` (a skill file that cannot be parsed is
    skipped on its own). A service that fails any of this is logged
@@ -192,8 +193,9 @@ proceeding, but can skip directly to `search_code` if none are found.
    auth strategy. If auth fails, returns a structured error immediately.
 4. **V8 sandbox** — `runSkillsSearchInSandbox(code, skills, sandboxLimits)`:
    - Delegates to `runInSandbox` with a `setupContext` that injects the `skills` array
-   - `skills` is an array of `{ id, filename, title, tags, content }` — one per `.md` file in
-     `services/<name>/skills/`; `id` is the filename without `.md`
+   - `skills` is an array of standard Agent Skill metadata —
+     `{ name, filename, description, content, ...optionalFields }` — one per `.md`
+     file in `services/<name>/skills/`; `content` excludes frontmatter
    - The AI's JavaScript filters/searches this array, within `searchTimeoutMs`
 5. Returns whatever the function returns. No network calls from within the sandbox.
 
@@ -202,17 +204,18 @@ If no relevant skills are found, the AI proceeds directly to `search_code` witho
 
 ---
 
-### Tool 3: `get_skill_details({ service, skill_id })` — optional, follows discover_skills
+### Tool 3: `get_skill_details({ service, skill_name })` — optional, follows discover_skills
 
 Only used when `discover_skills` returned a relevant skill. Provides the full business SOP
 with workflow steps, required fields, and constraints.
 
 **File: `src/tools/get-skill-details.tool.ts`**
 
-1. AI calls `get_skill_details` with `service` and `skill_id` (from `discover_skills` results).
+1. AI calls `get_skill_details` with `service` and the `skill_name` returned by
+   `discover_skills`.
 2. **Service lookup** — via `resolveService()`.
 3. **Auth validation** — via `validateAuth()`.
-4. **Skill lookup** — `skills.find(s => s.id === skill_id)`; not found ⇒ `UNKNOWN_SKILL`.
+4. **Skill lookup** — `skills.find(s => s.name === skill_name)`; not found ⇒ `UNKNOWN_SKILL`.
 5. Returns the full Markdown content of the skill document. No sandbox, no network.
 
 ---
@@ -601,7 +604,7 @@ Transport-level failures are HTTP responses; everything after the transport is a
 | `/mcp` body over `MCP_MAX_BODY_BYTES` | `PAYLOAD_TOO_LARGE` | — | HTTP 413, `Connection: close`; nothing parsed |
 | No, malformed or duplicated `Authorization` header | `MISSING_TOKEN` / `TOKEN_INVALID` | — | HTTP 401 at the transport with a `reason` (`missing_header`, `duplicate_authorization_header`, `malformed_scheme`, `weak_credentials`, …); no tool runs |
 | Unknown service name | `UNKNOWN_SERVICE` | no | Lists the available services |
-| Unknown skill id | `UNKNOWN_SKILL` | no | Lists the service's skills |
+| Unknown skill name | `UNKNOWN_SKILL` | no | Lists the service's skill names |
 | Token rejected by the auth strategy | `TOKEN_INVALID` / `TOKEN_EXPIRED` | no | Includes a JWT without `exp`, an unknown `kid`, `alg: none`/`HS*`, and introspection `active: false` |
 | Session fully expired | `SESSION_EXPIRED` | no | Access and refresh tokens both exhausted; asks the user to update their token |
 | Auth server down | `INTROSPECTION_FAILED` | yes | Context names the failure (HTTP status or error code such as `ECONNREFUSED`), never the auth server's address |
@@ -693,9 +696,9 @@ User: "Create a new task assigned to Alice with high priority"
   Step 2: discover_skills({ service: "tasks", code: "async () => ..." })
           → Auth: validates the token via the service's auth strategy (cached in the token cache)
           → Finds relevant business SOPs (e.g. "manage-tasks")
-          → Returns: [{ skill_id: "manage-tasks", title: "Manage Tasks" }]
+          → Returns: [{ skill_name: "manage-tasks", description: "..." }]
 
-  Step 3: get_skill_details({ service: "tasks", skill_id: "manage-tasks" })
+  Step 3: get_skill_details({ service: "tasks", skill_name: "manage-tasks" })
           → Auth: validates the token via the service's auth strategy
           → Returns full Markdown SOP with business rules, required fields, constraints
           → MCP client learns: budget must be > 0, 5 required fields, specific status transitions

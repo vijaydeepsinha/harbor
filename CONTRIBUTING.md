@@ -276,12 +276,15 @@ services/my-service/
 - `servers[0].url` is used as the upstream base URL when no `api` block is present; when `api` is set, the scanner uses `api.host`/`api.port`/`api.basePath`
 - At least one path defined
 
-**Skill file (`skills/my-skill.md`) skeleton** — the file name is the skill id; frontmatter is optional (`title`, else the first `#` heading; `tags`):
+**Skill file (`skills/my-skill.md`) skeleton** — use Agent Skills frontmatter;
+the `name` must match the filename:
 
 ```markdown
 ---
-title: One-line description shown to the AI
-tags: [keyword1, keyword2]
+name: my-skill
+description: One-line description of what this skill does and when to use it.
+metadata:
+  tags: "keyword1, keyword2"
 ---
 
 # My Skill

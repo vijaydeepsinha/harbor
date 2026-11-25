@@ -267,7 +267,8 @@ Build first: `npm run build`
 mkdir -p services/my-service/skills
 ```
 
-2. Add `spec.yaml` — your OpenAPI 3.x spec (boot always reads this local file; `spec.source` can make later refreshes read a URL):
+2. Add a local `spec.yaml`, or configure `spec.source: "url"` to fetch the
+   OpenAPI 3.x document at startup:
 
 ```yaml
 openapi: "3.0.0"

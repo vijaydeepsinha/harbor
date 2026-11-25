@@ -747,6 +747,10 @@ def test_discover_skills():
         if "_error" not in result:
             count = len(result) if isinstance(result, list) else 0
             assert_true(count >= 1, f"{service}: at least 1 skill returned (got {count})")
+            for skill in result:
+                assert_true(bool(skill.get("name")), f"{service}: skill has an Agent Skills name")
+                assert_true(bool(skill.get("description")), f"{service}: skill has a description")
+                assert_true(not skill.get("content", "").startswith("---"), f"{service}: skill body excludes frontmatter")
         else:
             fail(f"{service}: discover_skills failed — {result['_error'][:80]}")
 

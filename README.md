@@ -93,7 +93,7 @@ execution lifecycle, replay contract, approval protocol, and threat model.
 - **Pluggable backends** — register token-cache, idempotency, execution-store, audit-sink and rule-source backends in your entry point and select them by name, without forking the codebase
 - **Per-service configuration** — each service declares its own auth, circuit breaker, and spec source
 - **Zero API changes** — your backend never changes; Harbor is a pure adapter
-- **Service skills** — Markdown SOP files the AI reads before making API calls
+- **Service skills** — Agent Skills-compatible Markdown SOP files with standard frontmatter that the AI reads before making API calls
 - **Circuit breaker + safe retries** — count-based breaker per endpoint, per service; only idempotent methods (`GET`, `PUT`, `DELETE`) are retried, so a `POST` is never sent twice
 - **Structured audit logging** — every `api_execute` call recorded with code, endpoints, duration, outcome, and sent to pluggable sinks (`AUDIT_SINKS`, console by default)
 - **Streamable HTTP + stdio** — both MCP transports supported

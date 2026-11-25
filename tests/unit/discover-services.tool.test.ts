@@ -63,6 +63,14 @@ describe('registerDiscoverServicesTool', () => {
         expect(server.handlers[TOOL.DISCOVER_SERVICES]).toBeDefined()
         expect(typeof server.handlers[TOOL.DISCOVER_SERVICES]!.def.description).toBe('string')
         expect(server.handlers[TOOL.DISCOVER_SERVICES]!.def.description!.length).toBeGreaterThan(0)
+        const description = server.handlers[TOOL.DISCOVER_SERVICES]!.def.description!
+        expect(description).toContain('discover_skills(service, code)         → (optional)')
+        expect(description).toContain('get_skill_details(service, skill_name) → (optional)')
+        expect(description.indexOf('discover_skills(service, code)'))
+            .toBeLessThan(description.indexOf('get_skill_details(service, skill_name)'))
+        expect(description.indexOf('get_skill_details(service, skill_name)'))
+            .toBeLessThan(description.indexOf('search_code(service, code)'))
+        expect(description).toContain('mandatory prerequisite')
     })
 
     it('returns the registry service catalog as mcpSuccess JSON', async () => {

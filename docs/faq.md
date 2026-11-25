@@ -271,13 +271,18 @@ More: [`code-mode-governance.md`](code-mode-governance.md).
 
 **Skills not showing up in `discover_skills`**
 
-1. Frontmatter is optional. The skill id is the file name; the title comes from frontmatter `title`, else the first `#` heading, else the file name; `tags` are read from frontmatter. A file whose frontmatter does not parse is skipped with a warning (`Skipping skill "<file>"`) — the other skills still load.
+1. Frontmatter is required and must use the Agent Skills fields. The `name`
+   must match the filename, and `description` must be present:
    ```markdown
    ---
-   title: What this skill does
-   tags: [keyword1, keyword2]
+   name: my-skill
+   description: What this skill does and when to use it.
+   metadata:
+     tags: "keyword1, keyword2"
    ---
    ```
+   A file with invalid frontmatter is skipped with a warning (`Skipping skill
+   "<file>"`) while the other skills still load.
 2. Check startup log: `{…,"service":"my-service","skills":N,"msg":"Service registered"}` — N should be > 0
 3. No subdirectories — skill files must be directly in `skills/`, not nested
 

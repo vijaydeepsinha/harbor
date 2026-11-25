@@ -53,7 +53,6 @@ Found in the 2026-09-27 review and not yet fixed. Several need an owner decision
 - [ ] File store: no fsync; unreadable documents are skipped at boot
 
 ### Services and packaging
-- [ ] `url` / `url-with-fallback` spec sources fetch the URL only on refresh, never at boot; a url-only service with no local spec file is skipped
 - [ ] `config.json` is not schema-validated (`"enabled": "false"` is truthy, a partial `tls` block is dropped); a missing `config.json` skips the service
 - [ ] Production Dockerfile ships no `governance/rules` (zero rules unless mounted), and its HEALTHCHECK uses `localhost` (IPv6 on Alpine)
 

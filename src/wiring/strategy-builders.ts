@@ -213,16 +213,17 @@ export function buildGatewayGovernanceRuleSource(rulesDir: string, logger?: Logg
 export function buildSpecLoader(
     specSource: { type: 'file' | 'url' | 'url-with-fallback'; url?: string },
     specPath: string,
-    logger?: Logger
+    logger?: Logger,
+    fetchTimeoutMs?: number
 ): SpecLoaderStrategy {
     switch (specSource.type) {
         case 'file':
             return fileSpec(specPath)
         case 'url':
             if (!specSource.url) throw new Error('spec.url is required when spec.source is "url"')
-            return urlSpec(specSource.url, undefined, logger)
+            return urlSpec(specSource.url, fetchTimeoutMs, logger)
         case 'url-with-fallback':
             if (!specSource.url) throw new Error('spec.url is required when spec.source is "url-with-fallback"')
-            return urlWithFallback(specSource.url, specPath, undefined, logger)
+            return urlWithFallback(specSource.url, specPath, fetchTimeoutMs, logger)
     }
 }

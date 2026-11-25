@@ -55,11 +55,14 @@ JavaScript async arrow function.
 
 Only call this AFTER you have:
   1. Found the right service via discover_services()
-  2. (Recommended) Read business SOPs via discover_skills() + get_skill_details() — if available
-  3. Found the exact endpoints via search_code()
+  2. (Optional) Checked discover_skills() for the workflow
+  3. (Optional) Read each matching Skill via get_skill_details(service, skill_name)
+  4. Found the exact endpoints via search_code()
 
-Not every scenario has a matching skill. If no relevant skills are available,
-steps 1 → 3 (skipping 2) is perfectly valid.
+Steps 2-3 are optional unless the service description declares a mandatory
+prerequisite. Not every scenario has a matching Skill. If discover_skills() returns no relevant
+skill_name and the service description does not declare a mandatory prerequisite,
+skip steps 2-3. Do not invent a skill_name; discovery is the source of that value.
 
 IMPORTANT: You MUST provide the "service" parameter to select which backend to call.
 Available services: ${serviceNames.join(', ')}

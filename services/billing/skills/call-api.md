@@ -1,7 +1,8 @@
 ---
-id: call-api
-title: Call the billing API
-tags: [billing, invoices, oauth, api]
+name: call-api
+description: Call the billing API and inspect invoices through OAuth 2.1 resource-owner flows.
+metadata:
+  tags: "billing, invoices, oauth, api"
 ---
 
 # Call Billing API

@@ -8,22 +8,22 @@ import type {MetricsCollector} from '../core/types/metrics.types.js'
 import {mcpSuccess} from './tool-helpers.js'
 import {LOG_PREFIX, METRIC, OUTCOME, TOOL} from '../core/constants.js'
 
-const DESCRIPTION = `Lists all available service namespaces (e.g., "tasks", "billing", "jira").
-Use this FIRST to understand which domain the user is asking about.
+const DESCRIPTION = `Lists all registered service namespaces (e.g. "tasks", "billing").
+Call this FIRST to identify which service covers the user's request.
 
-Returns an array of objects with the service key and a description of what each service covers.
-Pass the "service" value to the other tools: discover_skills, get_skill_details, search_code,
-and api_execute.
+Returns: array of { service, description } objects.
 
 Recommended flow:
-  1. discover_services()                             → pick the right service
-  2. discover_skills(service, code)                  → (optional) find business SOPs if available
-  3. get_skill_details(service, skill_id)            → (optional) read the full How-To
-  4. search_code(service, code)                      → find exact endpoints & payloads
-  5. api_execute(service, code)                      → execute against the backend
+  1. discover_services()                    → find the right service
+  2. discover_skills(service, code)         → (optional) find relevant Agent Skill names
+  3. get_skill_details(service, skill_name) → (optional) read the full Skill instructions
+  4. search_code(service, code)             → find exact endpoints and payload schemas
+  5. api_execute(service, code)             → execute only confirmed API operations
 
 Not every scenario has a matching skill. If you find relevant skills, read them before
-proceeding; otherwise skip directly to search_code().`
+proceeding; otherwise skip directly to search_code(). Exception: if the selected service
+description says a Skill is a mandatory prerequisite, read that Skill before making any
+other service-scoped tool call.`
 
 export function registerDiscoverServicesTool(
     server: McpServer,

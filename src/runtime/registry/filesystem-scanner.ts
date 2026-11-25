@@ -2,9 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import {existsSync, readdirSync, readFileSync, statSync} from 'node:fs'
-import {basename, extname, join, resolve} from 'node:path'
-import matter from 'gray-matter'
-import SwaggerParser from '@apidevtools/swagger-parser'
+import {extname, join, resolve} from 'node:path'
 import type {OpenAPISpec} from '../../core/types/spec.types.js'
 import type {AuthStrategy} from '../../spi/auth/auth-strategy.js'
 import type {CircuitBreakerStrategy} from '../../spi/resilience/circuit-breaker.js'
@@ -20,6 +18,8 @@ import type {Logger} from '../observability/logger.js'
 import {GOVERNANCE_RULE_SOURCE_TYPE, STORE_TYPE} from '../../core/constants.js'
 import {errorMessage} from '../../core/utils/errors.js'
 import {resolveAuth, resolveCircuitBreaker, resolvePermissionGuard} from '../../wiring/service-wiring.js'
+import {buildSpecLoader} from '../../wiring/strategy-builders.js'
+import {parseSkillFile, type SkillMetadata} from './skill-parser.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,13 +62,7 @@ interface ServiceConfig {
     sandbox?: SandboxOverride
 }
 
-export interface SkillMetadata {
-    id: string
-    filename: string
-    title: string
-    tags: string[]
-    content: string
-}
+export type {SkillMetadata} from './skill-parser.js'
 
 export interface ServiceDefinition {
     name: string
@@ -107,8 +101,8 @@ export interface ServiceDefinition {
 }
 
 /**
- * Scans a directory for service subdirectories. Each subdirectory that contains
- * a spec file (spec.json or spec.yaml) is treated as a service.
+ * Scans a directory for service subdirectories. Each subdirectory with a
+ * configured, loadable spec source is treated as a service.
  */
 export async function scanServicesDirectory(
     servicesDir: string,
@@ -175,50 +169,44 @@ async function scanSingleService(
 
     const governance = resolveGovernanceConfig(config.governance, serviceDir, name)
 
-    // ── 3. Find and load spec ────────────────────────────────────────────────
-    const specPath = findSpecFile(serviceDir)
-    if (!specPath) {
-        throw new Error(`No spec.json or spec.yaml found in ${serviceDir}`)
+    // ── 3. Resolve and load the configured spec source ──────────────────────
+    const specSource = {
+        type: (config.spec?.source ?? 'file') as 'file' | 'url' | 'url-with-fallback',
+        url: config.spec?.url,
+    }
+    const serviceRefreshIntervalMs = config.serviceRefreshIntervalMs ?? 0
+    const serviceRefreshTimeoutMs = config.serviceRefreshTimeoutMs ?? 10_000
+    if (serviceRefreshIntervalMs !== 0 && !(Number.isInteger(serviceRefreshIntervalMs) && serviceRefreshIntervalMs >= MIN_REFRESH_INTERVAL_MS && serviceRefreshIntervalMs <= MAX_TIMER_MS)) {
+        throw new Error(`service "${name}": serviceRefreshIntervalMs must be 0 (off) or an integer from ${MIN_REFRESH_INTERVAL_MS} to ${MAX_TIMER_MS}, got ${String(serviceRefreshIntervalMs)}`)
+    }
+    if (!(Number.isInteger(serviceRefreshTimeoutMs) && serviceRefreshTimeoutMs > 0 && serviceRefreshTimeoutMs <= MAX_TIMER_MS)) {
+        throw new Error(`service "${name}": serviceRefreshTimeoutMs must be a positive integer ≤ ${MAX_TIMER_MS}, got ${String(serviceRefreshTimeoutMs)}`)
     }
 
-    const rawSpec = await SwaggerParser.dereference(specPath)
-    const spec = rawSpec as unknown as OpenAPISpec
+    const specPath = findSpecFile(serviceDir) ?? join(serviceDir, 'spec.yaml')
+    if (specSource.type === 'file' && !existsSync(specPath)) {
+        throw new Error(`No spec.json or spec.yaml found in ${serviceDir}`)
+    }
+    // createMcpGateway awaits this scan before registering the service, so URL
+    // sources are fresh even when periodic service refresh is disabled.
+    const spec = await buildSpecLoader(specSource, specPath, logger, serviceRefreshTimeoutMs).load()
 
-    // ── 4. Derive API host/port from config or spec's servers field ──────────
+    // ── 4. Derive API host/port from the initial, freshly loaded spec ───────
     const apiConfig = resolveApiConfig(config, spec, name, logger)
 
-    // ── 5. Build strategies from config ──────────────────────────────────────
+    // ── 5. Build strategies from config ─────────────────────────────────────
     const auth = resolveAuth(config.auth, logger)
     const circuitBreaker = resolveCircuitBreaker(config.circuitBreaker)
     const permissionGuard = resolvePermissionGuard()
     const idempotencyBackend = resolveIdempotencyBackend(config)
     const idempotencyKeyTtlMs = config.idempotency?.idempotencyKeyTtlMs ?? 600_000
 
-    // ── 5b. Sandbox override (per-service limits; merged with global defaults in server-factory) ──
     const sandboxOverride: SandboxOverride = {
         ...(config.sandbox?.memoryLimitMb !== undefined && {memoryLimitMb: config.sandbox.memoryLimitMb}),
         ...(config.sandbox?.executeTimeoutMs !== undefined && {executeTimeoutMs: config.sandbox.executeTimeoutMs}),
         ...(config.sandbox?.searchTimeoutMs !== undefined && {searchTimeoutMs: config.sandbox.searchTimeoutMs}),
         ...(config.sandbox?.maxApiCalls !== undefined && {maxApiCalls: config.sandbox.maxApiCalls}),
         ...(config.sandbox?.maxConcurrentCalls !== undefined && {maxConcurrentCalls: config.sandbox.maxConcurrentCalls})
-    }
-
-    // ── 5c. Spec source config ──────────────────────────────────────────────
-    const specSource = {
-        type: (config.spec?.source ?? 'file') as 'file' | 'url' | 'url-with-fallback',
-        url: config.spec?.url,
-    }
-
-    // ── 5d. Service-level refresh (applies to both spec and skills) ───────
-    const serviceRefreshIntervalMs = config.serviceRefreshIntervalMs ?? 0
-    const serviceRefreshTimeoutMs = config.serviceRefreshTimeoutMs ?? 10_000
-    // setInterval clamps a negative, NaN or > 2^31-1 delay to 1 ms: a typo would
-    // re-read the spec and every skill file a thousand times a second.
-    if (serviceRefreshIntervalMs !== 0 && !(Number.isInteger(serviceRefreshIntervalMs) && serviceRefreshIntervalMs >= MIN_REFRESH_INTERVAL_MS && serviceRefreshIntervalMs <= MAX_TIMER_MS)) {
-        throw new Error(`service "${name}": serviceRefreshIntervalMs must be 0 (off) or an integer from ${MIN_REFRESH_INTERVAL_MS} to ${MAX_TIMER_MS}, got ${String(serviceRefreshIntervalMs)}`)
-    }
-    if (!(Number.isInteger(serviceRefreshTimeoutMs) && serviceRefreshTimeoutMs > 0 && serviceRefreshTimeoutMs <= MAX_TIMER_MS)) {
-        throw new Error(`service "${name}": serviceRefreshTimeoutMs must be a positive integer ≤ ${MAX_TIMER_MS}, got ${String(serviceRefreshTimeoutMs)}`)
     }
 
     // ── 6. Scan skills directory ─────────────────────────────────────────────
@@ -315,19 +303,7 @@ export function scanSkills(serviceDir: string, logger?: Logger): SkillMetadata[]
             const file = join(skillsDir, filename)
             if (!statSync(file).isFile()) continue
             const raw = readFileSync(file, 'utf-8')
-            // An options object turns off gray-matter's parse cache: a file that
-            // failed once must fail again (the cache returned a blank parse for it).
-            const parsed = matter(raw, {})
-            const id = basename(filename, '.md')
-            const titleMatch = parsed.content.match(/^#\s+(.+)$/m)
-            const frontmatterTitle = parsed.data['title']
-            const title = (typeof frontmatterTitle === 'string' || typeof frontmatterTitle === 'number' ? String(frontmatterTitle).trim() : undefined)
-                || titleMatch?.[1]?.trim()
-                || id.replace(/-/g, ' ')
-            const tags: string[] = Array.isArray(parsed.data['tags'])
-                ? (parsed.data['tags'] as unknown[]).map(String)
-                : []
-            skills.push({id, filename, title, tags, content: raw})
+            skills.push(parseSkillFile(filename, raw))
         } catch (err) {
             logger?.warn({
                 skillsDir,

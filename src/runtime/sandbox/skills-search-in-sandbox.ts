@@ -11,7 +11,7 @@ import type {SandboxLimits} from '../../core/types/config.types.js'
  * The code can filter, search, and transform skill metadata however it needs to.
  *
  * Available inside the sandbox:
- *   skills — array of { id, filename, title, tags, content }
+ *   skills — array of Agent Skill metadata plus the Markdown instruction body
  */
 export async function runSkillsSearchInSandbox(
     userCode: string,

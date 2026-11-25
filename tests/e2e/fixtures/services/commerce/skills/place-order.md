@@ -1,6 +1,8 @@
 ---
-title: Place and pay for an order
-tags: [orders, payments]
+name: place-order
+description: Place and pay for an order, then notify the customer when the workflow completes.
+metadata:
+  tags: "orders, payments"
 ---
 
 # Place and pay for an order

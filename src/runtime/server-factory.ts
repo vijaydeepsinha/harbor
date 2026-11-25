@@ -19,7 +19,7 @@ import {extractBearerFromHeader} from './auth/bearer-authorization.js'
 
 /**
  * Boots a single MCP gateway by auto-scanning the services directory.
- * Each subdirectory with a spec file becomes a registered service.
+ * Each subdirectory with a configured, loadable spec source becomes a registered service.
  * Exposes 5 tools: discover_services, discover_skills, get_skill_details, search_code, api_execute.
  */
 export async function createMcpGateway(

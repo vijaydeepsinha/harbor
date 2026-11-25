@@ -121,6 +121,9 @@ describe('registerSearchCodeTool', () => {
         const entry = server.handlers[TOOL.SEARCH_CODE]
         expect(entry).toBeDefined()
         expect(entry!.def.description).toContain('tasks')
+        expect(entry!.def.description).toContain('Optionally check discover_skills()')
+        expect(entry!.def.description).toContain('get_skill_details({ service, skill_name })')
+        expect(entry!.def.description).toContain('does not discover Skills')
         const schema = entry!.def.inputSchema as ZodObject
         expect(Object.keys(schema.shape)).toEqual(expect.arrayContaining(['service', 'code']))
     })

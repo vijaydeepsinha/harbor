@@ -137,9 +137,9 @@ describe('ServiceRefresher — refreshes never overlap, never land late, and kee
 
     it('a failed spec load keeps the skills as they were too', async () => {
         const skillStore = new SkillStore()
-        skillStore.swap([{id: 's', filename: 's.md', title: 's', tags: [], content: 'x'}])
+        skillStore.swap([{name: 's', filename: 's.md', description: 's', content: 'x'}])
         const refresher = new ServiceRefresher(makeMockLoader(undefined, true), new SpecStore(), skillStore, '/tmp/definitely-no-skills-here', refreshConfig, silentLogger)
         await refresher.forceRefresh()
-        expect(skillStore.getSkills().map(s => s.id)).toEqual(['s'])
+        expect(skillStore.getSkills().map(s => s.name)).toEqual(['s'])
     })
 })

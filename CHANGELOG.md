@@ -22,6 +22,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Live E2E coverage for OAuth 2.1 resource binding via `api_execute` on the billing service (`tests/demo_e2e.py --docker-oauth`): a correct-audience JWT reaches the backend; a same-issuer, same-signature, wrong-audience JWT is rejected (`TOKEN_INVALID`, no data leak).
 
 ### Changed
+- **URL spec sources now load at startup:** `url` services fetch and register
+  the latest remote spec immediately, while `url-with-fallback` tries the URL
+  first and uses the local file only when the remote load fails. URL-only
+  services no longer require a stale local seed, and
+  `serviceRefreshTimeoutMs` applies to initial loads as well as refreshes.
+- **Agent Skills frontmatter:** Skill files in `services/<name>/skills/`
+  now use `name`, `description`, and optional standard fields (`license`,
+  `compatibility`, `metadata`, `allowed-tools`). The `name` must match the `.md`
+  filename stem; `metadata.tags` is a comma-separated string. Harbor exposes
+  body-only `content`, and `get_skill_details` accepts the standard
+  `skill_name` field directly.
 - **Pre-release source/deep-import change:** all provider interfaces now live in SPI; concrete governance/spec/no-op/permission strategies live in adapters; auth orchestration and bearer parsing live in runtime; the token-cache base lives in adapter support. Core retains data types, configuration and errors. Former implementation paths and the runtime wiring re-export were removed rather than kept as compatibility aliases. Update development-build imports to canonical paths. Lint and architectural tests guard the separation; interface members, tool schemas and runtime behaviour are unchanged.
 - **Source layout:** all gateway code lives under `src/` (`src/core`, `src/runtime`, `src/tools`, `src/spi`, `src/adapters`, `src/wiring`, `src/index.ts`); tests stay in `tests/`. The build output is unchanged (`dist/index.js`). Deep imports of the published package resolve as before (`dist/<module>/…`), but anyone importing the TypeScript sources by path must add `src/`. Without `SERVICES_DIR`, the gateway now finds `services/` at the repo (or image) root from both `tsx src/index.ts` and `node dist/index.js`; previously the built entry looked in `dist/services`. `tests/unit/doc-paths.test.ts` fails when a tracked Markdown file names a repository path that does not exist.
 - **Breaking:** Harbor 1.0 implements MCP protocol revision **2026-07-28** only (`legacy: 'reject'`). The 2025 `initialize` / `notifications/initialized` handshake is no longer supported.

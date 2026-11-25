@@ -163,6 +163,10 @@ describe('registerExecuteApiTool', () => {
         const entry = server.handlers[TOOL.API_EXECUTE]
         expect(entry).toBeDefined()
         expect(entry!.def.description).toContain('tasks')
+        expect(entry!.def.description).toContain('(Optional) Checked discover_skills()')
+        expect(entry!.def.description).toContain('Steps 2-3 are optional')
+        expect(entry!.def.description).toContain('get_skill_details(service, skill_name)')
+        expect(entry!.def.description).toContain('Do not invent a skill_name')
         const schema = entry!.def.inputSchema as ZodObject
         expect(Object.keys(schema.shape)).toEqual(expect.arrayContaining(['service', 'code']))
     })

@@ -47,4 +47,8 @@ See `docs/service-onboarding.md`, `docs/configuration.md` and `governance/rules/
 
 ## Removing the demo services
 
-Delete any of the demo folders you don't need. The gateway registers a folder only when it has a spec file and a `config.json` with an `auth` block, and skips any folder whose `config.json` has `"enabled": false` (the boolean) — set that instead of deleting if you just want to disable a service temporarily.
+Delete any of the demo folders you don't need. The gateway registers a folder
+when its configured file or URL spec loads and it has a `config.json` with an
+`auth` block. It skips any folder whose `config.json` has `"enabled": false`
+(the boolean); set that instead of deleting if you only want to disable a
+service temporarily.
