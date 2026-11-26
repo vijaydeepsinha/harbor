@@ -45,7 +45,7 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@apidevtools/swagger-parser": "^10.1.1",
+    "@apidevtools/swagger-parser": "^13.1.0",
     "@modelcontextprotocol/node": "2.1.2",
     "@modelcontextprotocol/server": "2.4.0",
     "axios": "^1.7.9",
