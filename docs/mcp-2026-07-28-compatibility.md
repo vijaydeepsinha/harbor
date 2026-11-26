@@ -131,10 +131,12 @@ See [`oauth-2.1-guide.md`](oauth-2.1-guide.md).
   Harbor's own keys.
 - **Application metadata** — `api_execute` results carry
   `harbor/execution-id`, `harbor/execution-status` and, while paused,
-  `harbor/approval-id`. A client without elicitation resumes by sending
-  `_meta["harbor/execution-id"]` on the request; Harbor treats it as a claim
-  and re-checks that the caller owns that execution. `harbor/` is a placeholder
-  vendor prefix (`META_PREFIX` in `src/core/constants.ts`).
+  `harbor/approval-id`. A client can resume by sending
+  `_meta["harbor/execution-id"]` on the request; it may accompany an MRTR
+  `requestState`, in which case both must identify the same execution. Harbor
+  treats the id as a claim and re-checks that the caller owns that execution.
+  `harbor/` is a placeholder vendor prefix (`META_PREFIX` in
+  `src/core/constants.ts`).
 
 ---
 
@@ -157,11 +159,13 @@ involved; the approval rides the 2026-07-28 multi-round-trip pattern:
    when unset), a TTL (`GOVERNANCE_APPROVAL_TTL_SEC`) and a binding to the
    JSON-RPC method (`src/runtime/execution/request-state.ts`).
 3. **Retry.** The client retries the same `tools/call` with the echoed
-   `requestState` and `inputResponses.approval`. The SDK verifies the state
+   `requestState` and `inputResponses.approval`; it may also include the
+   returned `_meta["harbor/execution-id"]`. The SDK verifies the state
    before the handler runs (`requestState.verify` in
    `src/runtime/http/mcp-server-factory.ts`); a tampered or expired state is a
    JSON-RPC `-32602` error. The handler then re-checks the principal against
-   the bearer it just authenticated, records the decision once (`accept` with
+   the bearer it just authenticated, requires any explicit execution id to
+   match the state's execution, and records the decision once (`accept` with
    `approve: true` — or one of the words `yes`, `sure`, `proceed`, `approve`,
    `approved` — approves; `approve: false`, a word such as `no` or
    `rejected`, or `decline` rejects; `cancel` cancels; any other `approve`

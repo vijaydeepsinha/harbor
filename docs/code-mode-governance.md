@@ -329,8 +329,10 @@ elicitation**. No custom MCP methods.
    refused with `-32602`.
 3. The client retries the **same** `tools/call` with `inputResponses.approval`
    (`accept` + form content, `decline`, or `cancel`) and the echoed
-   `requestState`. Harbor applies the decision once, then resumes the original
-   program in a fresh isolate.
+   `requestState`. It may also send `_meta["harbor/execution-id"]`; when both
+   identifiers are present, the explicit id selects the execution and the
+   verified state must name that same execution. Harbor applies the decision
+   once, then resumes the original program in a fresh isolate.
 4. Mapping: `accept` with `approve: true` → `APPROVED` (the activity executes
    on resume); `accept` with `approve: false` or `decline` → `REJECTED`
    (execution `DENIED`); `cancel` → `CANCELLED`. `approve` may also be a word,
@@ -382,7 +384,7 @@ placeholder until the project's public name is settled):
 | `harbor/execution-id` | response | the durable execution this call ran |
 | `harbor/execution-status` | response | status after the call |
 | `harbor/approval-id` | response | the approval the execution waits on |
-| `harbor/execution-id` | request | resume this execution (fallback path) |
+| `harbor/execution-id` | request | select this durable execution for resume; it may accompany a valid MCP `requestState` |
 
 Reserved `io.modelcontextprotocol/*` keys are never written by Harbor except
 `serverInfo`.
@@ -454,7 +456,8 @@ Agent                Harbor (api_execute)          V8 #1              Backend   
 | API answered with a status below 500 | activity `COMPLETED` with that status — replayable; the program sees `{ ok, status, data }`, `ok: false` for a 4xx |
 | 5xx or transport error (timeout, socket) on `POST` / `PATCH` | sent once, never retried — it may already have taken effect; activity `FAILED`, `outcomeKnown: false`; a later run stops at it with `ACTIVITY_OUTCOME_UNKNOWN` |
 | 5xx or transport error on `GET` / `PUT` / `DELETE` | retried inside the activity up to the service's `maxRetries` (backoff 500·2ⁿ ms + jitter); still failing ⇒ `FAILED`, `outcomeKnown: false`, as above |
-| A failed call the program does not catch | `SANDBOX_RUNTIME` (not retryable) ⇒ execution `FAILED`. `SANDBOX_TIMEOUT` is only the run's own time limit, whatever a backend's error message says |
+| A governed non-GET call throws after it was journaled `EXECUTING` | `ACTIVITY_OUTCOME_UNKNOWN` (not retryable) ⇒ execution `FAILED`, even if the program catches the bridge error. A later run never re-sends the call |
+| An ordinary uncaught program error | `SANDBOX_RUNTIME` (not retryable) ⇒ execution `FAILED`. `SANDBOX_TIMEOUT` is only the run's own time limit, whatever a backend's error message says |
 | Process died mid-call | activity left `EXECUTING`; on resume `GET` re-executes, anything else fails closed |
 | Calls still in flight when the program returned | finished within the run's time budget, else aborted and journaled `FAILED` (outcome unknown), before the run's outcome is recorded (§4) |
 | Circuit open / other retryable error | execution `INTERRUPTED` (resumable via `_meta["harbor/execution-id"]`); no activity recorded for the unmade call |
@@ -590,7 +593,7 @@ What a single write means per adapter:
 |---|---|---|---|
 | `in-memory` | a map update; cannot fail on its own | the process takes the whole store with it: nothing partial survives because nothing survives | in-process; die with the process |
 | `file` | the execution's whole document, rewritten through a temp file + rename — atomic, never torn | the document keeps the last completed write. No `fsync`: a power loss can lose the most recent writes. A write that fails on disk (full, unwritable) has already changed the copy in memory, so the process keeps running on state that a restart would not see | in-process |
-| `memcache` | one item per record (`set` is atomic per key); index keys are separate writes | an outage or a crash between two writes leaves the earlier ones; items without a TTL can still be evicted under memory pressure — size memcache for what you keep, and treat the audit trail as the durable record | `add` with a TTL; a crashed pod's lock expires after `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC` |
+| `memcache` | one item per record (`set` is atomic per key); a false `set` or required `touch` is an error, not a silent success; index keys are separate writes | an outage or a crash between two writes leaves the earlier ones; items without a TTL can still be evicted under memory pressure — size memcache for what you keep, and treat the audit trail as the durable record | `add` with a TTL; a crashed pod's lock expires after `EXECUTION_STORE_MEMCACHE_LOCK_TTL_SEC` |
 | registered backend | must make each record write atomic — the recovery below assumes nothing more | | must be held across processes, with an expiry |
 
 What a cut leaves, per operation, and how it recovers (tests:

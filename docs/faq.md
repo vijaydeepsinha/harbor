@@ -125,7 +125,11 @@ Increase `SANDBOX_EXECUTE_TIMEOUT_MS` (default: 8000ms) for `api_execute`, or `S
 
 Or reduce the work your code does — avoid loading large objects unnecessarily.
 
-`SANDBOX_TIMEOUT` means the run's own wall-clock budget ran out. A slow backend looks different: `api.request()` rejects with the HTTP client's timeout, and if the program does not catch it the run ends as `SANDBOX_RUNTIME`. For that, raise `api.requestTimeoutMs` in the service's `config.json`.
+`SANDBOX_TIMEOUT` means the run's own wall-clock budget ran out. A slow backend looks different:
+`api.request()` rejects with the HTTP client's timeout. For a governed non-GET call, Harbor marks
+the execution `FAILED` with `ACTIVITY_OUTCOME_UNKNOWN`, whether or not user code caught the
+bridge error; a governed GET or legacy call that escapes can end as `SANDBOX_RUNTIME`. To allow
+more backend time, raise `api.requestTimeoutMs` in the service's `config.json`.
 
 ---
 

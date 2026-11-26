@@ -290,7 +290,7 @@ export const MCP_PROTOCOL_VERSION = '2026-07-28'
  * placeholder until the project's public name is settled — rename in one place.
  */
 export const META_PREFIX = 'harbor/'
-/** Response `_meta`: the durable execution id of the Code Mode run. Request `_meta`: resume this execution (non-MRTR clients). */
+/** Response `_meta`: the durable execution id of the Code Mode run. Request `_meta`: select this execution for resume. */
 export const EXECUTION_ID_META_KEY = `${META_PREFIX}execution-id`
 /** Response `_meta`: execution status after this tool call. */
 export const EXECUTION_STATUS_META_KEY = `${META_PREFIX}execution-status`

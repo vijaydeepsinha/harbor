@@ -132,9 +132,10 @@ The gateway factory runs these steps once at startup:
    (`127.0.0.1:3333`). stdio: `MCP_TOKEN` is required and must pass the bearer parser (a JWT, or
    ≥ 32 base64url characters), or the process exits.
 
-8. **Registers `SIGTERM` and `SIGINT` handlers**: close the HTTP listener, then shut down the Code
-   Mode runtime (retention sweeper, rule refresher, store), close the audit pipeline, destroy the
-   token cache, stop every service refresher and the metrics timers.
+8. **Registers `SIGTERM` and `SIGINT` handlers**: for HTTP, stop accepting connections and wait
+   for accepted requests to drain; then shut down the Code Mode runtime (retention sweeper, rule
+   refresher, store), close the audit pipeline, destroy the token cache, stop every service refresher
+   and the metrics timers. stdio uses the same shared teardown after its transport ends.
 
 ---
 
@@ -344,11 +345,12 @@ execution is created and no sandbox runs.
 - **A new call** (no `requestState`, no `_meta["harbor/execution-id"]`) creates an execution. Its
   `code` is persisted as the authoritative original.
 - **A resume** — an MRTR retry carrying the sealed `requestState` (the SDK verified its HMAC, TTL
-  and method binding before the handler ran), or a client that decided over HTTP and sends
-  `_meta["harbor/execution-id"]` — loads the execution and checks it belongs to the same principal
-  and service (else `EXECUTION_NOT_RESUMABLE`). It then applies the human's answer via
-  `ApprovalService.decide()`. A reject ends the execution `DENIED` and a cancel ends it
-  `CANCELLED`, before anything runs. The incoming `code` is ignored.
+  and method binding before the handler ran), a client that decided over HTTP and sends
+  `_meta["harbor/execution-id"]`, or both — loads the execution and checks it belongs to the same
+  principal and service (else `EXECUTION_NOT_RESUMABLE`). The explicit id selects the execution;
+  a supplied state must name that same id before its human answer is applied via
+  `ApprovalService.decide()`. A reject ends the execution `DENIED` and a cancel ends it `CANCELLED`,
+  before anything runs. The incoming `code` is ignored.
 - `ExecutionManager.beginRun()` takes the run lock and moves the execution to `RUNNING`. It is
   refused with `EXECUTION_LOCKED` (retryable) while another run holds the lock, with
   `EXECUTION_NOT_RESUMABLE` when the execution is finished, and with the pause again when its
@@ -393,8 +395,9 @@ A failure is classified by what happened, never by the wording of a message:
   timeout fired.
 - `SANDBOX_MEMORY` (not retryable) — the isolate was disposed by `isolated-vm` itself.
 - `SANDBOX_SYNTAX` (not retryable) — the program does not compile.
-- `SANDBOX_RUNTIME` (not retryable) — anything else the program threw, including a backend error it
-  did not catch (e.g. a `timeout of 2000ms exceeded` from a slow backend).
+- `SANDBOX_RUNTIME` (not retryable) — an ordinary exception the program threw, including an
+  escaped transport error on a governed GET or the legacy unjournaled path. A governed non-GET
+  transport failure is promoted separately as `ACTIVITY_OUTCOME_UNKNOWN`.
 
 ---
 
@@ -627,10 +630,10 @@ Transport-level failures are HTTP responses; everything after the transport is a
 | Sandbox wall-clock or CPU timeout | `SANDBOX_TIMEOUT` | yes | Execution `INTERRUPTED` |
 | Sandbox memory limit | `SANDBOX_MEMORY` | no | Execution `FAILED` |
 | Sandbox syntax error | `SANDBOX_SYNTAX` | no | Execution `FAILED` |
-| Program threw (including an uncaught backend error) | `SANDBOX_RUNTIME` | no | Execution `FAILED` |
+| Program threw an ordinary exception | `SANDBOX_RUNTIME` | no | Execution `FAILED` |
 | Unexpected internal sandbox failure | `SANDBOX_INTERNAL_ERROR` | yes | Sanitised message; the cause is logged server-side |
 | Backend API 4xx | — | — | `{ data, status, ok: false }` to the program — not an error, not retried; activity `COMPLETED` |
-| Backend API 5xx or transport error | `API_ERROR` (or the transport's code) inside the program | — | GET/PUT/DELETE retried first; POST/PATCH never. Activity `FAILED` (outcome unknown), one breaker failure; the program may catch it, otherwise the run ends `SANDBOX_RUNTIME` |
+| Backend API 5xx or transport error | `API_ERROR` (or the transport's code) inside the program | — | GET/PUT/DELETE retried first; POST/PATCH never. Activity `FAILED` (outcome unknown), one breaker failure. A governed non-GET failure is promoted to `ACTIVITY_OUTCOME_UNKNOWN` even if caught; a governed GET/legacy error that escapes becomes `SANDBOX_RUNTIME` |
 | Idempotency cache down | — | — | Logs `warn`, executes the call directly |
 | Spec refresh fails | — | — | Logs `warn`, keeps the old spec and skills, never throws |
 

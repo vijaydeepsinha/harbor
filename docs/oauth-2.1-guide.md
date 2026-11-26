@@ -208,7 +208,7 @@ python3 tests/demo_e2e.py --start-services --oauth \
 
 This command:
 1. Starts the product/order/tasks backend services and Harbor
-2. Exercises all MCP tools (discover_services, discover_skills, search_code, api_execute)
+2. Exercises all MCP tools (discover_services, discover_skills, get_skill_details, search_code, api_execute)
 3. Verifies the OAuth 2.1 metadata endpoints (`/.well-known/oauth-protected-resource`)
 4. Spins up the Docker mock AS on port 8080, the billing backend on 3004 and the mock introspection server on 3008
 5. Switches Harbor to OAuth mode: enables `billing`, `billing-jwt` and `billing-introspection`, disables product/order/tasks, sets `HARBOR_RESOURCE_URI`

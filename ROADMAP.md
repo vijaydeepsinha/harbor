@@ -54,7 +54,6 @@ Found in the 2026-09-27 review and not yet fixed. Several need an owner decision
 
 ### Services and packaging
 - [ ] `config.json` is not schema-validated (`"enabled": "false"` is truthy, a partial `tls` block is dropped); a missing `config.json` skips the service
-- [ ] Production Dockerfile ships no `governance/rules` (zero rules unless mounted), and its HEALTHCHECK uses `localhost` (IPv6 on Alpine)
 
 ### Observability
 - [x] Error-path audit lines carry the authenticated `userIdHash` (they read `"unknown"` until the PR #7 follow-up)

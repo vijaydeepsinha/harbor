@@ -24,6 +24,10 @@ review of main.
 Release-readiness rerun on 2026-11-21 (`--local`): 157 governance E2E tests and
 232 Postman assertions passed.
 
+Current validation on 2026-11-26: 73 unit/integration files reported 838 passed
+and 1 skipped; the production-image governance run reported 157 E2E tests and
+232 Postman assertions passed, 389/389 in total.
+
 | Suite | Then (2026-09-21) | Now (2026-09-27) |
 |---|--:|--:|
 | Governance E2E (vitest, 15 files) | 138 tests | 156 tests, all passed |
@@ -35,9 +39,9 @@ The §K findings for the owner:
 | # | Finding | Status |
 |---|---|---|
 | 1 | A program can override the outbound `Authorization` header | **Resolved** by 24bdc72: identity, Harbor-owned and routing headers a program sets are dropped. The pinned test is now `bypass › should_not_let_program_supplied_headers_change_the_outbound_identity_or_routing`. |
-| 2 | An uncaught backend timeout is reported as `SANDBOX_TIMEOUT` | **Resolved** by a46d977: errors are classified by what happened; this one is `SANDBOX_RUNTIME` (execution `FAILED`, not retryable). The test is now `failures › should_report_an_uncaught_backend_timeout_as_a_runtime_error_not_a_sandbox_timeout`. |
+| 2 | An uncaught backend timeout is reported as `SANDBOX_TIMEOUT` | **Resolved.** a46d977 separated backend errors from the sandbox timer; the later unknown-outcome fix reports a governed non-GET timeout as `ACTIVITY_OUTCOME_UNKNOWN`, including when user code catches the bridge error, and leaves the execution `FAILED`. The test is `failures › should_report_an_uncaught_backend_timeout_as_outcome_unknown_not_a_sandbox_timeout`. |
 | 3 | Any valid bearer can inspect and decide another principal's execution over `/executions/*` | **Resolved** on main by owner binding (3cbc9df, 12ca119): anyone but the owner gets 403 and the approval stays pending. Pinned by `authorization › should_bind_http_inspection_and_decisions_to_the_execution_owner`. |
-| 4 | `Dockerfile` `HEALTHCHECK` resolves `localhost` to IPv6 on Alpine | **Open.** |
+| 4 | `Dockerfile` `HEALTHCHECK` resolves `localhost` to IPv6 on Alpine | **Resolved.** The production image probes `127.0.0.1:3333` directly; the governance workflow builds and boots that image. |
 
 What has changed since hand-over, so the body no longer says it:
 
@@ -47,6 +51,8 @@ What has changed since hand-over, so the body no longer says it:
 - A terminal execution's `originalCode` is dropped by default (`EXECUTION_CODE_RETENTION`, 79622ee).
 - Each service can refresh its own rules using `governance.rulesRefreshSec` in `config.json` (66f7b41); a `memcache` store shares the journal and run lock across pods (0a9dc25).
 - Replay binds the approved request: `APPROVED`, `WAITING_APPROVAL` and `EXECUTING` records bind query and body as well as method and path (241d217).
+- The production image now includes `governance/rules/`, and its `HEALTHCHECK`
+  uses IPv4 loopback instead of `localhost`.
 - The bridge logic the §K mutations targeted now lives in `src/runtime/sandbox/bridge-request-handler.ts` and `src/runtime/execution/activity-gate.ts` (see `TESTING.md`).
 - Per-file E2E counts in §D changed: approval 12 → 14, bypass 8 → 22, idempotency 7 → 8, protocol 24 → 25.
 

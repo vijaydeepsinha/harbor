@@ -210,7 +210,7 @@ protocol edge cases — plus a Postman collection. See [`TESTING.md`](TESTING.md
 
 ```bash
 npm run dev          # tsx watch — live reload
-npm test             # vitest — unit + integration (822 passing, 1 skipped)
+npm test             # vitest — unit + integration (838 passing, 1 skipped)
 npm run typecheck    # tsc --noEmit (strict)
 npm run lint         # eslint
 npm run build        # tsc → dist/

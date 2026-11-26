@@ -159,7 +159,7 @@ Error bodies from these routes are `{ error, code, … }` with `code` from `ERR`
 | Surface | Status | Notes |
 |---------|--------|-------|
 | `io.modelcontextprotocol/serverInfo` in response `_meta` | ✅ | Protocol-defined; `{ name: "harbor", version }` |
-| `harbor/execution-id`, `harbor/execution-status`, `harbor/approval-id` (`_meta`) | 🟡 | `META_PREFIX` (`src/core/constants.ts`) is a placeholder until the project's public name is settled; `harbor/execution-id` in a request `_meta` resumes an execution |
+| `harbor/execution-id`, `harbor/execution-status`, `harbor/approval-id` (`_meta`) | 🟡 | `META_PREFIX` (`src/core/constants.ts`) is a placeholder until the project's public name is settled; `harbor/execution-id` in request `_meta` selects the durable execution and may accompany a matching MCP `requestState` |
 | `input_required` approval form (input key `approval`; `approve` boolean — the listed answer words are accepted too — and `comment`) | 🟡 | The MRTR pattern is the protocol's; the form content is Harbor's |
 | Outbound `Authorization`, `Content-Type`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-Idempotency-Key`, `X-Correlation-ID` | ✅ | Header names. Values are not frozen: `X-Correlation-ID` is the current MCP request id (shared within one sandbox run), while governed idempotency keys include the durable execution id (`mcp-{service}-{executionId}-{sequence}`) |
 | Outbound `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `X-Harbor-Execution-ID` | ✅ | Gateway stamp, optional forwarded caller ID, and governed execution ID respectively; `X-Harbor-Execution-ID` is absent on the legacy path |

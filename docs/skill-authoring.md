@@ -136,10 +136,12 @@ Otherwise it throws an `Error` whose message starts with a code (`CODE: message`
 | `REPLAY_DIVERGED` | On a resume, the program made a different call than the one recorded at that position |
 | `ACTIVITY_OUTCOME_UNKNOWN` | On a resume, a call failed or was cut off in an earlier run and cannot safely be repeated |
 
-Catching anything but the first row does not help: Harbor reports the violation as the run's
-outcome once the program returns. After a pause or stop (approval, denial, cancellation,
-divergence, unknown outcome) every further `api.request()` in that run is refused. An uncaught
-error fails the run (`SANDBOX_RUNTIME`).
+Catching a policy violation does not help: Harbor reports it as the run's outcome once the
+program returns. For a governed non-GET transport failure, the same applies even to the first row:
+the bridge records `outcomeKnown: false`, and the promoted error is
+`ACTIVITY_OUTCOME_UNKNOWN`. After a pause or stop (approval, denial, cancellation, divergence,
+unknown outcome) every further `api.request()` in that run is refused. An ordinary uncaught
+program error fails the run (`SANDBOX_RUNTIME`).
 
 **Approvals re-run the program.** When a call needs approval, the agent should retry the *same*
 `api_execute` call after the human decides — not rewrite it. Harbor runs the original program again

@@ -271,7 +271,7 @@ Runs AI-written code in a V8 sandbox with `api.request()` injected. `api.request
 }
 ```
 
-**Per tool call** (`src/tools/execute-api.tool.ts` → `src/tools/execute-api-run.ts`): read the request at the SDK boundary (`src/tools/mcp-request-view.ts`) → resolve the service → validate the bearer → create a durable execution, or resume one (an MCP retry carrying `requestState`, or `_meta["harbor/execution-id"]`) → take the execution's run lock → run the program — the persisted original on a resume — in a fresh isolate → wait for the calls it started to finish → record the run's outcome → return the result, an `input_required` approval request, or an error. Once the execution exists, every result carries `harbor/execution-id` and `harbor/execution-status` in `_meta`.
+**Per tool call** (`src/tools/execute-api.tool.ts` → `src/tools/execute-api-run.ts`): read the request at the SDK boundary (`src/tools/mcp-request-view.ts`) → resolve the service → validate the bearer → create a durable execution, or resume one (an MCP retry carrying `requestState`, `_meta["harbor/execution-id"]`, or both when they name the same execution) → take the execution's run lock → run the program — the persisted original on a resume — in a fresh isolate → wait for the calls it started to finish → record the run's outcome → return the result, an `input_required` approval request, or an error. Once the execution exists, every result carries `harbor/execution-id` and `harbor/execution-status` in `_meta`.
 
 **Per `api.request()` call** (`src/runtime/sandbox/bridge-request-handler.ts`), in this order:
 
@@ -366,7 +366,10 @@ interface ApiResponse {
 - a 5xx or a transport error (timeout, connection failure). GET, PUT and DELETE are retried first, up to the service's `api.maxRetries` (default 1) with backoff `500·2^n ms` + jitter; POST and PATCH are sent once and never retried, since the first attempt may have taken effect. The activity is journaled `FAILED` (outcome unknown), so a resume stops with `ACTIVITY_OUTCOME_UNKNOWN` rather than repeat it;
 - a policy or limit refusal (governance, permission, circuit breaker, call limits, invalid request).
 
-A bridge error the program does not catch ends the run as `SANDBOX_RUNTIME`.
+A policy/limit bridge error is promoted with its own code even if user code catches it. A
+governed non-GET transport failure is promoted as `ACTIVITY_OUTCOME_UNKNOWN`; an ordinary
+uncaught program error, or an escaped governed GET/legacy transport error, is
+`SANDBOX_RUNTIME`.
 
 ```javascript
 // Correct pattern
@@ -464,7 +467,7 @@ Tool errors are returned as structured objects in the tool response (`isError: t
 | `SANDBOX_SYNTAX` | No | JavaScript syntax error in submitted code |
 | `SANDBOX_TIMEOUT` | Yes | The run exceeded its wall-clock budget |
 | `SANDBOX_MEMORY` | No | The isolate hit its memory limit |
-| `SANDBOX_RUNTIME` | No | The code threw an uncaught exception — including an `api.request()` error it did not catch (`API_ERROR`, a backend timeout) |
+| `SANDBOX_RUNTIME` | No | The code threw an ordinary uncaught exception; a governed GET/legacy `api.request()` error can reach this classification |
 | `SANDBOX_INTERNAL_ERROR` | Yes | Unexpected host-side failure (details logged, not returned) |
 | `CALL_LIMIT_EXCEEDED` | No | Too many `api.request()` calls |
 | `CONCURRENT_LIMIT_EXCEEDED` | No | Too many concurrent `api.request()` calls |
@@ -472,7 +475,7 @@ Tool errors are returned as structured objects in the tool response (`isError: t
 | `CIRCUIT_OPEN` | Yes | Circuit breaker open for the endpoint |
 | `PERMISSION_DENIED` | No | The permission guard refused the endpoint |
 
-`API_ERROR` (a 5xx or transport failure after retries) is what the *program* sees from `api.request()`; it never reaches the client as a top-level code. The governance codes are listed under [Code Mode governance](#code-mode-governance-durable-executions-approvals). A retryable error leaves the execution `INTERRUPTED` (resumable); a non-retryable one ends it `FAILED`.
+`API_ERROR` (a 5xx or transport failure after retries) or the transport's own code is what the *program* sees from `api.request()`. For a governed non-GET call, Harbor promotes the failed, outcome-unknown activity to `ACTIVITY_OUTCOME_UNKNOWN` after the isolate settles, even if the program caught the bridge error. The governance codes are listed under [Code Mode governance](#code-mode-governance-durable-executions-approvals). A retryable error leaves the execution `INTERRUPTED` (resumable); a non-retryable one ends it `FAILED`.
 
 ---
 
@@ -578,7 +581,7 @@ Additional error codes:
 | `EXECUTION_NOT_FOUND` | No | Unknown execution id |
 | `EXECUTION_NOT_RESUMABLE` | No | Finished, owned by another principal, or bound to another service |
 | `EXECUTION_CANCELLED` | No | The human cancelled the approval |
-| `ACTIVITY_OUTCOME_UNKNOWN` | No | A previous run's call to this activity failed or was cut off; Harbor will not repeat it |
+| `ACTIVITY_OUTCOME_UNKNOWN` | No | A call failed without a known backend outcome in this run, or a failed/in-flight non-GET call is found on resume; Harbor will not repeat it |
 | `RUN_OUTCOME_NOT_RECORDED` | Yes | The program completed but read-back could not confirm completion. Inspect persistence and any retained lock; if resumable, resume with `_meta["harbor/execution-id"]` to replay journaled calls, not a fresh execution. Metadata reports observed status or omits it if unreadable. Confirmed `COMPLETED` instead returns the recorded result |
 | `APPROVAL_NOT_FOUND` | No | Unknown approval, or one of another execution |
 | `APPROVAL_ALREADY_DECIDED` | No | A different answer was already recorded |

@@ -319,9 +319,9 @@ src/tools/execute-api.tool.ts
   │     userIdHash = hashAuthenticatedPrincipal(payload, bearer)
   │  runApiExecute — the run orchestrator (execute-api-run.ts); steps 3–7, returns a report
   ├─ 3. openExecution
-  │        requestState (MRTR retry) or _meta["harbor/execution-id"] ⇒ resume:
+  │        requestState (MRTR retry), _meta["harbor/execution-id"], or both (same id) ⇒ resume:
   │           load; same principal and service or EXECUTION_NOT_RESUMABLE;
-  │           apply the human's answer (ApprovalService.decide) — reject/cancel end it here;
+  │           apply the verified human's answer (ApprovalService.decide) — reject/cancel end it here;
   │           still pending without an answer ⇒ input_required again
   │        otherwise ⇒ ExecutionManager.create — the program is persisted as the authoritative original
   ├─ 4. ExecutionManager.beginRun — run lock, RUNNING, runCount + 1
@@ -439,8 +439,9 @@ src/runtime/server-factory.ts
                                    oauthConfig, governanceRuntime })
           stdio: MCP_TOKEN required and must pass the bearer parser, else exit;
                  startStdioGateway({ createMcpServer, registry, logger })
-          SIGTERM / SIGINT: close the HTTP listener, then governanceRuntime.shutdown(), auditPipeline.close(),
-                 token cache destroy, registry.shutdownAll() (refreshers, metrics), gateway metrics stop
+          SIGTERM / SIGINT: stop HTTP admission and await active-request drain, then
+                 governanceRuntime.shutdown(), auditPipeline.close(), token cache destroy,
+                 registry.shutdownAll() (refreshers, metrics), gateway metrics stop
 ```
 
 ---
@@ -473,7 +474,9 @@ A custom connector takes over everything `ApiClient` does after the bridge hands
 - dropping program-supplied identity and routing headers, and sending the correlation, idempotency and `X-Harbor-*` headers;
 - honouring `ctx.signal`, and `ctx.invalidate()` on a backend 401.
 
-A throw becomes a FAILED activity with an unknown outcome. The run stops there and the call is never retried silently.
+A throw becomes a FAILED activity with an unknown outcome. A governed non-GET call is then
+promoted to `ACTIVITY_OUTCOME_UNKNOWN` even if user code catches the bridge error; no caller may
+silently turn that unknown outcome into a successful run.
 
 ---
 
