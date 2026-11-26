@@ -775,8 +775,8 @@ const collection = {
             resetMock(),
             apiExecute('A POST that gets a 500 is sent once — its outcome is unknown, so it is never retried', 'commerce', programs.unstable('500'), [T.status('FAILED'), "pm.test('tool error', () => pm.expect(result.isError).to.eql(true));"]),
             downstream('Downstream — one attempt', '?method=POST&path=/unstable', ["pm.test('exactly 1 POST', () => pm.expect(calls).to.have.length(1));"]),
-            apiExecute('An uncaught backend timeout is SANDBOX_RUNTIME, not a retryable SANDBOX_TIMEOUT', 'commerce', programs.unstable('timeout'), [
-                T.toolError('SANDBOX_RUNTIME'), T.status('FAILED'), "pm.test('not retryable', () => pm.expect(payload.retryable).to.eql(false));"
+            apiExecute('An uncaught backend timeout is not retryable', 'commerce', programs.unstable('timeout'), [
+                T.toolError('ACTIVITY_OUTCOME_UNKNOWN'), T.status('FAILED'), "pm.test('not retryable', () => pm.expect(payload.retryable).to.eql(false));"
             ]),
 
             resetMock(),

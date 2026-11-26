@@ -264,11 +264,11 @@ export class ExecutionCancelledError extends ExecutionError {
     }
 }
 
-/** A previous run died while this activity's external call was in flight; Harbor cannot know whether it executed. */
+/** An activity's external call ended without a result; Harbor cannot know whether it executed. */
 export class ActivityOutcomeUnknownError extends ExecutionError {
     constructor(readonly executionId: string, readonly activitySequence: number, readonly label: string) {
         super(
-            `Activity #${activitySequence} (${label}) was in flight when a previous run ended; ` +
+            `Activity #${activitySequence} (${label}) ended without a known API outcome; ` +
             `Harbor cannot tell whether the API executed it, so it will not be repeated. Inspect the execution and start a new one.`,
             ERR.ACTIVITY_OUTCOME_UNKNOWN, false
         )

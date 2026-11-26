@@ -97,10 +97,15 @@ export class MemcacheExecutionStore implements ExecutionPersistence {
         const key = this.executionKey(record.executionId)
         if ((await this.read(key)) === undefined) throw new Error(`Execution ${record.executionId} does not exist`)
         const ttl = this.ttlFor(record)
-        await this.kv.set(key, JSON.stringify(record), {expires: ttl})
+        await this.write(key, JSON.stringify(record), {expires: ttl})
         // Terminal with a retention period: everything recorded for it expires with it.
         if (ttl > 0) {
-            for (const itemKey of await this.itemKeys(record.executionId)) await this.kv.touch(itemKey, ttl)
+            for (const itemKey of await this.itemKeys(record.executionId)) {
+                const {value} = await this.kv.get(itemKey)
+                if (value !== null && !await this.kv.touch(itemKey, ttl)) {
+                    throw new Error(`Memcache touch failed for ${itemKey}`)
+                }
+            }
         }
     }
 
@@ -118,9 +123,9 @@ export class MemcacheExecutionStore implements ExecutionPersistence {
     // ── activities ────────────────────────────────────────────────────────────
 
     async putActivity(record: ActivityRecord): Promise<void> {
-        await this.kv.set(this.activityKey(record.executionId, record.sequence), JSON.stringify(record))
+        await this.write(this.activityKey(record.executionId, record.sequence), JSON.stringify(record))
         const highest = await this.highestSequence(record.executionId)
-        if (record.sequence > highest) await this.kv.set(this.activityIndexKey(record.executionId), String(record.sequence))
+        if (record.sequence > highest) await this.write(this.activityIndexKey(record.executionId), String(record.sequence))
     }
 
     async getActivity(executionId: string, sequence: number): Promise<ActivityRecord | undefined> {
@@ -140,10 +145,10 @@ export class MemcacheExecutionStore implements ExecutionPersistence {
     // ── approvals ─────────────────────────────────────────────────────────────
 
     async putApproval(record: ApprovalRecord): Promise<void> {
-        await this.kv.set(this.approvalKey(record.approvalId), JSON.stringify(record))
+        await this.write(this.approvalKey(record.approvalId), JSON.stringify(record))
         const ids = await this.approvalIds(record.executionId)
         if (!ids.includes(record.approvalId)) {
-            await this.kv.set(this.approvalIndexKey(record.executionId), JSON.stringify([...ids, record.approvalId]))
+            await this.write(this.approvalIndexKey(record.executionId), JSON.stringify([...ids, record.approvalId]))
         }
     }
 
@@ -165,7 +170,7 @@ export class MemcacheExecutionStore implements ExecutionPersistence {
     async putDecision(record: GovernanceDecisionRecord): Promise<void> {
         const key = this.decisionsKey(record.executionId)
         const decisions = (await this.read<GovernanceDecisionRecord[]>(key)) ?? []
-        await this.kv.set(key, JSON.stringify([...decisions, record]))
+        await this.write(key, JSON.stringify([...decisions, record]))
     }
 
     async listDecisions(executionId: string): Promise<GovernanceDecisionRecord[]> {
@@ -194,6 +199,10 @@ export class MemcacheExecutionStore implements ExecutionPersistence {
     private async read<T>(key: string): Promise<T | undefined> {
         const {value} = await this.kv.get(key)
         return value === null ? undefined : (JSON.parse(value.toString()) as T)
+    }
+
+    private async write(key: string, value: string, options?: { expires?: number }): Promise<void> {
+        if (!await this.kv.set(key, value, options)) throw new Error(`Memcache set failed for ${key}`)
     }
 
     private async highestSequence(executionId: string): Promise<number> {

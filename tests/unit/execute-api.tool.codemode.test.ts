@@ -105,11 +105,12 @@ describe('api_execute under the Code Mode governance layer', () => {
         expect(count('GET', '/campaigns')).toBe(1)
         expect(count('POST', '/campaigns/C1/finalize')).toBe(0)
 
-        // client retries the SAME call with the human's answer (and, per MRTR, the same arguments)
+        // client retries the SAME call with the human's answer; clients that carry the
+        // durable execution id on every request still get the standard MCP continuation.
         const done = await handler({
             service: 'trafficking',
             code: PROGRAM_FINALIZE
-        }, await retryCtx(governanceRuntime, paused, {action: 'accept', approve: true, comment: 'ship it'}))
+        }, await retryCtx(governanceRuntime, paused, {action: 'accept', approve: true, comment: 'ship it'}, '2', executionId))
         expect(done['isError']).toBeUndefined()
         expect(parseContent(done)).toEqual({id: 'C1', did: 'POST /campaigns/C1/finalize'})
         expect((done['_meta'] as Record<string, unknown>)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.COMPLETED)
@@ -251,7 +252,8 @@ describe('api_execute under the Code Mode governance layer', () => {
         expect(meta[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.WAITING_APPROVAL)
         expect(meta[APPROVAL_ID_META_KEY]).toBe(approvalId)
 
-        // An elicitation-capable client that lost its requestState is simply asked again.
+        // The capability chooses the interaction channel; the execution id still
+        // selects the durable execution.
         const reasked = await handler({
             service: 'trafficking',
             code: PROGRAM_FINALIZE

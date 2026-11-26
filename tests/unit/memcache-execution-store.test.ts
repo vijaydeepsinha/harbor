@@ -13,6 +13,19 @@ import type {ExecutionRecord} from '../../src/core/types/execution.types.js'
 
 const T0 = Date.parse('2026-01-01T00:00:00.000Z')
 
+class RejectingMemcache extends FakeMemcache {
+    rejectSet = false
+    rejectTouch = false
+
+    override async set(key: string, value: string, options?: { expires?: number }): Promise<boolean> {
+        return this.rejectSet ? false : super.set(key, value, options)
+    }
+
+    override async touch(key: string, expires: number): Promise<boolean> {
+        return this.rejectTouch ? false : super.touch(key, expires)
+    }
+}
+
 function clock() {
     let now = T0
     return {
@@ -41,6 +54,42 @@ function twoPods() {
 }
 
 describe('memcache execution store — shared by every pod', () => {
+    it('rejects unsuccessful required writes and retention touches', async () => {
+        const kv = new RejectingMemcache()
+        const store = new MemcacheExecutionStore(kv)
+        await store.createExecution(execution('e-1'))
+
+        kv.rejectSet = true
+        await expect(store.putActivity({
+            executionId: 'e-1',
+            sequence: 1,
+            service: 'svc',
+            status: ACTIVITY_STATUS.EXECUTING,
+            request: {method: 'POST', rawPath: '/x', specPath: '/x'},
+            runIndex: 1,
+            createdAt: 't',
+            updatedAt: 't'
+        })).rejects.toThrow('Memcache set failed')
+
+        kv.rejectSet = false
+        await store.putActivity({
+            executionId: 'e-1',
+            sequence: 1,
+            service: 'svc',
+            status: ACTIVITY_STATUS.COMPLETED,
+            request: {method: 'POST', rawPath: '/x', specPath: '/x'},
+            runIndex: 1,
+            createdAt: 't',
+            updatedAt: 't'
+        })
+        kv.rejectTouch = true
+        await expect(store.updateExecution({
+            ...(await store.getExecution('e-1'))!,
+            status: EXECUTION_STATUS.COMPLETED,
+            expiresAt: new Date(Date.now() + 60_000).toISOString()
+        })).rejects.toThrow('Memcache touch failed')
+    })
+
     it('what one pod writes, another reads: execution, journal, approvals, decisions', async () => {
         const {podA, podB} = twoPods()
         await podA.createExecution(execution('e-1'))

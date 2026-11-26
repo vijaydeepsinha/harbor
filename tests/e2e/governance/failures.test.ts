@@ -29,10 +29,12 @@ describe('failure handling', () => {
     }
 
     it('should_not_retry_a_post_that_got_a_500_and_journal_the_activity_as_failed_with_unknown_outcome', async () => {
-        const out = expectToolError(await s().client('alice').apiExecute('commerce', programs.unstable('500')))
+        const out = expectToolError(
+            await s().client('alice').apiExecute('commerce', programs.unstable('500')),
+            ERR.ACTIVITY_OUTCOME_UNKNOWN
+        )
         s().track(out.meta.executionId)
         s().note('uncaught500Code', out.code)
-        expect(out.message).toContain('500')
         expect(out.meta.executionStatus).toBe(EXECUTION_STATUS.FAILED)
         // maxRetries: 1, but a POST is never re-sent: the first attempt may already have taken effect.
         expect(await s().mock.count('POST', '/unstable')).toBe(1)
@@ -46,10 +48,12 @@ describe('failure handling', () => {
     })
 
     it('should_journal_a_backend_timeout_as_failed_with_unknown_outcome', async () => {
-        const out = expectCompleted(await s().client('alice').apiExecute('commerce', programs.unstableCaught('timeout')))
+        const out = expectToolError(
+            await s().client('alice').apiExecute('commerce', programs.unstableCaught('timeout')),
+            ERR.ACTIVITY_OUTCOME_UNKNOWN
+        )
         s().track(out.meta.executionId)
-        expect(out.value).toMatchObject({threw: true})
-        expect(String((out.value as { message: string }).message).toLowerCase()).toContain('timeout')
+        expect(out.meta.executionStatus).toBe(EXECUTION_STATUS.FAILED)
         const insp = await s().admin.inspect(out.meta.executionId!)
         expect(insp.activities[0]).toMatchObject({status: ACTIVITY_STATUS.FAILED, failure: {outcomeKnown: false}})
         const attempts = await s().mock.requests({method: 'POST', path: '/unstable'})
@@ -62,7 +66,12 @@ describe('failure handling', () => {
         const insp = await s().admin.inspect(out.meta.executionId!)
         expect(insp.activities.map(a => [a.sequence, a.status])).toEqual([[1, ACTIVITY_STATUS.COMPLETED], [2, ACTIVITY_STATUS.FAILED]])
         expect(await s().mock.calls()).toEqual(['GET /ping', 'POST /unstable'])
-        expectToolError(await s().client('alice').resumeByMeta('commerce', programs.pingThenUnstable('500'), out.meta.executionId!), ERR.EXECUTION_NOT_RESUMABLE)
+        expect(out.meta.executionStatus).toBe(EXECUTION_STATUS.FAILED)
+        expectToolError(
+            await s().client('alice').resumeByMeta('commerce', programs.pingThenUnstable('500'), out.meta.executionId!),
+            ERR.EXECUTION_NOT_RESUMABLE
+        )
+        expect(await s().mock.calls()).toEqual(['GET /ping', 'POST /unstable'])
     })
 
     it('should_interrupt_with_sandbox_timeout_when_the_program_never_yields', async () => {
@@ -77,11 +86,14 @@ describe('failure handling', () => {
         expect(insp.execution.terminalReason?.code).toBe(ERR.SANDBOX_TIMEOUT)
     }, 30_000)
 
-    it('should_report_an_uncaught_backend_timeout_as_a_runtime_error_not_a_sandbox_timeout', async () => {
+    it('should_report_an_uncaught_backend_timeout_as_outcome_unknown_not_a_sandbox_timeout', async () => {
         // Formerly known_quirk_an_uncaught_backend_timeout_is_reported_as_sandbox_timeout: sandbox-core classified any
         // error whose message contained "timeout" as SANDBOX_TIMEOUT (retryable ⇒ INTERRUPTED), inviting a rerun of a
         // program whose POST may already have executed. Classification now follows what happened, not the wording.
-        const out = expectToolError(await s().client('alice').apiExecute('commerce', programs.unstable('timeout')), ERR.SANDBOX_RUNTIME)
+        const out = expectToolError(
+            await s().client('alice').apiExecute('commerce', programs.unstable('timeout')),
+            ERR.ACTIVITY_OUTCOME_UNKNOWN
+        )
         s().track(out.meta.executionId)
         expect(out.retryable).toBe(false)
         expect(out.meta.executionStatus).toBe(EXECUTION_STATUS.FAILED)

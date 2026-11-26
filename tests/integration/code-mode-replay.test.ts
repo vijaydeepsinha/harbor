@@ -356,13 +356,13 @@ describe('durable execution at the bridge: journal + replay', () => {
         expect(a3?.approvalId).toBe('ap-9')
     })
 
-    it('a transport failure is journaled as FAILED with outcomeKnown=false and is never replayed', async () => {
+    it('a transport failure is journaled as outcome-unknown and cannot be swallowed by the program', async () => {
         const {connector, calls} = makeConnector(req => req.method === 'POST' ? new Error('socket hang up') : undefined)
         const result = await runApiInSandbox(`async () => {
       await api.request({ method: 'GET', path: '/campaigns' })
       try { await api.request({ method: 'POST', path: '/campaigns/C1/activate' }) } catch (e) { return 'caught: ' + e.message }
-    }`, makeCtx(persistence, connector, 1))
-        expect(String(result)).toContain('socket hang up')
+    }`, makeCtx(persistence, connector, 1)).catch(error => error)
+        expect(result).toBeInstanceOf(ActivityOutcomeUnknownError)
         expect(calls.length).toBe(1)
         const a2 = await persistence.getActivity('exec-1', 2)
         expect(a2?.status).toBe(ACTIVITY_STATUS.FAILED)

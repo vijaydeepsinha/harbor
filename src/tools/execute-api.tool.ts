@@ -90,11 +90,11 @@ Rules:
   6. For paginated endpoints: loop until all records collected
 
 Governance: some operations require human approval. When that happens the
-call returns an input_required result with an approval form (or an
-APPROVAL_REQUIRED error carrying "${EXECUTION_ID_META_KEY}" in _meta). Do NOT
-rewrite or resend a different program: retry the same call after the human
-decides — Harbor resumes the original program and never repeats calls it
-already made.
+result carries "${EXECUTION_ID_META_KEY}" in _meta. Prefer resuming by that
+execution id after deciding through the Harbor execution API. Standard MCP
+elicitation/requestState remains supported when the client does not provide
+the execution id. Do NOT rewrite or resend a different program — Harbor
+resumes the original program and never repeats calls it already made.
 
 Pattern — fetch pending orders and cancel them:
 async () => {
@@ -214,7 +214,12 @@ async function respond(apiExecuteResult: ApiExecuteResult, responder: Responder)
             // Before the call there was nothing new to record: the question is simply put again.
             // Approval resumes require the execution runtime; this guard fails fast instead of
             // letting the request proceed without the data needed to seal the approval state.
-            return buildInputRequired(requireGovernanceRuntime(responder), responder.request, apiExecuteResult.approvalId, apiExecuteResult.state)
+            return buildInputRequired(
+                requireGovernanceRuntime(responder),
+                responder.request,
+                apiExecuteResult.approvalId,
+                apiExecuteResult.state
+            )
 
         case 'refused': {
             // Refused, or the answer itself ended the execution (decline, cancel): nothing ran, but the
@@ -397,7 +402,7 @@ async function approvalResult(
             correlationId,
             executionId: approvalRequiredError.executionId,
             approvalId: approvalRequiredError.approvalId
-        }, 'Execution paused — approval requested via MCP elicitation')
+        }, 'Execution paused — approval requested via MCP elicitation fallback')
         return buildInputRequired(governanceRuntime, request, approvalRequiredError.approvalId, {
             executionId: approvalRequiredError.executionId,
             approvalId: approvalRequiredError.approvalId,
@@ -409,9 +414,9 @@ async function approvalResult(
         correlationId,
         executionId: approvalRequiredError.executionId,
         approvalId: approvalRequiredError.approvalId
-    }, 'Execution paused — client lacks elicitation; approval expected over HTTP')
+    }, 'Execution paused — approval decision expected over HTTP')
     return mcpError(
-        `${approvalRequiredError.message} This client does not support elicitation: decide via POST /executions/${approvalRequiredError.executionId}/approvals/${approvalRequiredError.approvalId}, ` +
+        `${approvalRequiredError.message} Decide via POST /executions/${approvalRequiredError.executionId}/approvals/${approvalRequiredError.approvalId}, ` +
         `then call ${TOOL.API_EXECUTE} again with _meta["${EXECUTION_ID_META_KEY}"] = "${approvalRequiredError.executionId}" to resume.`,
         ERR.APPROVAL_REQUIRED,
         false,
@@ -425,7 +430,12 @@ async function approvalResult(
     )
 }
 
-async function buildInputRequired(governanceRuntime: GovernanceRuntime, request: McpRequestView, approvalId: string, state: ResumeState): Promise<InputRequiredResult> {
+async function buildInputRequired(
+    governanceRuntime: GovernanceRuntime,
+    request: McpRequestView,
+    approvalId: string,
+    state: ResumeState
+): Promise<InputRequiredResult> {
     const approval = await governanceRuntime.approvals.get(approvalId)
     const elicitation = governanceRuntime.approvals.buildElicitation(approval)
     const requestState = await request.sealRequestState(state)

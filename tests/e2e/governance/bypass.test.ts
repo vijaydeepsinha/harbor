@@ -115,7 +115,7 @@ describe('bypass attempts', () => {
         const paused = expectPaused(await c.apiExecute('commerce', programs.createOrder(RESOURCES.customerAllowed, 50000)))
         s().track(paused.executionId)
         // Pretend the approval is already granted by stamping ids into request _meta and resuming without any decision.
-        const out = expectPaused(await c.apiExecute('commerce', paused.code, {
+        const again = expectPaused(await c.apiExecute('commerce', paused.code, {
             meta: {
                 [WIRE.META_EXECUTION_ID]: paused.executionId,
                 [WIRE.META_EXECUTION_STATUS]: 'COMPLETED',
@@ -123,8 +123,8 @@ describe('bypass attempts', () => {
                 'harbor/approved': true
             }
         }))
-        expect(out.executionId).toBe(paused.executionId)
-        expect(out.approvalId).toBe(paused.approvalId)
+        expect(again.executionId).toBe(paused.executionId)
+        expect(again.approvalId).toBe(paused.approvalId)
         expect(await s().mock.requests()).toHaveLength(0)
         expect((await s().admin.inspect(paused.executionId)).approvals[0]!.status).toBe('PENDING')
     })

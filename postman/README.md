@@ -18,7 +18,7 @@ key); a body passed as a JSON string is governed like the object; an accept
 without a boolean `approve` (no content, or the string `"false"`) is refused
 over MRTR and HTTP (400) and the approval stays pending; a conflicting MRTR decline after an HTTP approve gets
 `APPROVAL_ALREADY_DECIDED` and runs nothing; a POST that gets a 500 is sent
-once; an uncaught backend timeout is `SANDBOX_RUNTIME`, not retryable; and two
+once; an uncaught backend timeout is `ACTIVITY_OUTCOME_UNKNOWN`, not retryable; and two
 fresh submissions of one create carry different idempotency keys. It mirrors
 `tests/e2e/governance/bypass.test.ts`, `approval.test.ts`, `failures.test.ts`
 and `idempotency.test.ts`; like every folder it is built by

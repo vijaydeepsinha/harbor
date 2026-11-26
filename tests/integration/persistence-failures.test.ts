@@ -266,7 +266,26 @@ describe('an activity whose failure the store cannot take', () => {
         }
     }
 
-    it('the program still sees its call\'s own error; the write is reported with the activity it concerns', async () => {
+    it('a program cannot mask a POST failure whose backend outcome is unknown', async () => {
+        const store = faultyStore()
+        const governanceRuntime = makeRuntime([], GOVERNANCE_DECISION.ALLOW, store.persistence)
+        const {handler, failureLogs} = observedTool(governanceRuntime, failingFinalize())
+        const code = `async () => {
+      await api.request({ method: 'GET', path: '/campaigns' })
+      try { await api.request({ method: 'POST', path: '/campaigns/C1/finalize' }) } catch (e) { return { sawError: String(e.message) } }
+      return 'unreachable'
+    }`
+
+        const r = await handler({service: 'trafficking', code}, makeCtx())
+        const executionId = metaOf(r)[EXECUTION_ID_META_KEY]!
+
+        expect(parseContent(r)).toMatchObject({code: ERR.ACTIVITY_OUTCOME_UNKNOWN, retryable: false})
+        expect(metaOf(r)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.FAILED)
+        expect((await store.inner.getActivity(executionId, 2))?.status).toBe(ACTIVITY_STATUS.FAILED)
+        expect(failureLogs()).toEqual([])
+    })
+
+    it('the activity failure write is reported and the run still stops as failed', async () => {
         const store = faultyStore()
         const governanceRuntime = makeRuntime([], GOVERNANCE_DECISION.ALLOW, store.persistence)
         const {handler, failureLogs, counted} = observedTool(governanceRuntime, failingFinalize())
@@ -277,8 +296,9 @@ describe('an activity whose failure the store cannot take', () => {
       return 'unreachable'
     }`
         const r = await handler({service: 'trafficking', code}, makeCtx())
-        expect(parseContent(r)).toEqual({sawError: expect.stringContaining('socket hang up')})
         const executionId = metaOf(r)[EXECUTION_ID_META_KEY]!
+        expect(parseContent(r)).toMatchObject({code: ERR.ACTIVITY_OUTCOME_UNKNOWN, retryable: false})
+        expect(metaOf(r)[EXECUTION_STATUS_META_KEY]).toBe(EXECUTION_STATUS.FAILED)
         expect(failureLogs()).toEqual([expect.objectContaining({
             operation: PERSISTENCE_OPERATION.ACTIVITY_FAILED, executionId, sequence: 2,
             intended: 'FAILED (outcome unknown)', left: ACTIVITY_STATUS.EXECUTING

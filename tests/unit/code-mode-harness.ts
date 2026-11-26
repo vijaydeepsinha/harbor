@@ -224,14 +224,20 @@ export async function retryCtx(
     inputRequiredResult: Record<string, unknown>,
     /** `approve` may be a word ("yes") as well as a boolean — see readApprovalAnswer. */
     answer: { action: 'accept' | 'decline' | 'cancel'; approve?: boolean | string; comment?: string } | undefined,
-    requestId = '2'
+    requestId = '2',
+    executionIdMeta?: string
 ): Promise<ServerContext> {
     const wire = inputRequiredResult['requestState'] as string
     const state = await governanceRuntime.requestState.verify(wire, makeCtx({requestId}))
     const inputResponses = answer
         ? {approval: {action: answer.action, ...(answer.action === 'accept' ? {content: {approve: answer.approve ?? true, ...(answer.comment ? {comment: answer.comment} : {})}} : {})}}
         : undefined
-    return makeCtx({state, ...(inputResponses ? {inputResponses} : {}), requestId})
+    return makeCtx({
+        state,
+        ...(inputResponses ? {inputResponses} : {}),
+        ...(executionIdMeta !== undefined ? {executionIdMeta} : {}),
+        requestId
+    })
 }
 
 export function parseContent(result: Record<string, unknown>): unknown {

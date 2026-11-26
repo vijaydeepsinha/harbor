@@ -6322,7 +6322,7 @@
           ]
         },
         {
-          "name": "An uncaught backend timeout is SANDBOX_RUNTIME, not a retryable SANDBOX_TIMEOUT",
+          "name": "An uncaught backend timeout is not retryable",
           "request": {
             "method": "POST",
             "header": [
@@ -6386,7 +6386,7 @@
                   "const text = result && result.content && result.content[0] && result.content[0].text;",
                   "let payload; try { payload = text && JSON.parse(text) } catch (e) { payload = text }",
                   "const meta = (result && result._meta) || {};",
-                  "pm.test('tool error code is SANDBOX_RUNTIME', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('SANDBOX_RUNTIME'); });",
+                  "pm.test('tool error code is ACTIVITY_OUTCOME_UNKNOWN', () => { pm.expect(result.isError).to.eql(true); pm.expect(payload.code).to.eql('ACTIVITY_OUTCOME_UNKNOWN'); });",
                   "pm.test('execution status is FAILED', () => pm.expect(meta['harbor/execution-status']).to.eql('FAILED'));",
                   "pm.test('not retryable', () => pm.expect(payload.retryable).to.eql(false));"
                 ]

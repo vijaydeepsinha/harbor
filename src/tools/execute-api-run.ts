@@ -49,6 +49,10 @@ export interface Refusal {
     meta?: { status?: ExecutionStatus; approvalId?: string }
 }
 
+const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+    EXECUTION_STATUS.COMPLETED, EXECUTION_STATUS.FAILED, EXECUTION_STATUS.DENIED, EXECUTION_STATUS.CANCELLED
+])
+
 /** What one `api_execute` call came to. The responder turns it into metrics, audit and the MCP result. */
 export type ApiExecuteResult =
 /** Nothing ran: the resume was refused, or the human's answer it carried ended the execution. */
@@ -91,10 +95,6 @@ export interface ApiExecuteRunDeps {
     /** The caller's X-Harbor-Client-ID from the inbound request, forwarded on every backend call. */
     callerClientId?: string
 }
-
-const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
-    EXECUTION_STATUS.COMPLETED, EXECUTION_STATUS.FAILED, EXECUTION_STATUS.DENIED, EXECUTION_STATUS.CANCELLED
-])
 
 /**
  * The run orchestrator of one `api_execute` call, past authentication:
@@ -265,8 +265,10 @@ type Opened =
 /**
  * Decides which execution this call belongs to (§6, §7, §26):
  *  - an MRTR retry carries a sealed `requestState` (verified by the SDK) and the human's answer;
- *  - a client without elicitation resumes via `_meta["harbor/execution-id"]` after deciding over HTTP;
+ *  - a client can instead resume via `_meta["harbor/execution-id"]` after deciding over HTTP;
  *  - otherwise this is a new program and its code is persisted as the authoritative original.
+ * An explicit execution id selects the execution when both carriers are present;
+ * accompanying MCP state must name that same execution and may carry its answer.
  * Incoming `code` is ignored on resume.
  */
 async function openExecution(
@@ -276,8 +278,10 @@ async function openExecution(
     logger: Logger,
     correlationId: string
 ): Promise<Opened> {
-    const {state} = resume
-    const resumeId = state?.executionId ?? resume.executionId
+    const explicitExecutionId = resume.executionId
+    const state = resume.state
+    const answer = resume.answer
+    const resumeId = explicitExecutionId ?? state?.executionId
     if (resumeId === undefined) {
         const execution = await governanceRuntime.executionManager.create({
             service: input.service,
@@ -288,6 +292,13 @@ async function openExecution(
         return {kind: 'open', execution}
     }
     const refuse = (refusal: Refusal): Opened => ({kind: 'refused', executionId: resumeId, refusal})
+    if (explicitExecutionId !== undefined && state !== undefined && state.executionId !== explicitExecutionId) {
+        return refuse({
+            message: 'The execution id and MCP requestState name different executions',
+            code: ERR.EXECUTION_NOT_RESUMABLE,
+            retryable: false
+        })
+    }
 
     let execution: ExecutionRecord
     try {
@@ -295,7 +306,8 @@ async function openExecution(
     } catch (err) {
         return refuse({message: ensureError(err).message, code: getErrorCode(err), retryable: errorRetryable(err)})
     }
-    // Principal binding: the sealed state and the stored execution both name the caller.
+    // Principal binding: the sealed state, when present, and the stored
+    // execution both name the caller.
     if ((state && state.userIdHash !== input.userIdHash) || execution.userIdHash !== input.userIdHash) {
         return refuse({
             message: 'This execution belongs to a different principal',
@@ -318,8 +330,8 @@ async function openExecution(
     }
 
     if (state) {
-        if (resume.answer) {
-            const ended = await applyAnswer(governanceRuntime, state, resume.answer, execution, logger, correlationId)
+        if (answer) {
+            const ended = await applyAnswer(governanceRuntime, state, answer, execution, logger, correlationId)
             if (ended) return refuse(ended)
         } else if (execution.status === EXECUTION_STATUS.WAITING_APPROVAL) {
             // The client retried without answering: ask again (spec allows repeated input_required).
@@ -329,6 +341,7 @@ async function openExecution(
             }
         }
     }
+
     // A decision a crash or a store outage cut short is completed before
     // anything runs: the run must meet the activity the human approved (or
     // the end of the execution they rejected), not the old question again.

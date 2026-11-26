@@ -53,7 +53,9 @@ export function buildMcpServerOptions(governanceRuntime?: GovernanceRuntime): Mc
             'If discover_skills() returns no match and the service has no mandatory Skill, ' +
             'skip directly to search_code(); honor any mandatory Skills declared by the service, ' +
             'and never invent a skill_name. ' +
-            'Always pass the "service" parameter to api_execute and use only paths confirmed by search_code().',
+            'Always pass the "service" parameter to api_execute and use only paths confirmed by search_code(). ' +
+            'For approval resumes, prefer the returned harbor/execution-id. MCP elicitation/requestState remains ' +
+            'a fallback for compatible clients that do not provide that execution id.',
         cacheHints: {
             'tools/list': {ttlMs: 0, cacheScope: 'private'},
             'server/discover': {ttlMs: 0, cacheScope: 'private'}

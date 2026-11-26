@@ -5,7 +5,7 @@ import {describe, expect, it, vi} from 'vitest'
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {createMcpGateway} from '../../src/runtime/server-factory.js'
+import {createMcpGateway, drainHttpGateway} from '../../src/runtime/server-factory.js'
 import {globalConfig} from './code-mode-harness.js'
 
 // The stdio transport itself is not under test: it would attach to this process's stdin.
@@ -46,5 +46,45 @@ describe('createMcpGateway — stdio transport', () => {
             exit.mockRestore()
             rmSync(dir, {recursive: true, force: true})
         }
+    })
+})
+
+describe('drainHttpGateway', () => {
+    it('does not tear down shared dependencies until the HTTP server has drained', async () => {
+        const order: string[] = []
+        let close: ((error?: Error) => void) | undefined
+        const server = {
+            close(callback: (error?: Error) => void) {
+                order.push('close')
+                close = callback
+            }
+        }
+        const shutdown = vi.fn(async () => {
+            order.push('shutdown')
+        })
+
+        const draining = drainHttpGateway(server, shutdown)
+        await Promise.resolve()
+        expect(order).toEqual(['close'])
+        expect(shutdown).not.toHaveBeenCalled()
+
+        close?.()
+        await draining
+        expect(order).toEqual(['close', 'shutdown'])
+        expect(shutdown).toHaveBeenCalledOnce()
+    })
+
+    it('still tears down shared dependencies when closing the listener reports an error', async () => {
+        const error = new Error('close failed')
+        const shutdown = vi.fn(async () => {
+        })
+        const draining = drainHttpGateway({
+            close(callback) {
+                callback(error)
+            }
+        }, shutdown)
+
+        await expect(draining).rejects.toBe(error)
+        expect(shutdown).toHaveBeenCalledOnce()
     })
 })

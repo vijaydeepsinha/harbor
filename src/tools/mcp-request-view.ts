@@ -22,7 +22,7 @@ export interface ResumeRequest {
     state?: ResumeState
     /** The answer that retry carries. A retry without one is asked again. */
     answer?: ApprovalAnswer
-    /** `_meta["harbor/execution-id"]`: how a client without elicitation resumes after deciding over HTTP. */
+    /** `_meta["harbor/execution-id"]`: the authoritative resume handle when supplied. */
     executionId?: string
 }
 
@@ -42,7 +42,6 @@ export interface McpRequestView {
     /** The client declared `elicitation`, so an approval can be asked inside MCP (`input_required`). */
     supportsElicitation: boolean
     resume: ResumeRequest
-
     /** Seals `requestState` for an `input_required` answer to this request (bound to its JSON-RPC method). */
     sealRequestState(state: ResumeState): Promise<string>
 }
@@ -59,6 +58,8 @@ const resumeStateSchema = z.object({
  * The function reads only the fields the tool is allowed to consume from
  * `ServerContext`, normalizes them into a stable shape, and treats missing or
  * malformed values as "no such input" instead of failing the whole request.
+ * The explicit execution ID is retained alongside the optional verified MCP
+ * continuation. The run orchestrator gives the execution ID first priority.
  * `codec` is the execution runtime's requestState codec; it is absent on the
  * legacy path, where nothing is sealed or resumed.
  */
@@ -73,9 +74,9 @@ export function readMcpRequest(ctx: ServerContext | undefined, codec?: Pick<Resu
         advisory,
         supportsElicitation: elicitation !== undefined && elicitation !== null,
         resume: {
+            ...(typeof metaId === 'string' && metaId !== '' ? {executionId: metaId} : {}),
             ...(state !== undefined ? {state} : {}),
-            ...(answer !== undefined ? {answer} : {}),
-            ...(typeof metaId === 'string' && metaId !== '' ? {executionId: metaId} : {})
+            ...(answer !== undefined ? {answer} : {})
         },
         sealRequestState: async (resumeState: ResumeState): Promise<string> => {
             if (!codec || !ctx) throw new Error('requestState cannot be sealed without an execution runtime and a request context')

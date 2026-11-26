@@ -158,9 +158,13 @@ describe('replay of the activity journal', () => {
       return { first, payment: p.status }
     }`
         const c = s().client('alice')
-        const paused = expectPaused(await c.apiExecute('commerce', program))
-        s().track(paused.executionId)
-        let insp = await s().admin.inspect(paused.executionId)
+        const stopped = expectToolError(
+            await c.apiExecute('commerce', program),
+            ERR.ACTIVITY_OUTCOME_UNKNOWN
+        )
+        const executionId = stopped.meta.executionId!
+        s().track(executionId)
+        let insp = await s().admin.inspect(executionId)
         expect(insp.activities[0]).toMatchObject({
             sequence: 1,
             status: ACTIVITY_STATUS.FAILED,
@@ -169,12 +173,11 @@ describe('replay of the activity journal', () => {
         const attempts = await s().mock.count('POST', '/unstable')
         expect(attempts).toBe(1) // maxRetries: 1, but a POST whose outcome is unknown is never re-sent
 
-        const out = expectToolError(await c.answerApproval(paused, {action: 'accept'}), ERR.ACTIVITY_OUTCOME_UNKNOWN)
-        expect(out.message).toContain('Activity #1')
-        expect(out.meta.executionStatus).toBe(EXECUTION_STATUS.FAILED)
+        expect(stopped.message).toContain('Activity #1')
+        expect(stopped.meta.executionStatus).toBe(EXECUTION_STATUS.FAILED)
         expect(await s().mock.count('POST', '/unstable')).toBe(attempts) // never repeated
-        expect(await s().mock.count('POST', '/payments')).toBe(0)     // and the approved step did not run either
-        insp = await s().admin.inspect(paused.executionId)
+        expect(await s().mock.count('POST', '/payments')).toBe(0)     // the stopped run never reached the approval
+        insp = await s().admin.inspect(executionId)
         expect(insp.execution.status).toBe(EXECUTION_STATUS.FAILED)
         expect(insp.execution.terminalReason?.code).toBe(ERR.ACTIVITY_OUTCOME_UNKNOWN)
     })

@@ -286,7 +286,16 @@ export class BridgeRequestHandler {
                     // Another call of this run between arrival and reply (queued here,
                     // going out, or being replayed) ⇒ this call's sequence depended on
                     // timing, and replay must bind its content (see ActivityJournal.next).
-                    await gate.begin(decision, this.inFlight > 1)
+                    try {
+                        await gate.begin(decision, this.inFlight > 1)
+                    } catch (error) {
+                        this.flag({
+                            kind: BRIDGE_VIOLATION.OUTCOME_UNKNOWN,
+                            sequence: decision.sequence,
+                            label: `${apiRequest.method} ${endpoint}`
+                        })
+                        throw error
+                    }
                     return {admitted: decision}
                 })
                 if ('reply' in gated) return gated.reply
@@ -443,6 +452,17 @@ export class BridgeRequestHandler {
         // the promotion by catching it.
         if (err instanceof CircuitOpenError) {
             this.flag({kind: BRIDGE_VIOLATION.CIRCUIT_OPEN, endpoint: err.endpoint, retryAfterMs: err.retryAfterMs})
+        }
+        // Once a non-GET call was journaled as EXECUTING, a thrown transport or
+        // completion-recording error leaves its real outcome unknown. User
+        // code may catch this bridge error, but it cannot turn the durable run
+        // into a successful completion.
+        if (attempted && executing !== undefined && attempted.method !== 'GET') {
+            this.flag({
+                kind: BRIDGE_VIOLATION.OUTCOME_UNKNOWN,
+                sequence: executing,
+                label: `${attempted.method} ${attempted.endpoint}`
+            })
         }
         // Record the attempt as a failure — the journal marks an EXECUTING
         // activity FAILED (outcome unknown), and the caller's progress shows the

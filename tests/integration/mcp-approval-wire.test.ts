@@ -114,7 +114,8 @@ describe('MCP wire: approval via input_required + retry', () => {
 
         // tampered state: the SDK seam refuses it before api_execute runs (nothing changes)
         const tampered = await readJsonRpc(await call({
-            name: 'api_execute', arguments: {service: 'trafficking', code: PROGRAM}, _meta: envelope(true),
+            name: 'api_execute', arguments: {service: 'trafficking', code: PROGRAM},
+            _meta: {...envelope(true), [EXECUTION_ID_META_KEY]: executionId},
             requestState: requestState.slice(0, -3) + 'xyz',
             inputResponses: {[APPROVAL_INPUT_KEY]: {action: 'accept', content: {approve: true}}}
         }))
@@ -123,7 +124,8 @@ describe('MCP wire: approval via input_required + retry', () => {
 
         // genuine retry: same call, human said yes
         const second = await readJsonRpc(await call({
-            name: 'api_execute', arguments: {service: 'trafficking', code: PROGRAM}, _meta: envelope(true),
+            name: 'api_execute', arguments: {service: 'trafficking', code: PROGRAM},
+            _meta: {...envelope(true), [EXECUTION_ID_META_KEY]: executionId},
             requestState,
             inputResponses: {[APPROVAL_INPUT_KEY]: {action: 'accept', content: {approve: true, comment: 'ok'}}}
         }))
@@ -259,4 +261,5 @@ describe('MCP wire: approval via input_required + retry', () => {
         expect(inputRequests[APPROVAL_INPUT_KEY]?.params.message).toContain('gateway review')
         expect(count('POST', '/campaigns/C1/finalize') - beforeFinalizes).toBe(0)
     })
+
 })

@@ -17,6 +17,29 @@ import {GATEWAY_NAME, STORE_TYPE} from '../core/constants.js'
 import {errorMessage} from '../core/utils/errors.js'
 import {extractBearerFromHeader} from './auth/bearer-authorization.js'
 
+interface CloseableHttpServer {
+    close(callback: (error?: Error) => void): unknown
+}
+
+/**
+ * Stops HTTP admission and waits for accepted requests to drain before
+ * dependencies used by those requests are torn down.
+ */
+export async function drainHttpGateway(
+    server: CloseableHttpServer,
+    shutdown: () => Promise<void>
+): Promise<void> {
+    let closeError: Error | undefined
+    await new Promise<void>(resolve => {
+        server.close(error => {
+            closeError = error
+            resolve()
+        })
+    })
+    await shutdown()
+    if (closeError) throw closeError
+}
+
 /**
  * Boots a single MCP gateway by auto-scanning the services directory.
  * Each subdirectory with a configured, loadable spec source becomes a registered service.
@@ -107,13 +130,22 @@ export async function createMcpGateway(
     // Shared shutdown tail. Both transports must tear down cache, registry,
     // and metrics in the same order; any transport-specific teardown (e.g.
     // closing the HTTP listener) runs *before* this.
-    const shutdownShared = () => {
-        void governanceRuntime.shutdown().catch(err => gatewayLogger.warn({error: errorMessage(err)}, 'Code Mode store shutdown failed'))
-        void auditPipeline.close()
-        tokenCacheStrategy.destroy()
-        registry.shutdownAll()
-        gatewayMetrics.stop()
-        gatewayLogger.info('Shutting down gracefully')
+    let sharedShutdown: Promise<void> | undefined
+    const shutdownShared = (): Promise<void> => {
+        if (sharedShutdown) return sharedShutdown
+        sharedShutdown = (async () => {
+            try {
+                await governanceRuntime.shutdown()
+            } catch (err) {
+                gatewayLogger.warn({error: errorMessage(err)}, 'Code Mode store shutdown failed')
+            }
+            await auditPipeline.close()
+            tokenCacheStrategy.destroy()
+            registry.shutdownAll()
+            gatewayMetrics.stop()
+            gatewayLogger.info('Shutting down gracefully')
+        })()
+        return sharedShutdown
     }
 
     if (transportMode === 'http') {
@@ -127,13 +159,17 @@ export async function createMcpGateway(
             governanceRuntime
         })
 
-        const httpShutdown = (signal: string) => {
+        let httpShutdown: Promise<void> | undefined
+        const beginHttpShutdown = (signal: string) => {
+            if (httpShutdown) return
             gatewayLogger.info({signal}, 'Received shutdown signal — closing HTTP listener')
-            http.server.close(() => gatewayLogger.info('HTTP server closed — no longer accepting connections'))
-            shutdownShared()
+            httpShutdown = drainHttpGateway(http.server, shutdownShared)
+                .then(() => gatewayLogger.info('HTTP server closed and active requests drained'))
+                .catch(err => gatewayLogger.warn({error: errorMessage(err)}, 'HTTP shutdown failed'))
+            void httpShutdown
         }
-        process.on('SIGTERM', () => httpShutdown('SIGTERM'))
-        process.on('SIGINT', () => httpShutdown('SIGINT'))
+        process.once('SIGTERM', () => beginHttpShutdown('SIGTERM'))
+        process.once('SIGINT', () => beginHttpShutdown('SIGINT'))
         return
     }
 
@@ -154,6 +190,10 @@ export async function createMcpGateway(
         createMcpServer, registry, logger: gatewayLogger
     })
 
-    process.on('SIGTERM', shutdownShared)
-    process.on('SIGINT', shutdownShared)
+    process.once('SIGTERM', () => {
+        void shutdownShared()
+    })
+    process.once('SIGINT', () => {
+        void shutdownShared()
+    })
 }

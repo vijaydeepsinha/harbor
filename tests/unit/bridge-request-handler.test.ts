@@ -6,6 +6,7 @@ import {BridgeRequestHandler} from '../../src/runtime/sandbox/bridge-request-han
 import type {SandboxExecutionContext} from '../../src/runtime/sandbox/execute-api-in-sandbox.js'
 import {ActivityJournal, CallLog} from '../../src/runtime/execution/activity-journal.js'
 import {InMemoryExecutionStore} from '../../src/adapters/execution/in-memory-execution-store.js'
+import {MemcacheExecutionStore} from '../../src/adapters/execution/memcache-execution-store.js'
 import {resolveOperation} from '../../src/runtime/governance/operation-resolver.js'
 import {AuditCollector} from '../../src/runtime/observability/audit.js'
 import {ProgressCollector} from '../../src/runtime/observability/progress.js'
@@ -15,8 +16,19 @@ import {
 } from '../../src/adapters/permissions/strategies/forward-token-permission-guard.strategy.js'
 import {ACTIVITY_STATUS, ERR} from '../../src/core/constants.js'
 import {SandboxCallLimitError, SandboxInvalidApiRequestError} from '../../src/core/types/sandbox-error.types.js'
-import {ApprovalRequiredError, GovernanceDeniedError} from '../../src/core/types/execution.types.js'
+import {
+    ActivityOutcomeUnknownError,
+    ApprovalRequiredError,
+    GovernanceDeniedError
+} from '../../src/core/types/execution.types.js'
 import {campaignSpec, makeConnector} from './code-mode-harness.js'
+import {FakeMemcache} from './fake-memcache.js'
+
+class RejectingMemcache extends FakeMemcache {
+    override async set(): Promise<boolean> {
+        return false
+    }
+}
 
 function makeCtx(overrides: Partial<SandboxExecutionContext> = {}) {
     const {connector, calls} = makeConnector()
@@ -94,6 +106,28 @@ describe('BridgeRequestHandler — the per-run api.request pipeline, callable wi
             correlationId: 'rpc-1',
             executionId: 'execution-42'
         })
+    })
+
+    it('does not call the connector when the EXECUTING journal write is rejected', async () => {
+        const persistence = new MemcacheExecutionStore(new RejectingMemcache())
+        const {ctx, calls} = makeCtx({
+            executionBridge: {
+                journal: new ActivityJournal(persistence, 'exec-1', 'trafficking', 1),
+                resolve: (m, p) => resolveOperation(campaignSpec, m, p)
+            }
+        })
+        const handler = new BridgeRequestHandler(ctx, new AbortController().signal)
+
+        const reply = parse(await handler.handle(call({
+            method: 'POST',
+            path: '/campaigns',
+            body: {name: 'x'}
+        })))
+
+        expect(reply.message).toContain('Memcache set failed')
+        expect(calls).toHaveLength(0)
+        expect(() => handler.throwIfViolated()).toThrow(ActivityOutcomeUnknownError)
+        expect(await persistence.getActivity('exec-1', 1)).toBeUndefined()
     })
 
     it('refuses over-budget and malformed calls and promotes them afterwards', async () => {
