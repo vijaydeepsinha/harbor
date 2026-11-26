@@ -70,7 +70,7 @@ jobs:
       - name: Lint (E2E suite, mock API, runners)
         run: npx eslint tests/e2e tests/postman vitest.e2e.config.ts
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # The production Dockerfile, cached by layer in the GitHub Actions cache
       # (isolated-vm compiles from source on alpine — the cache saves minutes).
