@@ -75,7 +75,7 @@ jobs:
       # The production Dockerfile, cached by layer in the GitHub Actions cache
       # (isolated-vm compiles from source on alpine — the cache saves minutes).
       - name: Build the gateway image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
