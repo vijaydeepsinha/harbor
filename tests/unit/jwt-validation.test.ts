@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { generateKeyPair, SignJWT, exportJWK, type KeyLike } from 'jose'
-import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
-import { JwtValidationStrategy, jwtValidation } from '../../adapters/auth/strategies/jwt-validation.strategy.js'
-import {
-  TokenExpiredError,
-  TokenInvalidError,
-  TokenIntrospectionError
-} from '../../core/types/auth.types.js'
-import { AUTH_TYPE } from '../../core/constants.js'
+import {afterAll, beforeAll, describe, expect, it} from 'vitest'
+import {exportJWK, generateKeyPair, type KeyLike, SignJWT} from 'jose'
+import {createServer, type Server} from 'node:http'
+import type {AddressInfo} from 'node:net'
+import {jwtValidation, JwtValidationStrategy} from '../../src/adapters/auth/strategies/jwt-validation.strategy.js'
+import {TokenExpiredError, TokenIntrospectionError, TokenInvalidError} from '../../src/core/types/auth.types.js'
+import {AUTH_TYPE} from '../../src/core/constants.js'
 
 let privateKey: KeyLike
 let otherPrivateKey: KeyLike
@@ -23,211 +19,231 @@ const ISSUER = 'https://auth.example.com'
 const AUDIENCE = 'https://harbor.example.com'
 
 beforeAll(async () => {
-  const pair = await generateKeyPair('RS256')
-  privateKey = pair.privateKey
-  const otherPair = await generateKeyPair('RS256')
-  otherPrivateKey = otherPair.privateKey
+    const pair = await generateKeyPair('RS256')
+    privateKey = pair.privateKey
+    const otherPair = await generateKeyPair('RS256')
+    otherPrivateKey = otherPair.privateKey
 
-  const jwk = await exportJWK(pair.publicKey)
-  const jwksDoc = JSON.stringify({ keys: [{ ...jwk, kid: 'k1', use: 'sig', alg: 'RS256' }] })
+    const jwk = await exportJWK(pair.publicKey)
+    const jwksDoc = JSON.stringify({keys: [{...jwk, kid: 'k1', use: 'sig', alg: 'RS256'}]})
 
-  await new Promise<void>(resolve => {
-    jwksServer = createServer((_, res) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(jwksDoc)
+    await new Promise<void>(resolve => {
+        jwksServer = createServer((_, res) => {
+            res.writeHead(200, {'Content-Type': 'application/json'})
+            res.end(jwksDoc)
+        })
+        jwksServer.listen(0, '127.0.0.1', resolve)
     })
-    jwksServer.listen(0, '127.0.0.1', resolve)
-  })
 
-  const { port } = jwksServer.address() as AddressInfo
-  jwksUrl = `http://127.0.0.1:${port}/.well-known/jwks.json`
+    const {port} = jwksServer.address() as AddressInfo
+    jwksUrl = `http://127.0.0.1:${port}/.well-known/jwks.json`
 
-  strategy = new JwtValidationStrategy({ jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE })
+    strategy = new JwtValidationStrategy({jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE})
 })
 
 afterAll(async () => {
-  await new Promise<void>((resolve, reject) =>
-    jwksServer.close(err => (err ? reject(err) : resolve()))
-  )
+    await new Promise<void>((resolve, reject) =>
+        jwksServer.close(err => (err ? reject(err) : resolve()))
+    )
 })
 
 function sign(
-  claims: Record<string, unknown> = {},
-  opts: { expiresInSec?: number; issuer?: string; audience?: string; noExp?: boolean } = {}
+    claims: Record<string, unknown> = {},
+    opts: { expiresInSec?: number; issuer?: string; audience?: string; noExp?: boolean } = {}
 ): Promise<string> {
-  const now = Math.floor(Date.now() / 1000)
-  let builder = new SignJWT({ ...claims })
-    .setProtectedHeader({ alg: 'RS256', kid: 'k1' })
-    .setIssuer(opts.issuer ?? ISSUER)
-    .setIssuedAt(now)
+    const now = Math.floor(Date.now() / 1000)
+    let builder = new SignJWT({...claims})
+        .setProtectedHeader({alg: 'RS256', kid: 'k1'})
+        .setIssuer(opts.issuer ?? ISSUER)
+        .setIssuedAt(now)
 
-  if (!opts.noExp) {
-    builder = builder.setExpirationTime(now + (opts.expiresInSec ?? 3600))
-  }
-  if (opts.audience !== undefined) {
-    builder = builder.setAudience(opts.audience)
-  } else {
-    builder = builder.setAudience(AUDIENCE)
-  }
-  return builder.sign(privateKey)
+    if (!opts.noExp) {
+        builder = builder.setExpirationTime(now + (opts.expiresInSec ?? 3600))
+    }
+    if (opts.audience !== undefined) {
+        builder = builder.setAudience(opts.audience)
+    } else {
+        builder = builder.setAudience(AUDIENCE)
+    }
+    return builder.sign(privateKey)
 }
 
 describe('JwtValidationStrategy', () => {
-  it('strategy name matches AUTH_TYPE.JWT_VALIDATION', () => {
-    expect(strategy.name).toBe(AUTH_TYPE.JWT_VALIDATION)
-  })
-
-  it('tokenRefreshBufferSec is undefined', () => {
-    expect(strategy.tokenRefreshBufferSec).toBeUndefined()
-  })
-
-  it('jwtValidation() factory returns a JwtValidationStrategy', () => {
-    const s = jwtValidation({ jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE })
-    expect(s).toBeInstanceOf(JwtValidationStrategy)
-  })
-
-  describe('resource binding (spec §17, RFC 8707)', () => {
-    it('constructor fails closed when audience/resource binding is absent', () => {
-      expect(() =>
-        new JwtValidationStrategy({ jwksUri: jwksUrl, issuer: ISSUER } as never)
-      ).toThrow(/audience/)
+    it('strategy name matches AUTH_TYPE.JWT_VALIDATION', () => {
+        expect(strategy.name).toBe(AUTH_TYPE.JWT_VALIDATION)
     })
 
-    it('constructor fails closed when audience is blank', () => {
-      expect(() =>
-        new JwtValidationStrategy({ jwksUri: jwksUrl, issuer: ISSUER, audience: '   ' })
-      ).toThrow(/resource binding/)
+    it('tokenRefreshBufferSec is undefined', () => {
+        expect(strategy.tokenRefreshBufferSec).toBeUndefined()
     })
 
-    it('jwtValidation() factory also fails closed without audience', () => {
-      expect(() => jwtValidation({ jwksUri: jwksUrl, issuer: ISSUER } as never)).toThrow(/audience/)
-    })
-  })
-
-  describe('validate — happy path', () => {
-    it('valid RS256 JWT returns correct TokenPayload shape', async () => {
-      const token = await sign({ scope: 'api:read' })
-      const payload = await strategy.validate(token)
-
-      expect(payload.access_token).toBe(token)
-      expect(payload.token_type).toBe('bearer')
-      expect(payload.scope).toBe('api:read')
-      expect(payload.expires_in).toBeGreaterThan(0)
-      expect(payload.expires_in).toBeLessThanOrEqual(3600)
+    it('jwtValidation() factory returns a JwtValidationStrategy', () => {
+        const s = jwtValidation({jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE})
+        expect(s).toBeInstanceOf(JwtValidationStrategy)
     })
 
-    it('expires_in reflects time remaining from exp claim', async () => {
-      const token = await sign({}, { expiresInSec: 1800 })
-      const payload = await strategy.validate(token)
-      expect(payload.expires_in).toBeGreaterThan(1790)
-      expect(payload.expires_in).toBeLessThanOrEqual(1800)
+    describe('resource binding (spec §17, RFC 8707)', () => {
+        it('constructor fails closed when audience/resource binding is absent', () => {
+            expect(() =>
+                new JwtValidationStrategy({jwksUri: jwksUrl, issuer: ISSUER} as never)
+            ).toThrow(/audience/)
+        })
+
+        it('constructor fails closed when audience is blank', () => {
+            expect(() =>
+                new JwtValidationStrategy({jwksUri: jwksUrl, issuer: ISSUER, audience: '   '})
+            ).toThrow(/resource binding/)
+        })
+
+        it('jwtValidation() factory also fails closed without audience', () => {
+            expect(() => jwtValidation({jwksUri: jwksUrl, issuer: ISSUER} as never)).toThrow(/audience/)
+        })
     })
 
-    it('scope as array is joined with space', async () => {
-      const token = await sign({ scope: ['api:read', 'api:write'] })
-      const payload = await strategy.validate(token)
-      expect(payload.scope).toBe('api:read api:write')
+    describe('validate — happy path', () => {
+        it('valid RS256 JWT returns correct TokenPayload shape', async () => {
+            const token = await sign({scope: 'api:read'})
+            const payload = await strategy.validate(token)
+
+            expect(payload.access_token).toBe(token)
+            expect(payload.token_type).toBe('bearer')
+            expect(payload.scope).toBe('api:read')
+            expect(payload.expires_in).toBeGreaterThan(0)
+            expect(payload.expires_in).toBeLessThanOrEqual(3600)
+        })
+
+        it('expires_in reflects time remaining from exp claim', async () => {
+            const token = await sign({}, {expiresInSec: 1800})
+            const payload = await strategy.validate(token)
+            expect(payload.expires_in).toBeGreaterThan(1790)
+            expect(payload.expires_in).toBeLessThanOrEqual(1800)
+        })
+
+        it('scope as array is joined with space', async () => {
+            const token = await sign({scope: ['api:read', 'api:write']})
+            const payload = await strategy.validate(token)
+            expect(payload.scope).toBe('api:read api:write')
+        })
+
+        it('scope absent → empty string', async () => {
+            const token = await sign({})
+            const payload = await strategy.validate(token)
+            expect(payload.scope).toBe('')
+        })
+
+        it('custom scopeClaim extracts the right claim', async () => {
+            const s = new JwtValidationStrategy({
+                jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE,
+                scopeClaim: 'permissions'
+            })
+            const token = await sign({permissions: 'admin:read'})
+            const payload = await s.validate(token)
+            expect(payload.scope).toBe('admin:read')
+        })
+
+        it('metadataMapping extracts mapped claims into metadata', async () => {
+            const s = new JwtValidationStrategy({
+                jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE,
+                metadataMapping: {userId: 'sub', clientId: 'client_id'}
+            })
+            const token = await sign({sub: 'user-42', client_id: 'my-app'})
+            const payload = await s.validate(token)
+            expect(payload.metadata).toEqual({userId: 'user-42', clientId: 'my-app'})
+        })
+
+        it('metadataMapping skips claims absent from token', async () => {
+            const s = new JwtValidationStrategy({
+                jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE,
+                metadataMapping: {userId: 'sub', missing: 'no_such_claim'}
+            })
+            const token = await sign({sub: 'user-1'})
+            const payload = await s.validate(token)
+            expect(payload.metadata).toEqual({userId: 'user-1'})
+        })
+
+        it('omits metadata key when no mapping configured', async () => {
+            const token = await sign({sub: 'user-1'})
+            const payload = await strategy.validate(token)
+            expect(payload.metadata).toBeUndefined()
+        })
+
     })
 
-    it('scope absent → empty string', async () => {
-      const token = await sign({})
-      const payload = await strategy.validate(token)
-      expect(payload.scope).toBe('')
-    })
+    describe('validate — error mapping', () => {
+        it('expired JWT → TokenExpiredError', async () => {
+            const s = new JwtValidationStrategy({
+                jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE,
+                clockToleranceSec: 0
+            })
+            const token = await sign({}, {expiresInSec: -10})
+            await expect(s.validate(token)).rejects.toBeInstanceOf(TokenExpiredError)
+        })
 
-    it('custom scopeClaim extracts the right claim', async () => {
-      const s = new JwtValidationStrategy({
-        jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE,
-        scopeClaim: 'permissions'
-      })
-      const token = await sign({ permissions: 'admin:read' })
-      const payload = await s.validate(token)
-      expect(payload.scope).toBe('admin:read')
-    })
+        it('wrong issuer → TokenInvalidError', async () => {
+            const token = await sign({}, {issuer: 'https://evil.example.com'})
+            await expect(strategy.validate(token)).rejects.toBeInstanceOf(TokenInvalidError)
+        })
 
-    it('metadataMapping extracts mapped claims into metadata', async () => {
-      const s = new JwtValidationStrategy({
-        jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE,
-        metadataMapping: { userId: 'sub', clientId: 'client_id' }
-      })
-      const token = await sign({ sub: 'user-42', client_id: 'my-app' })
-      const payload = await s.validate(token)
-      expect(payload.metadata).toEqual({ userId: 'user-42', clientId: 'my-app' })
-    })
+        it('wrong audience → TokenInvalidError', async () => {
+            const token = await sign({}, {audience: 'https://other-resource.example.com'})
+            await expect(strategy.validate(token)).rejects.toBeInstanceOf(TokenInvalidError)
+        })
 
-    it('metadataMapping skips claims absent from token', async () => {
-      const s = new JwtValidationStrategy({
-        jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE,
-        metadataMapping: { userId: 'sub', missing: 'no_such_claim' }
-      })
-      const token = await sign({ sub: 'user-1' })
-      const payload = await s.validate(token)
-      expect(payload.metadata).toEqual({ userId: 'user-1' })
-    })
+        it('wrong audience → client-facing message does not echo the failing claim value', async () => {
+            const token = await sign({}, {audience: 'https://other-resource.example.com'})
+            await expect(strategy.validate(token)).rejects.toMatchObject({
+                message: expect.not.stringContaining('other-resource'),
+            })
+        })
 
-    it('omits metadata key when no mapping configured', async () => {
-      const token = await sign({ sub: 'user-1' })
-      const payload = await strategy.validate(token)
-      expect(payload.metadata).toBeUndefined()
-    })
+        it('token signed with unknown key → TokenInvalidError', async () => {
+            const now = Math.floor(Date.now() / 1000)
+            const token = await new SignJWT({})
+                .setProtectedHeader({alg: 'RS256', kid: 'k1'})
+                .setIssuer(ISSUER)
+                .setAudience(AUDIENCE)
+                .setIssuedAt(now)
+                .setExpirationTime(now + 3600)
+                .sign(otherPrivateKey)
+            await expect(strategy.validate(token)).rejects.toBeInstanceOf(TokenInvalidError)
+        })
 
-  })
+        it('malformed JWT string → TokenInvalidError', async () => {
+            await expect(strategy.validate('not.a.jwt')).rejects.toBeInstanceOf(TokenInvalidError)
+        })
 
-  describe('validate — error mapping', () => {
-    it('expired JWT → TokenExpiredError', async () => {
-      const s = new JwtValidationStrategy({
-        jwksUri: jwksUrl, issuer: ISSUER, audience: AUDIENCE,
-        clockToleranceSec: 0
-      })
-      const token = await sign({}, { expiresInSec: -10 })
-      await expect(s.validate(token)).rejects.toBeInstanceOf(TokenExpiredError)
-    })
+        it('completely garbled input → TokenInvalidError', async () => {
+            await expect(strategy.validate('garbage')).rejects.toBeInstanceOf(TokenInvalidError)
+        })
 
-    it('wrong issuer → TokenInvalidError', async () => {
-      const token = await sign({}, { issuer: 'https://evil.example.com' })
-      await expect(strategy.validate(token)).rejects.toBeInstanceOf(TokenInvalidError)
-    })
+        it('JWT without exp → TokenInvalidError (it would otherwise never expire)', async () => {
+            await expect(strategy.validate(await sign({sub: 'u'}, {noExp: true}))).rejects.toBeInstanceOf(TokenInvalidError)
+        })
 
-    it('wrong audience → TokenInvalidError', async () => {
-      const token = await sign({}, { audience: 'https://other-resource.example.com' })
-      await expect(strategy.validate(token)).rejects.toBeInstanceOf(TokenInvalidError)
-    })
+        it('a token the issuer keys cannot verify is invalid, not "auth server unreachable"', async () => {
+            const now = Math.floor(Date.now() / 1000)
+            const unknownKid = await new SignJWT({sub: 'u'}).setProtectedHeader({alg: 'RS256', kid: 'not-published'})
+                .setIssuer(ISSUER).setAudience(AUDIENCE).setIssuedAt(now).setExpirationTime(now + 3600).sign(otherPrivateKey)
+            const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+            const claims = b64({sub: 'u', iss: ISSUER, aud: AUDIENCE, exp: now + 3600})
+            const algNone = `${b64({alg: 'none', typ: 'JWT'})}.${claims}.`
+            const hs256 = await new SignJWT({sub: 'u'}).setProtectedHeader({alg: 'HS256', kid: 'k1'})
+                .setIssuer(ISSUER).setAudience(AUDIENCE).setIssuedAt(now).setExpirationTime(now + 3600).sign(new TextEncoder().encode('x'.repeat(32)))
+            for (const [label, token] of [['unknown kid', unknownKid], ['alg none', algNone], ['HS256', hs256]] as const) {
+                const err = await strategy.validate(token).catch((e: unknown) => e)
+                expect(err, label).toBeInstanceOf(TokenInvalidError)
+                expect((err as TokenInvalidError).retryable, label).toBe(false)
+            }
+        })
 
-    it('wrong audience → client-facing message does not echo the failing claim value', async () => {
-      const token = await sign({}, { audience: 'https://other-resource.example.com' })
-      await expect(strategy.validate(token)).rejects.toMatchObject({
-        message: expect.not.stringContaining('other-resource'),
-      })
+        it('JWKS endpoint unreachable → TokenIntrospectionError', async () => {
+            const s = new JwtValidationStrategy({
+                jwksUri: 'http://127.0.0.1:1/.well-known/jwks.json',
+                issuer: ISSUER,
+                audience: AUDIENCE,
+            })
+            const token = await sign({})
+            await expect(s.validate(token)).rejects.toBeInstanceOf(TokenIntrospectionError)
+        })
     })
-
-    it('token signed with unknown key → TokenInvalidError', async () => {
-      const now = Math.floor(Date.now() / 1000)
-      const token = await new SignJWT({})
-        .setProtectedHeader({ alg: 'RS256', kid: 'k1' })
-        .setIssuer(ISSUER)
-        .setAudience(AUDIENCE)
-        .setIssuedAt(now)
-        .setExpirationTime(now + 3600)
-        .sign(otherPrivateKey)
-      await expect(strategy.validate(token)).rejects.toBeInstanceOf(TokenInvalidError)
-    })
-
-    it('malformed JWT string → TokenInvalidError', async () => {
-      await expect(strategy.validate('not.a.jwt')).rejects.toBeInstanceOf(TokenInvalidError)
-    })
-
-    it('completely garbled input → TokenInvalidError', async () => {
-      await expect(strategy.validate('garbage')).rejects.toBeInstanceOf(TokenInvalidError)
-    })
-
-    it('JWKS endpoint unreachable → TokenIntrospectionError', async () => {
-      const s = new JwtValidationStrategy({
-        jwksUri: 'http://127.0.0.1:1/.well-known/jwks.json',
-        issuer: ISSUER,
-        audience: AUDIENCE,
-      })
-      const token = await sign({})
-      await expect(s.validate(token)).rejects.toBeInstanceOf(TokenIntrospectionError)
-    })
-  })
 })

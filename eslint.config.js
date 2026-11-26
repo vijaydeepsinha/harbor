@@ -12,6 +12,35 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['dist/', 'node_modules/', 'coverage/'],
+    files: ['src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['**/spi/**/strategies/**'],
+          message: 'SPI contains contracts only; concrete strategies live in adapters.',
+        }],
+      }],
+    },
+  },
+  {
+    files: ['src/runtime/**/*.ts', 'src/tools/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['**/adapters/**', '**/spi/**/strategies/**'],
+          message: 'Use provider contracts or wiring; runtime/tools must not select concrete adapters.',
+        }],
+      }],
+    },
+  },
+  {
+    ignores: [
+      '**/dist/',
+      '**/node_modules/',
+      '**/coverage/',
+      '**/.venv/',
+      '**/.pytest_cache/',
+      '**/.ruff_cache/',
+    ],
   }
 )

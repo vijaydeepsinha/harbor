@@ -1,0 +1,121 @@
+name: Governance E2E
+
+# Runs the complete MCP governance suite — real MCP calls against the
+# production image, the real rules engine, the real V8 isolate, the file
+# store and a deterministic mock backend — plus the Postman collection.
+# Governance-relevant paths always trigger it; everything else is skipped.
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'governance/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'docker/governance-e2e/**'
+      - 'tests/e2e/**'
+      - 'tests/postman/**'
+      - 'postman/mcp-governance.postman_collection.json'
+      - 'postman/environments/**'
+      - 'vitest.e2e.config.ts'
+      - '.github/workflows/governance-e2e.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'governance/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'docker/governance-e2e/**'
+      - 'tests/e2e/**'
+      - 'tests/postman/**'
+      - 'postman/mcp-governance.postman_collection.json'
+      - 'postman/environments/**'
+      - 'vitest.e2e.config.ts'
+      - '.github/workflows/governance-e2e.yml'
+
+concurrency:
+  group: governance-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HARBOR_IMAGE: harbor-governance-e2e:ci
+
+jobs:
+  governance-e2e:
+    name: MCP governance — E2E + Postman
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (gateway + E2E suite)
+        run: |
+          npm run typecheck
+          npm run typecheck:e2e
+
+      - name: Lint (E2E suite, mock API, runners)
+        run: npx eslint tests/e2e tests/postman vitest.e2e.config.ts
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The production Dockerfile, cached by layer in the GitHub Actions cache
+      # (isolated-vm compiles from source on alpine — the cache saves minutes).
+      - name: Build the gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: ${{ env.HARBOR_IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # up → wait for health → boot-refusal + E2E (vitest, JUnit + JSON) → Postman collection (JUnit + JSON)
+      # → governance-test-summary.json → container logs → down. Any failing step fails the job.
+      - name: Run the governance suite (E2E + Postman)
+        run: npm run test:governance -- --no-build
+
+      - name: Publish test summary
+        if: always()
+        run: |
+          echo '## Governance test summary' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f artifacts/governance-test-summary.json ]; then
+            node -e '
+              const s = require("./artifacts/governance-test-summary.json");
+              const row = (n, p) => p ? `| ${n} | ${p.total} | ${p.passed} | ${p.failed} | ${p.skipped} |` : `| ${n} | – | – | – | – |`;
+              console.log("| Suite | Total | Passed | Failed | Skipped |\n|---|---:|---:|---:|---:|");
+              console.log(row("E2E (vitest)", s.e2e)); console.log(row("Postman", s.postman));
+              console.log(`\n**Status: ${s.status}**`);
+            ' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'No summary produced (the environment or the runner failed before tests ran).' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload artifacts (JUnit, JSON, logs, failure diagnostics)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: governance-e2e-artifacts
+          path: |
+            artifacts/e2e/junit.xml
+            artifacts/e2e/results.json
+            artifacts/e2e/failures/**
+            artifacts/postman/**
+            artifacts/logs/**
+            artifacts/governance-test-summary.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/vijaydeepsinha/harbor/security/advisories/new
+    about: Report a vulnerability privately using GitHub Security Advisories.
+  - name: Support policy
+    url: https://github.com/vijaydeepsinha/harbor/blob/main/SUPPORT.md
+    about: Check what support and version guarantees the project provides.

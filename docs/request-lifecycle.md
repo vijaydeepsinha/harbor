@@ -1,6 +1,6 @@
 # Request Lifecycle — End-to-End Trace
 
-> **Orientation:** For the layer diagram, SPI contracts, and system design context, see [`architecture.md`](architecture.md). This document focuses on the runtime call sequence only.
+> **Orientation:** For the layer diagram, SPI contracts, and system design context, see [`architecture.md`](architecture.md). This document focuses on the runtime call sequence only. Durable executions, replay and approvals are specified in [`code-mode-governance.md`](code-mode-governance.md).
 
 This document traces exactly what happens from the moment a user asks a question to the final
 response. It covers all five tools: `discover_services`, `discover_skills`, `get_skill_details`,
@@ -12,98 +12,150 @@ response. It covers all five tools: `discover_services`, `discover_skills`, `get
 
 | Class / Function | File | Role |
 |---|---|---|
-| `createMcpGateway` | `server-factory.ts` | Builds service registry and starts the gateway |
-| `ServiceRegistry` | `registry/service-registry.ts` | Maps service names to their resources |
-| `registerDiscoverServicesTool` | `tools/discover-services.tool.ts` | Defines what happens when `discover_services()` is called |
-| `registerDiscoverSkillsTool` | `tools/discover-skills.tool.ts` | Defines what happens when `discover_skills()` is called |
-| `registerGetSkillDetailsTool` | `tools/get-skill-details.tool.ts` | Defines what happens when `get_skill_details()` is called |
-| `registerSearchCodeTool` | `tools/search-code.tool.ts` | Defines what happens when `search_code()` is called |
-| `registerExecuteApiTool` | `tools/execute-api.tool.ts` | Defines what happens when `api_execute()` is called |
-| `AuthMiddleware` | `auth/auth-middleware.ts` | Parses bearer token, validates via auth strategy, cache-first lookup, proactive refresh, session expiry detection |
-| `AbstractTokenCache` | `auth/abstract-token-cache.ts` | Base class for all token cache backends — provides hash, TTL, get/validate/update orchestration |
-| `InMemoryTokenCache` | `auth/strategies/in-memory-token-cache.strategy.ts` | Default in-memory implementation of `AbstractTokenCache` |
-| `MemcacheTokenCache` | `auth/strategies/memcache-token-cache.strategy.ts` | Memcache-backed implementation of `AbstractTokenCache` |
-| `CouchbaseTokenCache` | `auth/strategies/couchbase-token-cache.strategy.ts` | Couchbase-backed implementation of `AbstractTokenCache` |
-| `OAuthIntrospectionStrategy` | `auth/strategies/oauth-introspection.strategy.ts` | Configurable auth call (GET/POST, flexible token passing, dot-path response/metadata mapping, proactive refresh via separate endpoint) |
-| `StaticTokenAuthStrategy` | `auth/strategies/static-token.strategy.ts` | Client-first: uses client's token as primary; falls back to the configured static token when none provided |
-| `toolHelpers` | `tools/tool-helpers.ts` | Shared utilities — `mcpError`, `mcpSuccess`, `resolveService`, `validateAuth`, `extractCorrelationId`, `extractSessionId`, `runSandboxTool` |
-| `AuditCollector` | `observability/audit.ts` | Collects which endpoints were called during a request |
-| `runInSandbox` | `sandbox/sandbox-core.ts` | Shared base — creates V8 isolate, calls `setupContext` to inject data, runs user code, disposes isolate |
-| `runSpecSearchInSandbox` | `sandbox/spec-search-in-sandbox.ts` | Delegates to `runInSandbox`, injects `spec` |
-| `runSkillsSearchInSandbox` | `sandbox/skills-search-in-sandbox.ts` | Delegates to `runInSandbox`, injects `skills` array |
-| `runApiInSandbox` | `sandbox/execute-api-in-sandbox.ts` | Delegates to `runInSandbox`, injects `api.request()` bridge |
-| `ApiClient.executeRequest` | `api-client/api-client.ts` | Makes the actual HTTP call to the backend API |
-| `CircuitBreakerStrategy` | `resilience/strategies/*.ts` | Tracks failures and opens/closes the circuit |
-| `IdempotencyStrategy` | `idempotency/strategies/*.ts` | Caches results to prevent duplicate writes |
-| `writeAuditRecord` | `observability/audit.ts` | Writes the final audit log entry |
-| `MetricsRegistry` | `observability/metrics.ts` | Increments counters |
+| `createMcpGateway` | `src/runtime/server-factory.ts` | Boots the gateway: services, token cache, registry, audit pipeline, Code Mode runtime, transport |
+| `scanServicesDirectory` | `src/runtime/registry/filesystem-scanner.ts` | Reads `services/*` — `config.json`, the spec, `skills/*.md` |
+| `buildServiceResources` | `src/runtime/gateway/service-resources-factory.ts` | Wires one scanned service into its `ServiceResources` |
+| `ServiceRegistry` | `src/runtime/registry/service-registry.ts` | Maps service names to their resources |
+| `startHttpGateway` | `src/runtime/http/http-gateway.ts` | `/mcp` (bearer format, body limit), `/health`, protected-resource metadata, `/executions` |
+| `buildMcpServerFactory` | `src/runtime/http/mcp-server-factory.ts` | A fresh `McpServer` with the five tools for every request |
+| `registerDiscoverServicesTool` | `src/tools/discover-services.tool.ts` | Defines what happens when `discover_services()` is called |
+| `registerDiscoverSkillsTool` | `src/tools/discover-skills.tool.ts` | Defines what happens when `discover_skills()` is called |
+| `registerGetSkillDetailsTool` | `src/tools/get-skill-details.tool.ts` | Defines what happens when `get_skill_details()` is called |
+| `registerSearchCodeTool` | `src/tools/search-code.tool.ts` | Defines what happens when `search_code()` is called |
+| `registerExecuteApiTool` | `src/tools/execute-api.tool.ts` | Defines what happens when `api_execute()` is called |
+| `toolHelpers` | `src/tools/tool-helpers.ts` | Shared utilities — `mcpError`, `mcpSuccess`, `resolveService`, `validateAuth`, `extractCorrelationId`, `runSandboxTool` |
+| `AuthMiddleware` | `src/runtime/auth/auth-middleware.ts` | Parses the bearer, cache-first validation via the service's auth strategy, proactive refresh, session expiry detection |
+| `extractBearerFromHeader` | `src/runtime/auth/bearer-authorization.ts` | One `Authorization` header, `Bearer` scheme, a JWT or ≥ 32 base64url characters |
+| `AbstractTokenCache` | `src/adapters/auth/abstract-token-cache.ts` | Base class for all token cache backends — hash, entry expiry, get/validate/update orchestration |
+| `InMemoryTokenCache` | `src/adapters/auth/strategies/in-memory-token-cache.strategy.ts` | Default in-memory implementation of `AbstractTokenCache` |
+| `MemcacheTokenCache` | `src/adapters/auth/strategies/memcache-token-cache.strategy.ts` | Memcache-backed implementation of `AbstractTokenCache` |
+| `CouchbaseTokenCache` | `src/adapters/auth/strategies/couchbase-token-cache.strategy.ts` | Couchbase-backed implementation of `AbstractTokenCache` |
+| `OAuthIntrospectionStrategy` | `src/adapters/auth/strategies/oauth-introspection.strategy.ts` | Configurable auth call (GET/POST, flexible token passing, dot-path response/metadata mapping, refresh via a separate endpoint) |
+| `JwtValidationStrategy` / `OAuthDiscoveryStrategy` | `src/adapters/auth/strategies/jwt-validation.strategy.ts`, `oauth-discovery.strategy.ts` | Local JWT verification (JWKS, or JWKS found by AS metadata discovery) |
+| `StaticTokenAuthStrategy` | `src/adapters/auth/strategies/static-token.strategy.ts` | Client-first: forwards the client's token; falls back to the configured static token when none is provided |
+| `ExecutionManager` | `src/runtime/execution/execution-manager.ts` | Creates, loads, begins and ends runs of a durable execution (run lock) |
+| `ApprovalService` | `src/runtime/execution/approval-service.ts` | Opens an approval for one activity; applies the human's decision exactly once |
+| `runInSandbox` | `src/runtime/sandbox/sandbox-core.ts` | Shared base — creates the V8 isolate, calls `setupContext`, runs user code, classifies failures, disposes the isolate |
+| `runSpecSearchInSandbox` | `src/runtime/sandbox/spec-search-in-sandbox.ts` | Delegates to `runInSandbox`, injects `spec` |
+| `runSkillsSearchInSandbox` | `src/runtime/sandbox/skills-search-in-sandbox.ts` | Delegates to `runInSandbox`, injects the `skills` array |
+| `runApiInSandbox` | `src/runtime/sandbox/execute-api-in-sandbox.ts` | Delegates to `runInSandbox`, injects the `api.request()` bridge; drains un-awaited calls |
+| `BridgeRequestHandler` | `src/runtime/sandbox/bridge-request-handler.ts` | The host side of `api.request()`: the per-call pipeline behind the bridge |
+| `canonicalizeRequestPath` | `src/runtime/sandbox/request-path.ts` | The one spelling of the path that governance, the journal and the connector all use |
+| `resolveOperation` | `src/runtime/governance/operation-resolver.ts` | Concrete path → OpenAPI template, `operationId`, path params |
+| `ActivityGate` | `src/runtime/execution/activity-gate.ts` | Decides replay / execute / pause / stop for each call; asks governance about new activities |
+| `evaluateGovernance` | `src/runtime/governance/rule-evaluator.ts` | Pure function: Governance Rules → ALLOW / DENY / REQUIRE_APPROVAL |
+| `CallLog` / `ActivityJournal` | `src/runtime/execution/activity-journal.ts` | The single record of each call's outcome (the durable activity record when governed) |
+| `ApiClient` | `src/runtime/api-client/api-client.ts` | Implements `ConnectorAPI`: headers, idempotency, the HTTP call, retries, breaker failures |
+| `CircuitBreakerStrategy` | `src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.ts`, `src/adapters/resilience/strategies/noop-circuit-breaker.strategy.ts` | Tracks failures per endpoint and opens/closes the circuit |
+| `IdempotencyStrategy` | `src/adapters/idempotency/strategies/`, `src/adapters/idempotency/strategies/noop-idempotency.strategy.ts` | Returns the stored result for a repeated idempotency key |
+| `AuditCollector` | `src/runtime/observability/audit.ts` | Projection of the run's call log: which endpoints were called during a request |
+| `ProgressCollector` | `src/runtime/observability/progress.ts` | Projection of the run's call log: per-call status and created ids, returned on failure |
+| `writeAuditRecord` / `AuditPipeline` | `src/runtime/observability/audit.ts`, `audit-pipeline.ts` | Delivers the audit record (and execution-state events) to every `AUDIT_SINKS` sink |
+| `MetricsRegistry` | `src/runtime/observability/metrics.ts` | Increments counters; logs them as `metrics_flush` every 60 s |
 
 ---
 
 ## Phase 1 — Startup (runs once, not per request)
 
-**File: `index.ts`**
+**File: `src/index.ts`**
 ```typescript
-const servicesDir = resolve(__dirname, 'services')
-const globalConfig = validateGlobalConfig()
+const servicesDir = process.env['SERVICES_DIR']
+  ? resolve(process.cwd(), process.env['SERVICES_DIR'])
+  : resolve(__dirname, '..', 'services')      // <install root>/services, whatever the working directory
+const globalConfig = validateGlobalConfig()   // Zod; exits on a bad value
 await createMcpGateway(servicesDir, globalConfig)
 ```
 
-**File: `server-factory.ts` — `createMcpGateway()`**
+Before that, `src/core/config/config.ts` merges `MCP_CONFIG_FILE` (default
+`/etc/harbor-config/config.yaml`, `KEY: value` lines) into the environment when the file exists;
+variables already set win.
+
+**File: `src/runtime/server-factory.ts` — `createMcpGateway()`**
 
 The gateway factory runs these steps once at startup:
 
-1. **Auto-scans the `services/` directory** via `filesystem-scanner.ts`. Each subdirectory with a
-   spec file (`spec.json`, `spec.yaml`, or `spec.yml`) becomes a service. Services with
-   `"enabled": false` in their `config.json` are skipped. Failed scans log an error and skip
-   that directory — other services still load.
+1. **Scans the services directory** via `src/runtime/registry/filesystem-scanner.ts`. Each
+   subdirectory with a local spec file or a configured URL spec source is a candidate
+   service. For each one it reads `config.json` (a service with `"enabled": false` is skipped),
+   loads the configured source immediately (remote first for URL sources), derives the API
+   base URL from the resulting spec (`config.api`, else the spec's
+   `servers[0].url`), builds the auth strategy (`config.auth` is required), the circuit breaker
+   and the idempotency config, and reads `skills/*.md` (a skill file that cannot be parsed is
+   skipped on its own). A service that fails any of this is logged
+   (`Failed to scan service "<name>" — skipping`) and skipped; the others still load. No service
+   left ⇒ exit.
 
-2. **Creates the `ServiceRegistry`** — an empty `Map<string, ServiceResources>`.
+2. **Builds the token cache — once, shared by every service.** Backend type comes from
+   `TOKEN_CACHE_TYPE` (`in-memory` default, `memcache`, `couchbase`, or a registered backend).
 
-3. **For each scanned service:**
+3. **For each scanned service**, `buildServiceResources()`:
 
    a. **Stores the spec and skills** — the parsed spec goes into a `SpecStore`, the scanned
-      skills go into a `SkillStore`. Both support atomic `swap()`.
+      skills into a `SkillStore`. Both support atomic `swap()`.
 
-   b. **Starts service refresh scheduler** — `ServiceRefresher.start()` calls `setInterval` with
-      the service-level `serviceRefreshIntervalMs`. On each tick it reloads both the spec (via the
-      configured loader) and the skills (re-scans `skills/*.md` from disk). If either reload
-      fails, it logs a warning and keeps the existing data.
+   b. **Creates auth middleware** — `AuthMiddleware` over the shared token cache and the service's
+      own `AuthStrategy`.
 
-   c. **Builds the global token cache** — one `TokenCacheStrategy` instance shared by all services.
-      Backend type is determined by `TOKEN_CACHE_TYPE` env var (`in-memory` | `memcache` | `couchbase`).
-      `InMemoryTokenCache` is the default for development; `MemcacheTokenCache` and
-      `CouchbaseTokenCache` use shared infrastructure clients from `infra/`.
+   c. **Resolves the idempotency strategy** — the `idempotency` block of the service's
+      `config.json`, else the gateway default `IDEMPOTENCY_TYPE` (`noop` unless set). An unknown
+      type fails the service.
 
-   d. **Creates auth middleware** — `AuthMiddleware` using the global token cache and the service's own
-      `AuthStrategy` (derived from `config.json` or defaults). Supports proactive token refresh
-      for tokens near expiry.
+   d. **Merges sandbox limits** — `config.json` `sandbox` overrides over the `SANDBOX_*` defaults.
 
-   e. **Resolves idempotency strategy** — from the service's `config.json` or the global default.
+   e. **Creates `ApiClient`** — pointed at this service's base URL, with its own circuit breaker
+      and idempotency strategy.
 
-   f. **Creates `ApiClient`** — pointed at this service's host:port with its own circuit breaker
-      and idempotency.
+   f. **Starts the service refresher** — last, so a service that failed above leaves no timer
+      behind. With `serviceRefreshIntervalMs` > 0 it reloads the spec (via the configured loader)
+      and the skills together on each tick; a failed spec load keeps both, and ticks never
+      overlap.
 
-   g. **Registers all resources** into the `ServiceRegistry` keyed by the folder name.
+   g. **Registers the resources** in the `ServiceRegistry`, keyed by the folder name. A service
+      whose resources fail to build is logged (`Failed to build service resources — skipping
+      service`) and skipped.
 
-4. **Creates a per-request `McpServer` factory** with five tools wired to the shared registry:
-   `discover_services`, `discover_skills`, `get_skill_details`, `search_code`, `api_execute`.
-   The client's `Authorization` header is extracted and validated on every HTTP request.
+4. **Builds the audit pipeline** — one sink per `AUDIT_SINKS` entry (`console` by default) when
+   `ENABLE_AUDIT` is on (`true`/`1`, the default); none when it is `false`/`0`.
 
-5. **Registers `SIGTERM` handler** to destroy the global token cache and shut down gracefully.
+5. **Builds the Code Mode runtime** — the execution store (`EXECUTION_STORE_TYPE`), execution
+   manager, approval service, retention sweeper, `requestState` codec, and a rule source/store/
+   refresher for each registered service. Sources and refresh intervals come from that service's
+   `config.json`. An unreadable configured source or invalid initial rule stops boot; a missing
+   default local directory boots that service with no rules and a WARN. Disabled services never
+   construct or load their rule source.
 
-6. **Starts the Streamable HTTP (or stdio) transport.** The gateway now listens for client connections.
-   Connections without a valid `Authorization: Bearer` header are rejected at this stage.
+6. **Creates the per-request `McpServer` factory** with the five tools wired to the shared
+   registry: `discover_services`, `discover_skills`, `get_skill_details`, `search_code`,
+   `api_execute`.
+
+7. **Starts the transport.** HTTP: the Streamable HTTP listener on `MCP_HOST:MCP_PORT`
+   (`127.0.0.1:3333`). stdio: `MCP_TOKEN` is required and must pass the bearer parser (a JWT, or
+   ≥ 32 base64url characters), or the process exits.
+
+8. **Registers `SIGTERM` and `SIGINT` handlers**: for HTTP, stop accepting connections and wait
+   for accepted requests to drain; then shut down the Code Mode runtime (retention sweeper, rule
+   refresher, store), close the audit pipeline, destroy the token cache, stop every service refresher
+   and the metrics timers. stdio uses the same shared teardown after its transport ends.
 
 ---
 
 ## Phase 2 — The tool flow
 
+Every HTTP request is independent: `POST /mcp` carries its own `Authorization` header and MCP
+`_meta` envelope, and gets its own `McpServer`. There are no MCP sessions.
+
+At the transport, `src/runtime/http/http-gateway.ts` checks only the bearer's **format**: exactly
+one `Authorization` header, `Bearer` scheme, a JWT or ≥ 32 base64url characters. Missing, malformed
+or duplicated ⇒ HTTP 401 (with `WWW-Authenticate: Bearer resource_metadata=…` when
+`HARBOR_RESOURCE_URI` is set). Whether the auth server accepts the token is decided later, by each
+tool that calls `validateAuth()`. The body is read up to `MCP_MAX_BODY_BYTES` (4 MiB default);
+beyond that ⇒ 413 `PAYLOAD_TOO_LARGE`, and a body that is not JSON ⇒ JSON-RPC `-32700`.
+
 ### Tool 1: `discover_services()`
 
 This is the simplest tool. No sandbox, no auth, no network.
 
-**File: `tools/discover-services.tool.ts`**
+**File: `src/tools/discover-services.tool.ts`**
 
 1. AI calls `discover_services()` (no parameters).
 2. The handler calls `registry.listServices()`.
@@ -133,56 +185,61 @@ service to target.
 Not every scenario has a matching skill. The AI should check for relevant skills before
 proceeding, but can skip directly to `search_code` if none are found.
 
-**File: `tools/discover-skills.tool.ts`**
+**File: `src/tools/discover-skills.tool.ts`**
 
 1. AI calls `discover_skills` with `service: "tasks"` and a JavaScript function as `code`.
-2. **Service lookup** — via `resolveService()` helper. If the service doesn't exist, returns an error listing available services.
-3. **Auth validation** — via `validateAuth()` helper. Validates the client token against the service's auth strategy. If auth fails, returns a structured error immediately.
-4. **V8 sandbox** — `runSkillsSearchInSandbox(code, skills, globalConfig)`:
+2. **Service lookup** — via `resolveService()`. An unknown service returns `UNKNOWN_SERVICE`
+   (not retryable) listing the available services.
+3. **Auth validation** — via `validateAuth()`. Validates the client token against the service's
+   auth strategy. If auth fails, returns a structured error immediately.
+4. **V8 sandbox** — `runSkillsSearchInSandbox(code, skills, sandboxLimits)`:
    - Delegates to `runInSandbox` with a `setupContext` that injects the `skills` array
-   - `skills` is an array of `{ id, filename, title, content }` — all `.md` files from `services/<name>/skills/`
-   - The AI's JavaScript filters/searches this array
-5. Returns matching skill IDs and titles. No network calls from within the sandbox.
+   - `skills` is an array of standard Agent Skill metadata —
+     `{ name, filename, description, content, ...optionalFields }` — one per `.md`
+     file in `services/<name>/skills/`; `content` excludes frontmatter
+   - The AI's JavaScript filters/searches this array, within `searchTimeoutMs`
+5. Returns whatever the function returns. No network calls from within the sandbox.
 
 If no relevant skills are found, the AI proceeds directly to `search_code` without calling
 `get_skill_details`.
 
 ---
 
-### Tool 3: `get_skill_details({ service, skill_id })` — optional, follows discover_skills
+### Tool 3: `get_skill_details({ service, skill_name })` — optional, follows discover_skills
 
 Only used when `discover_skills` returned a relevant skill. Provides the full business SOP
 with workflow steps, required fields, and constraints.
 
-**File: `tools/get-skill-details.tool.ts`**
+**File: `src/tools/get-skill-details.tool.ts`**
 
-1. AI calls `get_skill_details` with `service` and `skill_id` (from `discover_skills` results).
-2. **Service lookup** — via `resolveService()` helper.
-3. **Auth validation** — via `validateAuth()` helper. Validates the client token.
-4. **Skill lookup** — `skills.find(s => s.id === skill_id)`.
+1. AI calls `get_skill_details` with `service` and the `skill_name` returned by
+   `discover_skills`.
+2. **Service lookup** — via `resolveService()`.
+3. **Auth validation** — via `validateAuth()`.
+4. **Skill lookup** — `skills.find(s => s.name === skill_name)`; not found ⇒ `UNKNOWN_SKILL`.
 5. Returns the full Markdown content of the skill document. No sandbox, no network.
 
 ---
 
 ### Tool 4: `search_code({ service, code })`
 
-**File: `tools/search-code.tool.ts`**
+**File: `src/tools/search-code.tool.ts`**
 
 1. AI calls `search_code` with `service: "tasks"` and a JavaScript function as `code`.
 
-2. **Service lookup** — via `resolveService()` helper. If the service doesn't exist, returns an
-   error listing all available services.
+2. **Service lookup** — via `resolveService()`.
 
-3. **Auth validation** — via `validateAuth()` helper. Validates the client token against the service's auth strategy.
+3. **Auth validation** — via `validateAuth()`.
 
 4. **Spec retrieval** — `svcResources.specStore.getSpec()` returns the fully dereferenced
-   OpenAPI spec for the requested service.
+   OpenAPI spec, then `permissionGuard.filterSpec(spec, tokenPayload)` removes what the token may
+   not see (the default guard removes nothing).
 
-5. **V8 sandbox** — `runSpecSearchInSandbox(code, spec, globalConfig)`:
-   - Creates a new `ivm.Isolate` with memory limit from config
+5. **V8 sandbox** — `runSpecSearchInSandbox(code, filteredSpec, sandboxLimits)`:
+   - Creates a new `ivm.Isolate` with the service's memory limit
    - Deep-copies the spec into the sandbox via `ivm.ExternalCopy`
    - Sets `spec` on the sandbox's global object — this is the ONLY thing available
-   - Compiles and runs the AI's JavaScript function
+   - Compiles and runs the AI's JavaScript function within `searchTimeoutMs`
    - Returns the result as JSON
    - Disposes the isolate in `finally`
 
@@ -195,186 +252,330 @@ network capability whatsoever. It is a read-only computation over a JSON object.
 
 ### Tool 5: `api_execute({ service, code })`
 
-This is the full pipeline. Every step is described below.
+This is the full pipeline. Every step is described below. The booted gateway always has a Code
+Mode runtime, so every `api_execute` is a durable, governed execution. (An embedder that registers
+the tool without one gets the legacy path: no execution is created or ended, and calls go out
+without the journal or governance.)
 
-**File: `tools/execute-api.tool.ts`**
+**File: `src/tools/execute-api.tool.ts`**
 
 ---
 
 #### Step 1 — Service lookup
 
 ```typescript
-const svcResources = registry.get(service)
+const svcResources = resolveService(registry, service, serviceNames)
 ```
 
-Retrieves the correct `apiClient`, `authMiddleware`, `circuitBreaker`, etc. for the target
-service. If the service doesn't exist, returns an error.
+Retrieves the service's `apiClient`, `authMiddleware`, `circuitBreaker`, `permissionGuard`,
+idempotency TTL and `sandboxLimits`. An unknown service returns `UNKNOWN_SERVICE`, not retryable:
+the registry is fixed at boot, so the same name fails every time.
 
 ---
 
 #### Step 2 — Auth validation
 
-**File: `auth/auth-middleware.ts`**
+**File: `src/runtime/auth/auth-middleware.ts`**
 
 ```typescript
-const tokenPayload = await svcResources.authMiddleware.validateRequest(authHeader, correlationId)
+const { payload: tokenPayload, invalidate } =
+  await svcResources.authMiddleware.validateRequest(authHeader, correlationId)
+const userIdHash = hashAuthenticatedPrincipal(tokenPayload, clientToken)
 ```
 
-Uses the service's own auth strategy (resolved via `resolveService()` and `validateAuth()` tool helpers):
-- **OAuth introspection**: Calls the configured auth server endpoint (GET or POST, configurable token passing mode). Caches the result in the global token cache. Supports proactive token refresh — if a cached token is within `tokenRefreshBufferSec` of expiry and the strategy supports `refresh()`, the middleware refreshes it and updates the cache. Auth response fields are mapped to `TokenPayload` via configurable `responseMapping` and `metadataMapping` dot-paths.
-- **Static token**: Uses the client's token (from the `Authorization` header) as primary; falls back to the configured static token only when no client token is present. No network call, no refresh capability.
+Uses the service's own auth strategy:
+- **OAuth introspection**: calls the configured auth server endpoint (GET with the token in the
+  query string by default; POST with the token in the query, body or header is configurable).
+  A response whose `active` is present and not `true` is `TOKEN_INVALID`. The lifetime comes from
+  `expires_in` (or its mapped field) or RFC 7662's absolute `exp`. Auth response fields are mapped
+  to `TokenPayload` via configurable `responseMapping` and `metadataMapping` dot-paths.
+- **JWT validation / OAuth 2.1**: verifies the signature against the issuer's JWKS, `iss`, `aud`
+  (required) and a required `exp`; only RS/PS/ES 256–512 and EdDSA are accepted.
+- **Static token**: forwards the client's token (from the `Authorization` header); falls back to
+  the configured static token only when none is present. No network call, no refresh.
+
+`invalidate` evicts this caller's cache entry; `ApiClient` calls it when a backend answers 401.
+The principal hash `userIdHash` is sha256 of `metadata.userId` when that is a non-empty string or
+a finite number, else of the raw inbound bearer. It owns the execution.
 
 Token cache and refresh flow (all async to support remote backends):
 
 ```
-1. tokenCache.get(rawToken)
+1. tokenCache.get(service, rawToken)
    │
-   ├─ Cache HIT  → refreshIfNeeded(payload, expiresAt)
-   │               └─ Near expiry? → strategy.refresh() → tokenCache.update()
-   │               └─ Not near expiry? → return cached payload
+   ├─ Cache HIT  → serve the cached payload now
+   │               └─ refresh_token present, strategy has refresh(), and the backend token is
+   │                  within tokenRefreshBufferSec (default 300 s) of its own expiry
+   │                  (tokenExpiresAt, not the cache entry's expiry)?
+   │                    → background refresh: single-flight per token, 30 s cooldown after a failure
+   │                      → strategy.refresh() → tokenCache.update()
    │
    └─ Cache MISS → tokenCache.getOrValidate(rawToken, strategy.validate)
-                   └─ Validate against auth server, cache result
-                   └─ refreshIfNeeded() — also runs on fresh validations
-                      (covers cache-down scenario where every request is a miss
-                       but the token may still need refresh)
+                   └─ validate against the auth server, cache the result
+                   └─ refreshIfNeededSync() — the same window check, but synchronous: there is no
+                      cached payload to serve meanwhile
 ```
 
-**Cache resilience**: If the external cache (Memcache/Couchbase) is down, all cache reads
-return `undefined` (miss) and writes are silently absorbed. A `warn`-level log is emitted for
-each failure. The gateway continues to function by hitting the auth server directly — slower
-but operational.
+A refresh rotates the **backend** token only. `tokenCache.update()` never extends a live entry:
+the caller's own token is validated again when the entry would have expired anyway, so a token
+revoked at the auth server stops working then. The refreshed payload keeps the original
+`metadata.userId`, so the caller's principal hash, and with it access to their own paused
+executions, survives the refresh.
 
-**Session expiry**: If `refreshIfNeeded()` detects that both the access token and refresh token
-have expired (typically after ~12 hours), it throws `SessionExpiredError` with a clear user-facing
-message. This is surfaced to the AI client as a non-retryable error prompting the user to update
-their Bearer token.
+A cache entry lives for `min(expires_in, AUTH_TOKEN_CACHE_TTL_MS)` (default 5 minutes).
 
-If auth fails, the tool returns a structured error immediately — no sandbox runs.
+**Cache resilience**: if the external cache (Memcache/Couchbase) is down, reads return a miss and
+writes are absorbed, each with a `warn` log. The gateway keeps working by hitting the auth server
+directly — slower but operational.
+
+**Session expiry**: if the synchronous refresh fails with `TokenExpiredError` while the access
+token has itself expired, the middleware throws `SessionExpiredError` (`SESSION_EXPIRED`, not
+retryable) with a message asking the user to update their Bearer token. Any other refresh failure
+logs a warning and serves the still-valid token.
+
+If auth fails, the tool returns a structured error immediately, as a tool result (HTTP 200); no
+execution is created and no sandbox runs.
 
 ---
 
-#### Step 3 — V8 sandbox execution
+#### Step 3 — Create or resume the execution
 
-**File: `sandbox/execute-api-in-sandbox.ts` — `runApiInSandbox()`**
+**Files: `src/tools/execute-api-run.ts` (`openExecution`), `src/tools/mcp-request-view.ts` (what the request says), `src/runtime/execution/execution-manager.ts`**
 
-Delegates to `runInSandbox()` (shared with search and skills sandboxes). The `setupContext`
+- **A new call** (no `requestState`, no `_meta["harbor/execution-id"]`) creates an execution. Its
+  `code` is persisted as the authoritative original.
+- **A resume** — an MRTR retry carrying the sealed `requestState` (the SDK verified its HMAC, TTL
+  and method binding before the handler ran), a client that decided over HTTP and sends
+  `_meta["harbor/execution-id"]`, or both — loads the execution and checks it belongs to the same
+  principal and service (else `EXECUTION_NOT_RESUMABLE`). The explicit id selects the execution;
+  a supplied state must name that same id before its human answer is applied via
+  `ApprovalService.decide()`. A reject ends the execution `DENIED` and a cancel ends it `CANCELLED`,
+  before anything runs. The incoming `code` is ignored.
+- `ExecutionManager.beginRun()` takes the run lock and moves the execution to `RUNNING`. It is
+  refused with `EXECUTION_LOCKED` (retryable) while another run holds the lock, with
+  `EXECUTION_NOT_RESUMABLE` when the execution is finished, and with the pause again when its
+  approval is still undecided.
+
+The idempotency key base for the run is `mcp-{service}-{executionId}`; the bridge appends each
+activity's sequence number.
+
+---
+
+#### Step 4 — V8 sandbox execution
+
+**File: `src/runtime/sandbox/execute-api-in-sandbox.ts` — `runApiInSandbox()`**
+
+Delegates to `runInSandbox()` (shared with the search and skills sandboxes). The `setupContext`
 callback does the execute-specific work:
 
 ```
 runInSandbox() — shared V8 lifecycle
   |
-  new ivm.Isolate({ memoryLimit: 64 })    ← brand new V8 engine, 64 MB limit
+  new ivm.Isolate({ memoryLimit })          ← brand new V8 engine, SANDBOX_MEMORY_MB (64 MB default)
   |
-  createContext()                          ← empty global scope (no fetch, no require, nothing)
+  wall-clock timer (executeTimeoutMs)       ← disposes the isolate when it fires; covers every await
   |
-  setupContext(jail, context, isolate)     ← execute-specific injection:
-  |   jail.set('__makeRequest', ...)        ← bridge to outer Node.js (auth, CB, API client)
-  |   isolate.compileScript(bootstrap)      ← defines `api = { request: ... }` inside sandbox
+  createContext()                           ← empty global scope (no fetch, no require, nothing)
   |
-  compile and run wrappedUserCode          ← user's async arrow function runs; can only call api.request()
+  setupContext(jail, context, isolate)      ← execute-specific injection:
+  |   jail.set('__makeRequest', ...)         ← bridge to outer Node.js: BridgeRequestHandler.handle
+  |   isolate.compileScript(bootstrap)       ← defines `api = { request: ... }` inside the sandbox
   |
-  result returned as JSON string           ← sandbox returns result
+  compile and run the program               ← the persisted async arrow function; it can only call api.request()
   |
-  isolate.dispose()                        ← engine destroyed, all memory freed (in finally)
+  result returned as a JSON string
+  |
+  isolate.dispose()                         ← engine destroyed, all memory freed (in finally)
 ```
 
 Key: no `spec` is injected into the execute sandbox. The AI cannot access the OpenAPI spec here.
 
+A failure is classified by what happened, never by the wording of a message:
+- `SANDBOX_TIMEOUT` (retryable) — the wall-clock timer disposed the isolate, or V8's own CPU
+  timeout fired.
+- `SANDBOX_MEMORY` (not retryable) — the isolate was disposed by `isolated-vm` itself.
+- `SANDBOX_SYNTAX` (not retryable) — the program does not compile.
+- `SANDBOX_RUNTIME` (not retryable) — an ordinary exception the program threw, including an
+  escaped transport error on a governed GET or the legacy unjournaled path. A governed non-GET
+  transport failure is promoted separately as `ACTIVITY_OUTCOME_UNKNOWN`.
+
 ---
 
-#### Step 4 — API call (inside the bridge, outer context)
+#### Step 5 — API call (inside the bridge, outer context)
 
 For each `api.request()` call the AI's code makes:
 
-**File: `sandbox/execute-api-in-sandbox.ts` — the bridge function**
+**File: `src/runtime/sandbox/bridge-request-handler.ts` — `BridgeRequestHandler.handle()`**
 
-```typescript
-async (configJson: string): Promise<string> => {
-  const config = JSON.parse(configJson)
-  const normalizedPath = normalizeEndpointPath(config.path)  // /orders/123 → /orders/{id}
-
-  circuitBreaker.check(normalizedPath)          // ← throws CircuitOpenError if OPEN
-
-  const result = await apiClient.executeRequest(config, tokenPayload, ...)
-
-  circuitBreaker.recordSuccess(normalizedPath)  // ← only called on 2xx/3xx
-  auditCollector.record(config.method, normalizedPath)
-
-  return JSON.stringify(result)
-}
+```
+admit()                                   run already stopped? maxApiCalls? maxConcurrentCalls?
+validate + canonicalise                   request-path.ts           ⇒ INVALID_API_REQUEST, nothing sent
+resolve(method, path)                     OpenAPI template, operationId, path params
+exclusive(…)                              per-run admission lock — one call at a time, in arrival order
+  ├─ stop check                           a sibling paused / denied / diverged ⇒ refused with that code
+  ├─ ActivityGate.admit                   journal lookup:
+  │                                         COMPLETED → replay the recorded response (no call)
+  │                                         APPROVED / GET left EXECUTING → execute
+  │                                         WAITING_APPROVAL, DENIED, CANCELLED, FAILED,
+  │                                         non-GET left EXECUTING → stop
+  │                                       new activity → evaluateGovernance → ALLOW | DENY | REQUIRE_APPROVAL
+  ├─ permissionGuard.canExecute(template) ⇒ PERMISSION_DENIED
+  ├─ circuitBreaker.check(template)       ⇒ CIRCUIT_OPEN
+  └─ ActivityGate.begin                   activity journaled EXECUTING — before the call goes out
+apiClient.request(apiRequest, ctx)        outside the lock: calls of one run still overlap
+journal.recordResponse(…)                 COMPLETED with the response, whatever its HTTP status
+circuitBreaker.recordSuccess(template)    any returned status (a 5xx has thrown before this)
 ```
 
-**File: `api-client/api-client.ts` — `executeRequest()`**
+- **Canonicalisation** happens once. A missing leading slash is added, unreserved escapes are
+  decoded (`%6f` → `o`), and a query string in the path moves into `params`. Absolute and
+  protocol-relative URLs, backslashes, fragments, empty interior segments, `.`/`..` (literal or
+  encoded), segments that decode to `/`, `\` or a control character, malformed percent-encoding,
+  and a query key repeated or also given in `params` are all refused. Governance, the journal and
+  the wire all see the same path.
+- **Replay divergence**: a journaled activity binds method, template and concrete path, and, while
+  it is APPROVED, WAITING_APPROVAL or EXECUTING, also query and body. A resumed program that asks
+  for something else at that sequence gets `REPLAY_DIVERGED` and nothing runs.
+- **A throw from the connector** marks the activity FAILED with an unknown outcome. On a resume
+  that activity is never re-sent: the run stops with `ACTIVITY_OUTCOME_UNKNOWN`.
 
-- Sets headers: `Authorization`, `X-Correlation-ID`, `X-Request-Source: mcp-agent`, `X-MCP-Session-ID`, `X-Idempotency-Key`
-- Retries on 5xx with fixed 500ms backoff
-- Returns `{ data, status, ok: true }` for 2xx/3xx
-- Returns `{ data, status, ok: false }` for 4xx — never retries, never records circuit failure
-- Calls `circuitBreaker.recordFailure()` on 5xx and network errors
+**File: `src/runtime/api-client/api-client.ts` — `request()` / `executeRequest()`**
+
+- `request()` runs `executeRequest()` through the service's idempotency strategy, keyed by
+  `ctx.idempotencyKey` = `mcp-{service}-{executionId}-{sequence}` (legacy path:
+  `mcp-{service}-{userIdHash12}-{codeHash16}-c{n}`, `n` being the call's arrival index).
+- Headers: `Content-Type: application/json` (the program may override it), then the program's
+  own headers, then Harbor's, which always win:
+  - `Authorization: Bearer <access_token>` — the validated payload's token
+  - `X-Request-Source` (`MCP_AGENT_NAME`, default `mcp-agent`), `X-MCP-Tool: api_execute`,
+    `X-MCP-Service`, `X-MCP-Version` (no session header: MCP 2026-07-28 is stateless)
+  - `X-Idempotency-Key`
+  - `X-Correlation-ID` — the MCP request id, shared by calls in this sandbox run on both legacy
+    and governed paths; each approval resume gets a new request id. The durable execution id is
+    tracked separately by governance and in the execution-specific idempotency key
+  - `X-Harbor-Execution-ID` — the durable execution id on governed calls, stable across approval
+    resumes; absent on legacy calls
+  - `X-Harbor-Server-ID` — the gateway's stamp (`HARBOR_SERVER_ID`, default `HARBOR_GATEWAY`)
+  - `X-Harbor-Client-ID` — the caller's own id, forwarded when the `/mcp` request carried a
+    safe one
+- **What a program may not set**, in any letter case (its copies are dropped): `Authorization`,
+  `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-MCP-Session-ID` (no longer sent, still reserved),
+  `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`,
+  `X-Harbor-Execution-ID`, `Host`,
+  `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `TE`, `Trailer`,
+  `Proxy-Authorization`, `Proxy-Connection`, `Cookie`, `Forwarded`, `X-Forwarded-For`/`-Host`/
+  `-Proto`/`-Port`/`-Prefix`, `X-Real-IP`, `X-HTTP-Method-Override`, `X-HTTP-Method`,
+  `X-Method-Override`, `X-Original-URL`, `X-Rewrite-URL`, `X-Original-Method`. It may still set
+  `Accept`, `Content-Type` and its own `X-…` headers.
+- The request never leaves the service's base URL (axios `allowAbsoluteUrls: false`).
+- Returns `{ data, status, ok: true }` for 2xx/3xx.
+- Returns `{ data, status, ok: false }` for 4xx — never retried, never a circuit failure. A 401
+  also evicts the caller's token cache entry.
+- **Retries**: only `GET`, `PUT` and `DELETE`, on a 5xx or a transport error (timeout, refused
+  connection), up to the service's `maxRetries` (default 1), waiting `500·2^n` ms plus up to 500 ms
+  of jitter. `POST` and `PATCH` are sent exactly once: a 5xx or timeout may already have taken
+  effect, and sending again could create a second order.
+- When the call finally fails: `circuitBreaker.recordFailure(ctx.endpoint)` — once per logical
+  call, however many attempts — and the error is thrown into the program (`API_ERROR: Upstream API
+  returned 503`, or the transport's code, e.g. `ECONNREFUSED: …`).
 
 ---
 
-#### Step 5 — Circuit breaker state machine
+#### Step 6 — Circuit breaker state machine
 
-**File: `resilience/strategies/count-based-circuit-breaker.strategy.ts`**
+**File: `src/adapters/resilience/strategies/count-based-circuit-breaker.strategy.ts`**
 
-State per normalised endpoint path (e.g. `/orders/{id}`):
+A service without a `circuitBreaker` block (or with `"type": "noop"`) has the no-op breaker: it
+never opens. With `"type": "count-based"`, state is kept per endpoint — the OpenAPI template
+(e.g. `/orders/{orderId}`), the same key for `check`, `recordSuccess` and `recordFailure`:
 
 ```
-CLOSED  ─── 5 consecutive 5xx/network ──→  OPEN
-  ↑                                           │
-  │                                   after recoveryTimeMs
-HALF_OPEN ←───────────────────────────────────┘
-  │
-  ├── next call succeeds → CLOSED (reset failures)
-  └── next call fails    → OPEN   (reset timer)
+CLOSED  ─── failureThreshold failed calls in a row ──→  OPEN
+  ↑                                                       │
+  │                                          after recoveryTimeMs
+  │                                                       ▼
+  └──── probe succeeds ──── HALF_OPEN (one probe admitted; others get CIRCUIT_OPEN
+                               │      until it reports or recoveryTimeMs passes)
+                               └── probe fails → OPEN (timer restarts)
 ```
 
-`/orders/123` and `/orders/456` map to the same circuit — `/orders/{id}`.
-Each service has its own circuit breaker instance — one service's failures don't affect others.
+`/orders/123` and `/orders/456` share one circuit. A 4xx counts as a success. Each service has its
+own breaker instance, so one service's failures don't affect others. `CIRCUIT_OPEN` is retryable,
+and the execution ends `INTERRUPTED` (resumable).
 
 ---
 
-#### Step 6 — Multiple API calls
+#### Step 7 — Multiple API calls
 
-Steps 3-5 repeat for every `api.request()` call inside the user's function. The sandbox
-continues running until the function returns, throws, or times out.
+Steps 5–6 repeat for every `api.request()` call inside the user's function. Concurrent calls
+(`Promise.all`) are admitted one at a time — each takes the next activity sequence in arrival order —
+but run in parallel, up to `maxConcurrentCalls`. A call admitted while another was in flight is
+journaled `admittedConcurrently`, and replay binds its query and body as well as its path
+(`docs/code-mode-governance.md` §4). Once a
+call pauses or stops the run, every later call is refused with the code that says why
+(`APPROVAL_REQUIRED`, `GOVERNANCE_DENIED`, `REPLAY_DIVERGED`, `EXECUTION_CANCELLED`,
+`ACTIVITY_OUTCOME_UNKNOWN`), and the first run-stopping outcome stands.
+
+When the function returns, calls it started without awaiting are still its calls. They get the
+rest of `executeTimeoutMs` to finish and be journaled. Whatever is still in flight is then aborted
+and journaled FAILED; a connector that ignores the abort is abandoned after 1 s. No call is
+accepted after that. A violation the program caught and swallowed (a pause, a denial, an invalid
+request) still decides the outcome.
 
 ---
 
-#### Step 7 — Audit and metrics
+#### Step 8 — End of run, audit and metrics
 
-**File: `tools/execute-api.tool.ts`**
+**Files: `src/tools/execute-api-run.ts` (the run's outcome in the store), `src/tools/execute-api.tool.ts` (the responder: metrics, audit, the MCP result), `src/tools/execute-api-outcome.ts` (the mapping both read)**
 
-When the sandbox function returns:
+`ExecutionManager.endRun()` records how the run ended and releases the lock:
+
+| Run ended with | Execution status |
+|---|---|
+| a result | `COMPLETED` |
+| `APPROVAL_REQUIRED` | `WAITING_APPROVAL` |
+| `GOVERNANCE_DENIED` | `DENIED` |
+| `EXECUTION_CANCELLED` | `CANCELLED` |
+| `CIRCUIT_OPEN`, or any other retryable error (`SANDBOX_TIMEOUT`, `SANDBOX_INTERNAL_ERROR`) | `INTERRUPTED` (resumable) |
+| anything else (`REPLAY_DIVERGED`, `ACTIVITY_OUTCOME_UNKNOWN`, `SANDBOX_RUNTIME`, limits, `PERMISSION_DENIED`, …) | `FAILED` |
+
+The new state is published to the audit sinks as an `execution` event. Then the audit record:
 
 ```typescript
 writeAuditRecord({
   auditId: uuidv4(),
-  service: 'tasks-service',         // which backend was called
+  timestamp, service: 'tasks', environment, userIdHash, correlationId,
   tool: 'api_execute',
-  authStrategy: 'static-token',
-  codeSubmitted: code,                    // exact JS the AI submitted
+  authStrategy: 'static-token', idempotencyStrategy: 'noop', circuitBreakerStrategy: 'noop',
+  codeSubmitted: program,               // the program that ran — the persisted original on a resume
   endpointsAccessed: ['GET /api/v1/tasks'],
-  apiCallCount: 1,
+  apiCallCount: 1,                       // calls that went out in this run; replayed ones don't count
   durationMs: 312,
-  outcome: 'success'
-}, logger, globalConfig)
+  outcome: 'success',
+  executionId                            // plus errorType / errorCode on failure
+}, logger, globalConfig, auditPipeline)
 ```
 
-Logged as structured JSON at `info` level. Skipped if `ENABLE_AUDIT=false`.
+It is delivered to every `AUDIT_SINKS` sink — by default `console`, which logs it as structured
+JSON (`"msg":"audit"`) at `info` level on the service's logger. Nothing is written when
+`ENABLE_AUDIT=false`. The record's `userIdHash` is the authenticated principal on every
+path — success, error, approval pause, refused resume; it is `"unknown"` only when the call
+failed before authentication finished.
+`tool_calls_total` is incremented with the outcome.
 
 ---
 
-#### Step 8 — Result returned to AI client
+#### Step 9 — Result returned to AI client
 
-The tool handler returns:
-```typescript
-{
-  content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
-}
-```
+- **Completed:** `{ content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }` with
+  `_meta` carrying `harbor/execution-id`, `harbor/execution-status: COMPLETED` and the server info.
+- **Approval required:** if the client declared the `elicitation` capability, an `input_required`
+  result with a form elicitation and the sealed `requestState`; the client retries the same call
+  with the human's answer. Otherwise an `APPROVAL_REQUIRED` tool error naming
+  `POST /executions/{id}/approvals/{approvalId}`, after which the client resumes with
+  `_meta["harbor/execution-id"]`.
+- **Anything else:** `{ error, code, retryable }` (plus `progress` when calls were recorded, and
+  `executionId`), with the `harbor/*` `_meta` keys.
 
 The MCP SDK sends this back over the Streamable HTTP connection to the AI client.
 
@@ -398,23 +599,43 @@ with the source file and line number (powered by `pino-caller`).
 
 ## What happens when things go wrong
 
-| What fails | What is thrown | How it is handled |
-|---|---|---|
-| Unknown service name | — | Returns `{ error: "Unknown service ...", code: 'UNKNOWN_SERVICE', retryable: true }` |
-| Missing auth header | `MissingTokenError` | Returns `{ error, code: 'MISSING_TOKEN', retryable: false }`. Context appended: `[header absent]` or `[malformed Bearer scheme]` |
-| Token expired | `TokenExpiredError` | Returns `{ error, code: 'TOKEN_EXPIRED', retryable: false }` |
-| Token invalid/revoked | `TokenInvalidError` | Returns `{ error, code: 'TOKEN_INVALID', retryable: false }` |
-| Session fully expired | `SessionExpiredError` | Both access + refresh tokens exhausted (~12h). Returns `{ error, code: 'SESSION_EXPIRED', retryable: false }` with a message asking the user to update their token |
-| Auth server down | `TokenIntrospectionError` | Returns `{ error, code: 'INTROSPECTION_FAILED', retryable: true }`. Context includes the HTTP status or network error detail |
-| Proactive refresh fails | — | Logs `warn`, continues with existing (still-valid) token. No error returned to client unless session is fully expired |
-| Token cache down | — | Logs `warn` per operation (read/write/delete). Falls through to auth server for validation. Service stays operational but slower |
-| Circuit open | `CircuitOpenError` | Returns `{ error, code: 'CIRCUIT_OPEN', retryable: true }`, increments metric |
-| Sandbox timeout | `SandboxTimeoutError` | Returns `{ error, code: 'SANDBOX_TIMEOUT', retryable: true }` |
-| Sandbox syntax error | `SandboxSyntaxError` | Returns `{ error, code: 'SANDBOX_SYNTAX', retryable: false }` |
-| backend API 4xx | — | Returns `{ data, status, ok: false }` — not an error, not retried |
-| backend API 5xx | `ApiError` after retries | Returns `{ error, code: 'API_ERROR', retryable: false }` |
-| Idempotency cache down | — | Falls through silently, executes fn() directly |
-| Spec refresh fails | — | Logs warn, keeps old spec, never throws |
+Transport-level failures are HTTP responses; everything after the transport is a tool result
+(`isError: true`, HTTP 200) whose text is `{ error, code, retryable }`.
+
+| What fails | Code | Retryable | How it is handled |
+|---|---|---|---|
+| `/mcp` body over `MCP_MAX_BODY_BYTES` | `PAYLOAD_TOO_LARGE` | — | HTTP 413, `Connection: close`; nothing parsed |
+| No, malformed or duplicated `Authorization` header | `MISSING_TOKEN` / `TOKEN_INVALID` | — | HTTP 401 at the transport with a `reason` (`missing_header`, `duplicate_authorization_header`, `malformed_scheme`, `weak_credentials`, …); no tool runs |
+| Unknown service name | `UNKNOWN_SERVICE` | no | Lists the available services |
+| Unknown skill name | `UNKNOWN_SKILL` | no | Lists the service's skill names |
+| Token rejected by the auth strategy | `TOKEN_INVALID` / `TOKEN_EXPIRED` | no | Includes a JWT without `exp`, an unknown `kid`, `alg: none`/`HS*`, and introspection `active: false` |
+| Session fully expired | `SESSION_EXPIRED` | no | Access and refresh tokens both exhausted; asks the user to update their token |
+| Auth server down | `INTROSPECTION_FAILED` | yes | Context names the failure (HTTP status or error code such as `ECONNREFUSED`), never the auth server's address |
+| Other auth failure | `AUTH_FAILED` | per cause | Fallback code for an auth error without its own |
+| Proactive refresh fails | — | — | Logs `warn`, continues with the existing (still-valid) token; background refreshes back off for 30 s |
+| Token cache down | — | — | Logs `warn` per operation; falls through to the auth server |
+| Execution already running | `EXECUTION_LOCKED` | yes | Another run holds the lock |
+| Resume of an unknown / finished / someone else's execution | `EXECUTION_NOT_FOUND` / `EXECUTION_NOT_RESUMABLE` | no | Nothing runs; when `beginRun` refuses, `harbor/execution-status` reports the stored status |
+| Conflicting answer to an already decided approval | `APPROVAL_ALREADY_DECIDED` | no | Nothing runs; repeating the recorded answer resumes. On a finished execution: `EXECUTION_NOT_RESUMABLE` |
+| `accept` whose `approve` is missing or not a recognised answer (a boolean, or a word such as `yes` / `no`) | `INVALID_API_REQUEST` | no | The approval stays pending |
+| Bad `api.request` argument or path | `INVALID_API_REQUEST` | no | Nothing sent or journaled; still reported if the program swallowed it |
+| More than `maxApiCalls` / `maxConcurrentCalls` | `CALL_LIMIT_EXCEEDED` / `CONCURRENT_LIMIT_EXCEEDED` | no | Execution `FAILED` |
+| Permission guard refuses | `PERMISSION_DENIED` | no | Execution `FAILED` |
+| Governance DENY, or a human rejected | `GOVERNANCE_DENIED` | no | Execution `DENIED`; the call was not made |
+| Governance REQUIRE_APPROVAL | `input_required`, or `APPROVAL_REQUIRED` | no | Execution `WAITING_APPROVAL` until a human decides |
+| A human cancelled | `EXECUTION_CANCELLED` | no | Execution `CANCELLED` |
+| Resumed program asks for a different call | `REPLAY_DIVERGED` | no | Execution `FAILED`; nothing runs, an approved request stays approved |
+| Resume meets a FAILED activity, or a non-GET left EXECUTING | `ACTIVITY_OUTCOME_UNKNOWN` | no | Execution `FAILED`; the call is never re-sent |
+| Circuit open | `CIRCUIT_OPEN` | yes | Execution `INTERRUPTED`; `circuit_breaker_opens_total` incremented |
+| Sandbox wall-clock or CPU timeout | `SANDBOX_TIMEOUT` | yes | Execution `INTERRUPTED` |
+| Sandbox memory limit | `SANDBOX_MEMORY` | no | Execution `FAILED` |
+| Sandbox syntax error | `SANDBOX_SYNTAX` | no | Execution `FAILED` |
+| Program threw an ordinary exception | `SANDBOX_RUNTIME` | no | Execution `FAILED` |
+| Unexpected internal sandbox failure | `SANDBOX_INTERNAL_ERROR` | yes | Sanitised message; the cause is logged server-side |
+| Backend API 4xx | — | — | `{ data, status, ok: false }` to the program — not an error, not retried; activity `COMPLETED` |
+| Backend API 5xx or transport error | `API_ERROR` (or the transport's code) inside the program | — | GET/PUT/DELETE retried first; POST/PATCH never. Activity `FAILED` (outcome unknown), one breaker failure. A governed non-GET failure is promoted to `ACTIVITY_OUTCOME_UNKNOWN` even if caught; a governed GET/legacy error that escapes becomes `SANDBOX_RUNTIME` |
+| Idempotency cache down | — | — | Logs `warn`, executes the call directly |
+| Spec refresh fails | — | — | Logs `warn`, keeps the old spec and skills, never throws |
 
 ---
 
@@ -422,10 +643,10 @@ with the source file and line number (powered by `pino-caller`).
 
 `search_code` goes through:
 
-1. Service lookup via `resolveService()` tool helper
-2. Auth validation via `validateAuth()` tool helper
-3. Gets spec from `svcResources.specStore.getSpec()`
-4. Creates a `runSpecSearchInSandbox` — same isolate pattern but injects `spec` instead of `api`
+1. Service lookup via `resolveService()`
+2. Auth validation via `validateAuth()`
+3. Gets the spec from `svcResources.specStore.getSpec()` and filters it with `permissionGuard.filterSpec()`
+4. Runs `runSpecSearchInSandbox` — same isolate pattern but injects `spec` instead of `api`
 5. No circuit breaker, no idempotency, no audit record, no API calls
 6. Returns the function's return value as JSON to the AI client
 
@@ -439,8 +660,8 @@ with the source file and line number (powered by `pino-caller`).
 User: "Show me all my tasks"
 
   Step 0: Client sends POST /mcp with Authorization: Bearer <token>
-          → Gateway validates bearer, creates fresh stateless transport + McpServer for this request.
-            Rejected if no token present.
+          → Gateway checks the bearer's format and the body size, then creates a fresh
+            McpServer for this request. No, malformed or duplicated bearer ⇒ HTTP 401.
 
   Step 1: discover_services()
           → [{ service: "tasks", description: "Task and project management..." }]
@@ -448,14 +669,15 @@ User: "Show me all my tasks"
           (No auth required — returns the service catalog only)
 
   Step 2: search_code({ service: "tasks", code: "async () => ..." })
-          → Auth: validates token via the service's auth strategy
-          → Injects the service's OpenAPI spec into sandbox
+          → Auth: validates the token via the service's auth strategy
+          → Injects the service's (permission-filtered) OpenAPI spec into the sandbox
           → Returns: [{ path: "/api/v1/tasks", methods: ["GET","POST","PUT"] }]
 
   Step 3: api_execute({ service: "tasks", code: "async () => ..." })
-          → Auth: validates token (proactive refresh if near expiry)
-          → Sandbox: runs code with api.request() routed to the service's ApiClient
-          → Returns task data to sandbox → to tool → to MCP client
+          → Auth: validates the token (proactive refresh if near expiry)
+          → Creates an execution; runs the program with api.request() routed through the
+            bridge (governance, journal) to the service's ApiClient
+          → Returns task data to sandbox → to tool → to MCP client (with harbor/execution-id)
 
   Step 4: MCP client tells user: "Here are your tasks: ..."
 ```
@@ -466,8 +688,8 @@ User: "Show me all my tasks"
 User: "Create a new task assigned to Alice with high priority"
 
   Step 0: Client sends POST /mcp with Authorization: Bearer <token>
-          → Gateway validates bearer, creates fresh stateless transport + McpServer for this request.
-            Rejected if no token present.
+          → Gateway checks the bearer's format and the body size, then creates a fresh
+            McpServer for this request. No, malformed or duplicated bearer ⇒ HTTP 401.
 
   Step 1: discover_services()
           → [{ service: "tasks", description: "Task and project management..." }]
@@ -475,23 +697,27 @@ User: "Create a new task assigned to Alice with high priority"
           (No auth required — returns the service catalog only)
 
   Step 2: discover_skills({ service: "tasks", code: "async () => ..." })
-          → Auth: validates token via the service's auth strategy (cached in global token cache)
+          → Auth: validates the token via the service's auth strategy (cached in the token cache)
           → Finds relevant business SOPs (e.g. "manage-tasks")
-          → Returns: [{ skill_id: "manage-tasks", title: "Manage Tasks" }]
+          → Returns: [{ skill_name: "manage-tasks", description: "..." }]
 
-  Step 3: get_skill_details({ service: "tasks", skill_id: "manage-tasks" })
-          → Auth: validates token via the service's auth strategy
+  Step 3: get_skill_details({ service: "tasks", skill_name: "manage-tasks" })
+          → Auth: validates the token via the service's auth strategy
           → Returns full Markdown SOP with business rules, required fields, constraints
           → MCP client learns: budget must be > 0, 5 required fields, specific status transitions
 
   Step 4: search_code({ service: "tasks", code: "async () => ..." })
-          → Auth: validates token via the service's auth strategy
-          → Injects the service's OpenAPI spec into sandbox
+          → Auth: validates the token via the service's auth strategy
+          → Injects the service's (permission-filtered) OpenAPI spec into the sandbox
           → Returns: [{ path: "/api/v1/tasks", methods: ["GET","POST","PUT"] }]
 
   Step 5: api_execute({ service: "tasks", code: "async () => ..." })
-          → Auth: validates token (proactive refresh if near expiry)
-          → Sandbox: runs code with api.request() routed to the service's ApiClient
+          → Auth: validates the token (proactive refresh if near expiry)
+          → Creates an execution; the POST is canonicalised, governed and journaled EXECUTING
+            before it goes out
+          → A rule requiring approval pauses the run: input_required (or APPROVAL_REQUIRED);
+            the client retries with the human's answer and the original program resumes,
+            replaying completed calls instead of re-sending them
           → Creates task following the business rules from the skill
           → Returns created task data to MCP client
 

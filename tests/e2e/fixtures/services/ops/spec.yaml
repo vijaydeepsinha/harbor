@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: E2E Ops Service
+  version: 1.0.0
+paths:
+  /admin/users:
+    get:
+      operationId: listAdminUsers
+      summary: List administrative users
+      responses:
+        '200': { description: users }
+    post:
+      operationId: createAdminUser
+      summary: Create an administrative user
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: { type: string }
+                role: { type: string }
+      responses:
+        '201': { description: created }
+  /ping:
+    get:
+      operationId: ping
+      summary: Cheap liveness read
+      responses:
+        '200': { description: pong }

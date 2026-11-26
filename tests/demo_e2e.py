@@ -40,6 +40,7 @@ Phase 1 services run on localhost:3001 (product), 3002 (order), 3003 (task), 333
 """
 
 import argparse
+import base64
 import json
 import os
 import signal
@@ -47,7 +48,6 @@ import socket
 import subprocess
 import sys
 import time
-import base64
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -56,50 +56,58 @@ from typing import Optional
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-GATEWAY_BASE  = "http://127.0.0.1:3333"
-GATEWAY_URL   = f"{GATEWAY_BASE}/mcp"
-BEARER_TOKEN  = "TestBearerTokenForE2ETestingOnly"
-MCP_PROTOCOL  = "2026-07-28"
-MCP_META_PROTOCOL   = "io.modelcontextprotocol/protocolVersion"
+GATEWAY_BASE = "http://127.0.0.1:3333"
+GATEWAY_URL = f"{GATEWAY_BASE}/mcp"
+BEARER_TOKEN = "TestBearerTokenForE2ETestingOnly"
+MCP_PROTOCOL = "2026-07-28"
+MCP_META_PROTOCOL = "io.modelcontextprotocol/protocolVersion"
 MCP_META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
 MCP_META_CLIENT_CAPS = "io.modelcontextprotocol/clientCapabilities"
 MCP_META_SERVER_INFO = "io.modelcontextprotocol/serverInfo"
 SERVICE_STARTUP_WAIT_S = 1
 
-OAUTH_AS_BASE      = "http://localhost:8080/default"
-OAUTH_CLIENT_ID    = "harbor-test-client"
+OAUTH_AS_BASE = "http://localhost:8080/default"
+OAUTH_CLIENT_ID = "harbor-test-client"
 OAUTH_CLIENT_SECRET = "test-secret"
 
 # jwt-validation and oauth-introspection both reuse the billing backend
 # (:3004) with a different Harbor-side service config — same upstream data,
 # different auth strategy under test.
-JWT_VALIDATION_SERVICE  = "billing-jwt"
-INTROSPECTION_SERVICE   = "billing-introspection"
-INTROSPECTION_PORT      = 3008
+JWT_VALIDATION_SERVICE = "billing-jwt"
+INTROSPECTION_SERVICE = "billing-introspection"
+INTROSPECTION_PORT = 3008
 
 # Fixed test fixtures known to examples/demo/mock-introspection-server.js.
 # All >=32 chars so Harbor's bearer-format pre-check lets them through to the
-# introspection strategy itself (see spi/auth/bearer-authorization.ts).
-INTROSPECT_TOKEN_VALID      = "introspection-valid-token-abc123"
-INTROSPECT_TOKEN_WRONG_AUD  = "introspection-wrong-aud-token-xyz789"
-INTROSPECT_TOKEN_REVOKED    = "introspection-revoked-token-00000000"
+# introspection strategy itself (see src/runtime/auth/bearer-authorization.ts).
+INTROSPECT_TOKEN_VALID = "introspection-valid-token-abc123"
+INTROSPECT_TOKEN_WRONG_AUD = "introspection-wrong-aud-token-xyz789"
+INTROSPECT_TOKEN_REVOKED = "introspection-revoked-token-00000000"
 
-ROOT         = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent
 COMPOSE_FILE = ROOT / "examples" / "07-oauth" / "docker-compose.yml"
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
 
-GREEN  = "\033[32m"
-RED    = "\033[31m"
+GREEN = "\033[32m"
+RED = "\033[31m"
 YELLOW = "\033[33m"
-CYAN   = "\033[36m"
-BOLD   = "\033[1m"
-RESET  = "\033[0m"
+CYAN = "\033[36m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
 
 def ok(msg):   print(f"  {GREEN}✓{RESET} {msg}")
+
+
 def fail(msg): print(f"  {RED}✗{RESET} {msg}")
+
+
 def info(msg): print(f"  {CYAN}·{RESET} {msg}")
+
+
 def section(title): print(f"\n{BOLD}{CYAN}── {title}{RESET}")
+
 
 # ── Process management ────────────────────────────────────────────────────────
 
@@ -107,6 +115,7 @@ _procs: list[subprocess.Popen] = []
 _oauth_harbor_proc: Optional[subprocess.Popen] = None
 _billing_proc: Optional[subprocess.Popen] = None
 _introspection_proc: Optional[subprocess.Popen] = None
+
 
 def _find_node() -> str:
     for candidate in [
@@ -120,15 +129,21 @@ def _find_node() -> str:
             continue
     sys.exit(f"{RED}node not found — install Node 22+{RESET}")
 
+
 def start_services(extra_env: Optional[dict] = None):
     node = _find_node()
     demo = ROOT / "examples" / "demo"
-    env = {**os.environ, "NODE_PATH": str(ROOT / "node_modules"), **(extra_env or {})}
+    env = {
+        **os.environ,
+        "NODE_PATH": str(ROOT / "node_modules"),
+        **(extra_env or {}),
+        "GATEWAY_GOVERNANCE_RULES_DIR": str(ROOT / "tests" / "e2e" / "fixtures" / "governance" / "gateway"),
+    }
 
     for script, port in [
         ("product-service.js", 3001),
-        ("order-service.js",   3002),
-        ("task-service.js",    3003),
+        ("order-service.js", 3002),
+        ("task-service.js", 3003),
     ]:
         proc = subprocess.Popen(
             [node, str(demo / script)],
@@ -145,7 +160,7 @@ def start_services(extra_env: Optional[dict] = None):
 
     tsx = ROOT / "node_modules" / ".bin" / "tsx"
     gw = subprocess.Popen(
-        [node, str(tsx), "index.ts"],
+        [node, str(tsx), "src/index.ts"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env={**env, "LOG_LEVEL": "error"},
@@ -164,6 +179,7 @@ def start_services(extra_env: Optional[dict] = None):
             time.sleep(0.5)
     raise RuntimeError("Harbor gateway did not become ready")
 
+
 def stop_services():
     for p in _procs:
         try:
@@ -180,6 +196,7 @@ def stop_services():
             except Exception:
                 pass
 
+
 # ── Docker / OAuth helpers ────────────────────────────────────────────────────
 
 def _docker_available() -> bool:
@@ -189,10 +206,12 @@ def _docker_available() -> bool:
     except Exception:
         return False
 
+
 def _port_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(1)
         return s.connect_ex(("127.0.0.1", port)) != 0
+
 
 def _docker_oauth_up():
     if not _port_free(8080):
@@ -218,6 +237,7 @@ def _docker_oauth_up():
             time.sleep(1)
     raise RuntimeError("Docker OAuth server did not become ready within 30s")
 
+
 def _docker_oauth_down():
     try:
         subprocess.run(
@@ -229,11 +249,13 @@ def _docker_oauth_down():
     except Exception:
         pass
 
+
 def _set_service_enabled(name: str, enabled: bool):
     cfg_path = ROOT / "services" / name / "config.json"
     cfg = json.loads(cfg_path.read_text())
     cfg["enabled"] = enabled
     cfg_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+
 
 def _switch_to_oauth_mode():
     for svc in ("billing", JWT_VALIDATION_SERVICE, INTROSPECTION_SERVICE):
@@ -242,6 +264,7 @@ def _switch_to_oauth_mode():
         _set_service_enabled(svc, False)
     info("Service mode: billing/billing-jwt/billing-introspection=enabled, product/order/tasks=disabled")
 
+
 def _switch_to_token_mode():
     for svc in ("billing", JWT_VALIDATION_SERVICE, INTROSPECTION_SERVICE):
         _set_service_enabled(svc, False)
@@ -249,19 +272,21 @@ def _switch_to_token_mode():
         _set_service_enabled(svc, True)
     info("Service mode restored: product/order/tasks=enabled, billing/billing-jwt/billing-introspection=disabled")
 
+
 def _start_harbor_oauth(oauth_env: dict):
     global _oauth_harbor_proc
     node = _find_node()
-    tsx  = ROOT / "node_modules" / ".bin" / "tsx"
-    env  = {
+    tsx = ROOT / "node_modules" / ".bin" / "tsx"
+    env = {
         **os.environ,
-        "NODE_PATH":    str(ROOT / "node_modules"),
+        "NODE_PATH": str(ROOT / "node_modules"),
         "SERVICES_DIR": str(ROOT / "services"),
-        "LOG_LEVEL":    "error",
+        "LOG_LEVEL": "error",
         **oauth_env,
+        "GATEWAY_GOVERNANCE_RULES_DIR": str(ROOT / "tests" / "e2e" / "fixtures" / "governance" / "gateway"),
     }
     _oauth_harbor_proc = subprocess.Popen(
-        [node, str(tsx), "index.ts"],
+        [node, str(tsx), "src/index.ts"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env=env,
@@ -276,6 +301,7 @@ def _start_harbor_oauth(oauth_env: dict):
         except Exception:
             time.sleep(0.5)
     raise RuntimeError("Harbor (OAuth mode) did not become ready")
+
 
 def _stop_harbor_oauth():
     global _oauth_harbor_proc
@@ -294,6 +320,7 @@ def _stop_harbor_oauth():
             pass
     _oauth_harbor_proc = None
     info("Harbor (OAuth mode) stopped")
+
 
 def _start_billing_backend():
     """Start the billing backend (examples/demo/billing-service.js) on :3004.
@@ -322,6 +349,7 @@ def _start_billing_backend():
             time.sleep(0.5)
     raise RuntimeError("billing backend (:3004) did not become ready")
 
+
 def _stop_billing_backend():
     global _billing_proc
     if _billing_proc is None:
@@ -339,6 +367,7 @@ def _stop_billing_backend():
             pass
     _billing_proc = None
     info("billing backend stopped")
+
 
 def _start_introspection_server():
     """Start the mock RFC 7662 introspection server (:3008) for oauth-introspection."""
@@ -362,6 +391,7 @@ def _start_introspection_server():
             time.sleep(0.5)
     raise RuntimeError(f"mock introspection server (:{INTROSPECTION_PORT}) did not become ready")
 
+
 def _stop_introspection_server():
     global _introspection_proc
     if _introspection_proc is None:
@@ -380,6 +410,7 @@ def _stop_introspection_server():
     _introspection_proc = None
     info("mock introspection server stopped")
 
+
 def _get_real_jwt() -> str:
     data = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode()
     credentials = base64.b64encode(f"{OAUTH_CLIENT_ID}:{OAUTH_CLIENT_SECRET}".encode()).decode()
@@ -394,6 +425,7 @@ def _get_real_jwt() -> str:
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode())["access_token"]
+
 
 def _get_jwt_wrong_aud() -> str:
     """Mint a JWT from the SAME mock AS but bound to a *different* resource.
@@ -422,6 +454,7 @@ def _get_jwt_wrong_aud() -> str:
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode())["access_token"]
 
+
 def _mcp_envelope() -> dict:
     return {
         MCP_META_PROTOCOL: MCP_PROTOCOL,
@@ -429,20 +462,23 @@ def _mcp_envelope() -> dict:
         MCP_META_CLIENT_CAPS: {},
     }
 
+
 def _mcp_params(params: dict) -> dict:
     return {**params, "_meta": _mcp_envelope()}
 
+
 def _mcp_headers(method: str, token: str, name: Optional[str] = None) -> dict:
     headers = {
-        "Content-Type":           "application/json",
-        "Authorization":          f"Bearer {token}",
-        "Accept":                 "application/json, text/event-stream",
-        "MCP-Protocol-Version":   MCP_PROTOCOL,
-        "Mcp-Method":             method,
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": MCP_PROTOCOL,
+        "Mcp-Method": method,
     }
     if name is not None:
         headers["Mcp-Name"] = name
     return headers
+
 
 def _parse_mcp_response(raw: str) -> dict:
     try:
@@ -453,6 +489,7 @@ def _parse_mcp_response(raw: str) -> dict:
         if line.startswith("data: "):
             return json.loads(line[6:])
     return {"_transport_error": f"unparseable response: {raw[:200]}"}
+
 
 def _mcp_discover_with_jwt(jwt: str) -> dict:
     """Returns parsed server/discover response, or {_error: ...} on failure."""
@@ -472,6 +509,7 @@ def _mcp_discover_with_jwt(jwt: str) -> dict:
     except Exception as e:
         return {"_error": str(e)}
 
+
 def _mcp_post_jwt(payload: dict, jwt: str, mcp_name: Optional[str] = None) -> dict:
     """POST an MCP request using a JWT (2026-07-28 envelope + headers)."""
     method = payload["method"]
@@ -490,6 +528,7 @@ def _mcp_post_jwt(payload: dict, jwt: str, mcp_name: Optional[str] = None) -> di
     except urllib.error.HTTPError as e:
         return {"_error": f"HTTP {e.code}: {e.read().decode()[:200]}"}
 
+
 def _post_with_bearer(path: str, token: str) -> tuple[int, dict]:
     """POST to path with an explicit Bearer token; returns (status, headers)."""
     url = f"{GATEWAY_BASE}{path}"
@@ -507,6 +546,7 @@ def _post_with_bearer(path: str, token: str) -> tuple[int, dict]:
             return resp.status, {k.lower(): v for k, v in resp.headers.items()}
     except urllib.error.HTTPError as e:
         return e.code, {k.lower(): v for k, v in e.headers.items()}
+
 
 # ── MCP transport helpers ─────────────────────────────────────────────────────
 
@@ -532,6 +572,7 @@ def _mcp_post(payload: dict, token: str = BEARER_TOKEN) -> dict:
     except Exception as e:
         return {"_transport_error": str(e)}
 
+
 def mcp_init() -> bool:
     payload = {
         "jsonrpc": "2.0", "id": 0, "method": "server/discover",
@@ -554,6 +595,7 @@ def mcp_init() -> bool:
     server_info = resp.get("result", {}).get("_meta", {}).get(MCP_META_SERVER_INFO, {})
     return server_info.get("name") == "harbor"
 
+
 def call_tool(name: str, args: dict, req_id: int) -> dict:
     resp = _mcp_post({
         "jsonrpc": "2.0", "id": req_id, "method": "tools/call",
@@ -569,8 +611,10 @@ def call_tool(name: str, args: dict, req_id: int) -> dict:
     except Exception as e:
         return {"_error": f"parse failed: {e}", "_raw": resp}
 
+
 def api_exec(service: str, code: str, req_id: int) -> dict:
     return call_tool("api_execute", {"service": service, "code": code}, req_id)
+
 
 def api_exec_jwt(service: str, code: str, req_id: int, jwt: str) -> dict:
     """Run api_execute over a JWT-authenticated MCP call.
@@ -596,10 +640,12 @@ def api_exec_jwt(service: str, code: str, req_id: int, jwt: str) -> dict:
         pass
     return {"is_error": bool(result.get("isError")), "parsed": parsed, "raw": resp}
 
+
 # ── Assertions ────────────────────────────────────────────────────────────────
 
 _passed = 0
 _failed = 0
+
 
 def assert_true(condition: bool, label: str):
     global _passed, _failed
@@ -610,14 +656,17 @@ def assert_true(condition: bool, label: str):
         _failed += 1
         fail(label)
 
+
 def assert_eq(actual, expected, label: str):
     if actual != expected:
         assert_true(False, f"{label}  (expected {expected!r}, got {actual!r})")
     else:
         assert_true(True, label)
 
+
 def assert_in(item, container, label: str):
     assert_true(item in container, label)
+
 
 def assert_no_error(d: dict, label: str) -> bool:
     global _passed, _failed
@@ -628,6 +677,7 @@ def assert_no_error(d: dict, label: str) -> bool:
     _passed += 1
     ok(label)
     return True
+
 
 # ── HTTP helpers (used by OAuth tests) ───────────────────────────────────────
 
@@ -649,6 +699,7 @@ def _get(url: str) -> tuple[int, dict, dict]:
             body = {}
         return e.code, headers, body
 
+
 def _post_no_token(path: str) -> tuple[int, dict]:
     url = f"{GATEWAY_BASE}{path}"
     req = urllib.request.Request(
@@ -663,6 +714,7 @@ def _post_no_token(path: str) -> tuple[int, dict]:
     except urllib.error.HTTPError as e:
         return e.code, {k.lower(): v for k, v in e.headers.items()}
 
+
 # ── Test cases ────────────────────────────────────────────────────────────────
 
 def test_discover_services():
@@ -672,9 +724,9 @@ def test_discover_services():
         return
 
     services = {s["service"]: s for s in result} if isinstance(result, list) else {}
-    assert_in("order",   services, "order service present")
+    assert_in("order", services, "order service present")
     assert_in("product", services, "product service present")
-    assert_in("tasks",   services, "tasks service present")
+    assert_in("tasks", services, "tasks service present")
 
     for name in ("order", "product", "tasks"):
         if name in services:
@@ -682,6 +734,7 @@ def test_discover_services():
                 bool(services[name].get("description")),
                 f"{name} has a description",
             )
+
 
 def test_discover_skills():
     section("discover_skills")
@@ -694,15 +747,20 @@ def test_discover_skills():
         if "_error" not in result:
             count = len(result) if isinstance(result, list) else 0
             assert_true(count >= 1, f"{service}: at least 1 skill returned (got {count})")
+            for skill in result:
+                assert_true(bool(skill.get("name")), f"{service}: skill has an Agent Skills name")
+                assert_true(bool(skill.get("description")), f"{service}: skill has a description")
+                assert_true(not skill.get("content", "").startswith("---"), f"{service}: skill body excludes frontmatter")
         else:
             fail(f"{service}: discover_skills failed — {result['_error'][:80]}")
+
 
 def test_product_service():
     section("api_execute → product service")
 
     r = api_exec("product",
-        'async () => { const r = await api.request({ method: "GET", path: "/products" }); return r.data; }',
-        300)
+                 'async () => { const r = await api.request({ method: "GET", path: "/products" }); return r.data; }',
+                 300)
     if assert_no_error(r, "GET /products succeeded"):
         products = r.get("products", [])
         assert_eq(len(products), 4, "4 products returned")
@@ -711,94 +769,111 @@ def test_product_service():
             assert_in(pid, ids, f"product {pid} present")
 
     r = api_exec("product",
-        'async () => { const r = await api.request({ method: "GET", path: "/products", params: { category: "electronics" } }); return r.data; }',
-        301)
+                 'async () => { const r = await api.request({ method: "GET", path: "/products", params: { category: "electronics" } }); return r.data; }',
+                 301)
     if assert_no_error(r, "GET /products?category=electronics succeeded"):
         cats = [p["category"] for p in r.get("products", [])]
         assert_true(all(c == "electronics" for c in cats), "all results are electronics")
 
     r = api_exec("product",
-        'async () => { const r = await api.request({ method: "GET", path: "/products/p001" }); return r.data; }',
-        302)
+                 'async () => { const r = await api.request({ method: "GET", path: "/products/p001" }); return r.data; }',
+                 302)
     if assert_no_error(r, "GET /products/p001 succeeded"):
-        assert_eq(r.get("id"), "p001",                "id is p001")
+        assert_eq(r.get("id"), "p001", "id is p001")
         assert_eq(r.get("name"), "Wireless Headphones", "name correct")
-        assert_eq(r.get("inStock"), True,              "in stock")
+        assert_eq(r.get("price"), 4999, "price is INR amount")
+        assert_eq(r.get("currency"), "INR", "currency is INR")
+        assert_eq(r.get("inStock"), True, "in stock")
 
     r = api_exec("product",
-        'async () => { const r = await api.request({ method: "GET", path: "/products/p999" }); return { status: r.status, ok: r.ok }; }',
-        303)
+                 'async () => { const r = await api.request({ method: "GET", path: "/products/p999" }); return { status: r.status, ok: r.ok }; }',
+                 303)
     if assert_no_error(r, "GET /products/p999 returns 404"):
         assert_eq(r.get("status"), 404, "status is 404")
+
 
 def test_order_service():
     section("api_execute → order service")
 
     r = api_exec("order",
-        'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001", quantity: 1 } }); return r.data; }',
-        400)
+                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001", quantity: 1, amountInr: 4999 } }); return r.data; }',
+                 400)
     order_id = None
     if assert_no_error(r, "POST /orders succeeded"):
         order_id = r.get("orderId")
-        assert_true(bool(order_id),                   "orderId present")
-        assert_eq(r.get("productId"), "p001",          "productId correct")
-        assert_eq(r.get("quantity"),  1,               "quantity correct")
-        assert_eq(r.get("status"),    "confirmed",     "status confirmed")
+        assert_true(bool(order_id), "orderId present")
+        assert_eq(r.get("productId"), "p001", "productId correct")
+        assert_eq(r.get("quantity"), 1, "quantity correct")
+        assert_eq(r.get("amountInr"), 4999, "amountInr correct")
+        assert_eq(r.get("currency"), "INR", "currency correct")
+        assert_eq(r.get("status"), "confirmed", "status confirmed")
         assert_true(bool(r.get("estimatedDelivery")), "estimatedDelivery present")
 
     if order_id:
         r = api_exec("order",
-            f'async () => {{ const r = await api.request({{ method: "GET", path: "/orders/{order_id}" }}); return r.data; }}',
-            401)
+                     f'async () => {{ const r = await api.request({{ method: "GET", path: "/orders/{order_id}" }}); return r.data; }}',
+                     401)
         if assert_no_error(r, f"GET /orders/{order_id} succeeded"):
-            assert_eq(r.get("orderId"),   order_id,    "orderId matches")
-            assert_eq(r.get("status"),    "confirmed", "status confirmed")
-            assert_eq(r.get("productId"), "p001",      "productId matches")
+            assert_eq(r.get("orderId"), order_id, "orderId matches")
+            assert_eq(r.get("status"), "confirmed", "status confirmed")
+            assert_eq(r.get("productId"), "p001", "productId matches")
 
     r = api_exec("order",
-        'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001" } }); return { status: r.status, ok: r.ok }; }',
-        402)
+                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p002", quantity: 1, amountInr: 7999 } }); return r.data; }',
+                 402)
+    assert_eq(r.get("code"), "APPROVAL_REQUIRED", "orders above 5000 INR require approval")
+
+    r = api_exec("order",
+                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001", amountInr: 4999 } }); return { status: r.status, ok: r.ok }; }',
+                 403)
     if assert_no_error(r, "POST /orders missing quantity returns 400"):
         assert_eq(r.get("status"), 400, "status is 400")
 
     r = api_exec("order",
-        'async () => { const r = await api.request({ method: "GET", path: "/orders/ord-9999" }); return { status: r.status, ok: r.ok }; }',
-        403)
+                 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p001", quantity: 1, amountInr: 100 } }); return { status: r.status, ok: r.ok }; }',
+                 404)
+    if assert_no_error(r, "POST /orders rejects an understated total"):
+        assert_eq(r.get("status"), 400, "mismatched total returns 400")
+
+    r = api_exec("order",
+                 'async () => { const r = await api.request({ method: "GET", path: "/orders/ord-9999" }); return { status: r.status, ok: r.ok }; }',
+                 405)
     if assert_no_error(r, "GET /orders/ord-9999 returns 404"):
         assert_eq(r.get("status"), 404, "status is 404")
+
 
 def test_task_service():
     section("api_execute → task service")
 
     r = api_exec("tasks",
-        'async () => { const r = await api.request({ method: "GET", path: "/api/v1/tasks" }); return r.data; }',
-        500)
+                 'async () => { const r = await api.request({ method: "GET", path: "/api/v1/tasks" }); return r.data; }',
+                 500)
     initial_count = 0
     if assert_no_error(r, "GET /api/v1/tasks succeeded"):
         initial_count = r.get("total", 0)
         assert_true(initial_count >= 4, f"at least 4 seeded tasks (got {initial_count})")
 
     r = api_exec("tasks",
-        'async () => { const r = await api.request({ method: "POST", path: "/api/v1/tasks", body: { title: "Submit paper on 20 June", priority: "medium" } }); return r.data; }',
-        501)
+                 'async () => { const r = await api.request({ method: "POST", path: "/api/v1/tasks", body: { title: "Submit paper on 20 June", priority: "medium" } }); return r.data; }',
+                 501)
     task_id = None
     if assert_no_error(r, "POST /api/v1/tasks succeeded"):
         task_id = r.get("id")
-        assert_true(bool(task_id),                         "id present")
-        assert_eq(r.get("title"),    "Submit paper on 20 June", "title correct")
-        assert_eq(r.get("status"),   "todo",               "status defaults to todo")
-        assert_eq(r.get("priority"), "medium",             "priority medium")
+        assert_true(bool(task_id), "id present")
+        assert_eq(r.get("title"), "Submit paper on 20 June", "title correct")
+        assert_eq(r.get("status"), "todo", "status defaults to todo")
+        assert_eq(r.get("priority"), "medium", "priority medium")
 
     if task_id:
         r = api_exec("tasks",
-            f'async () => {{ const r = await api.request({{ method: "GET", path: "/api/v1/tasks/{task_id}" }}); return r.data; }}',
-            502)
+                     f'async () => {{ const r = await api.request({{ method: "GET", path: "/api/v1/tasks/{task_id}" }}); return r.data; }}',
+                     502)
         if assert_no_error(r, f"GET /api/v1/tasks/{task_id} succeeded"):
             assert_eq(r.get("id"), task_id, "id matches")
 
     r = api_exec("tasks",
-        'async () => { const r = await api.request({ method: "GET", path: "/api/v1/tasks", params: { status: "todo" } }); return r.data; }',
-        503)
+                 'async () => { const r = await api.request({ method: "GET", path: "/api/v1/tasks", params: { status: "todo" } }); return r.data; }',
+                 503)
     if assert_no_error(r, "GET /api/v1/tasks?status=todo succeeded"):
         statuses = [t["status"] for t in r.get("tasks", [])]
         assert_true(all(s == "todo" for s in statuses), "all returned tasks are todo")
@@ -808,37 +883,39 @@ def test_task_service():
 
     if task_id:
         r = api_exec("tasks",
-            f'async () => {{ const r = await api.request({{ method: "PATCH", path: "/api/v1/tasks/{task_id}", body: {{ status: "in_progress" }} }}); return r.data; }}',
-            504)
+                     f'async () => {{ const r = await api.request({{ method: "PATCH", path: "/api/v1/tasks/{task_id}", body: {{ status: "in_progress" }} }}); return r.data; }}',
+                     504)
         if assert_no_error(r, f"PATCH /api/v1/tasks/{task_id} to in_progress succeeded"):
             assert_eq(r.get("status"), "in_progress", "status updated")
 
     if task_id:
         r = api_exec("tasks",
-            f'async () => {{ const r = await api.request({{ method: "PATCH", path: "/api/v1/tasks/{task_id}", body: {{ status: "flying" }} }}); return {{ status: r.status }}; }}',
-            505)
+                     f'async () => {{ const r = await api.request({{ method: "PATCH", path: "/api/v1/tasks/{task_id}", body: {{ status: "flying" }} }}); return {{ status: r.status }}; }}',
+                     505)
         if assert_no_error(r, "PATCH with invalid status returns 400"):
             assert_eq(r.get("status"), 400, "status is 400")
 
     if task_id:
         r = api_exec("tasks",
-            f'async () => {{ const r = await api.request({{ method: "DELETE", path: "/api/v1/tasks/{task_id}" }}); return {{ status: r.status, ok: r.ok }}; }}',
-            506)
-        if assert_no_error(r, f"DELETE /api/v1/tasks/{task_id} succeeded"):
-            assert_eq(r.get("status"), 204, "status 204")
-            assert_eq(r.get("ok"),     True, "ok true")
+                     f'async () => {{ const r = await api.request({{ method: "DELETE", path: "/api/v1/tasks/{task_id}" }}); return {{ status: r.status, ok: r.ok }}; }}',
+                     506)
+        if assert_no_error(r, f"DELETE /api/v1/tasks/{task_id} was denied by gateway policy"):
+            assert_eq(r.get("code"), "GOVERNANCE_DENIED", "gateway denies DELETE")
+            assert_true("deny-all-delete" in r.get("error", ""), "denial names gateway rule")
 
         r = api_exec("tasks",
-            f'async () => {{ const r = await api.request({{ method: "GET", path: "/api/v1/tasks/{task_id}" }}); return {{ status: r.status }}; }}',
-            507)
-        if assert_no_error(r, "GET deleted task returns 404"):
-            assert_eq(r.get("status"), 404, "status 404 after delete")
+                     f'async () => {{ const r = await api.request({{ method: "GET", path: "/api/v1/tasks/{task_id}" }}); return {{ status: r.status }}; }}',
+                     507)
+        if assert_no_error(r, "GET task after denied DELETE succeeds"):
+            assert_eq(r.get("status"), 200, "task remains after denied DELETE")
 
     r = api_exec("tasks",
-        'async () => { const r = await api.request({ method: "GET", path: "/api/v1/tasks" }); return r.data; }',
-        508)
+                 'async () => { const r = await api.request({ method: "GET", path: "/api/v1/tasks" }); return r.data; }',
+                 508)
     if assert_no_error(r, "GET /api/v1/tasks final count correct"):
-        assert_eq(r.get("total"), initial_count, f"total back to {initial_count} after delete")
+        expected_count = initial_count + (1 if task_id else 0)
+        assert_eq(r.get("total"), expected_count, f"total remains {expected_count} after denied delete")
+
 
 # ── OAuth 2.1 tests — metadata + backward compat (fake AS URL) ───────────────
 
@@ -876,6 +953,7 @@ def test_oauth_metadata(resource_uri: str):
     assert_eq(body4.get("status"), "ok", "health still ok after OAuth config active")
     assert_true(isinstance(body4.get("services"), list),
                 "health still returns services list after OAuth config active")
+
 
 # ── OAuth 2.1 tests — real JWT via Docker mock AS ─────────────────────────────
 
@@ -1003,6 +1081,7 @@ def test_docker_oauth(resource_uri: str):
         assert_eq(code, "TOKEN_INVALID",
                   "wrong-aud rejection carries the deterministic TOKEN_INVALID code")
 
+
 def test_jwt_validation():
     """jwt-validation strategy, live: local JWT verification against the same
     Docker mock AS's JWKS (no discovery — jwksUri/issuer/audience configured
@@ -1063,6 +1142,7 @@ def test_jwt_validation():
     # treats as a missing/malformed credential — same 401 path as no header.
     assert_true(status in (400, 401), f"empty bearer rejected before dispatch (status {status})")
 
+
 def test_oauth_introspection():
     """oauth-introspection strategy, live: Harbor calls a real HTTP
     introspection endpoint (examples/demo/mock-introspection-server.js) for
@@ -1118,6 +1198,7 @@ def test_oauth_introspection():
     # (d) No token → 401 before introspection is ever called.
     status, _ = _post_no_token("/mcp")
     assert_eq(status, 401, "POST /mcp without token → 401 (introspection never called)")
+
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -1196,8 +1277,8 @@ def main():
                 _start_billing_backend()
                 _start_introspection_server()
                 _start_harbor_oauth({
-                    "HARBOR_RESOURCE_URI":    args.oauth_resource_uri,
-                    "HARBOR_AUTH_SERVERS":    OAUTH_AS_BASE,
+                    "HARBOR_RESOURCE_URI": args.oauth_resource_uri,
+                    "HARBOR_AUTH_SERVERS": OAUTH_AS_BASE,
                     "HARBOR_SCOPES_SUPPORTED": "api:read,api:write",
                 })
                 test_docker_oauth(args.oauth_resource_uri)

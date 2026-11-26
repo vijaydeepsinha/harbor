@@ -1,36 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Contributors to the Harbor project.
 
-import { describe, it, expect, afterEach, vi } from 'vitest'
-import type { AddressInfo } from 'node:net'
-import type { AuthInfo } from '@modelcontextprotocol/server'
-import { ERR, MCP_PROTOCOL_VERSION } from '../../core/constants.js'
+import {afterEach, describe, expect, it, vi} from 'vitest'
+import type {AddressInfo} from 'node:net'
+import type {AuthInfo} from '@modelcontextprotocol/server'
+import {ERR, MCP_PROTOCOL_VERSION} from '../../src/core/constants.js'
+import {type HttpGatewayHandle, startHttpGateway} from '../../src/runtime/http/http-gateway.js'
+import {ServiceRegistry} from '../../src/runtime/registry/service-registry.js'
+import type {Logger} from '../../src/runtime/observability/logger.js'
 
-const { mockNodeMcpHandler, mockCreateMcpHandler, mockToNodeHandler } = vi.hoisted(() => {
-  const nodeHandler = vi.fn()
-  return {
-    mockNodeMcpHandler: nodeHandler,
-    mockCreateMcpHandler: vi.fn(() => ({ fetch: vi.fn() })),
-    mockToNodeHandler: vi.fn(() => nodeHandler)
-  }
+const {mockNodeMcpHandler, mockCreateMcpHandler, mockToNodeHandler} = vi.hoisted(() => {
+    const nodeHandler = vi.fn()
+    return {
+        mockNodeMcpHandler: nodeHandler,
+        mockCreateMcpHandler: vi.fn(() => ({fetch: vi.fn()})),
+        mockToNodeHandler: vi.fn(() => nodeHandler)
+    }
 })
 
 vi.mock('@modelcontextprotocol/server', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@modelcontextprotocol/server')>()
-  return {
-    ...actual,
-    createMcpHandler: mockCreateMcpHandler,
-    UnsupportedProtocolVersionError: class UnsupportedProtocolVersionError extends Error {}
-  }
+    const actual = await importOriginal<typeof import('@modelcontextprotocol/server')>()
+    return {
+        ...actual,
+        createMcpHandler: mockCreateMcpHandler,
+        UnsupportedProtocolVersionError: class UnsupportedProtocolVersionError extends Error {
+        }
+    }
 })
 
 vi.mock('@modelcontextprotocol/node', () => ({
-  toNodeHandler: mockToNodeHandler
+    toNodeHandler: mockToNodeHandler
 }))
-
-import { startHttpGateway, type HttpGatewayHandle } from '../../runtime/http/http-gateway.js'
-import { ServiceRegistry } from '../../runtime/registry/service-registry.js'
-import type { Logger } from '../../runtime/observability/logger.js'
 
 /**
  * The gateway is tested end-to-end against a real `node:http` listener on an
@@ -40,211 +40,274 @@ import type { Logger } from '../../runtime/observability/logger.js'
  */
 
 function makeLogger(): Logger {
-  const noop = () => {}
-  return {
-    info: noop, warn: noop, error: noop, debug: noop, trace: noop, fatal: noop,
-    child: () => makeLogger()
-  } as unknown as Logger
+    const noop = () => {
+    }
+    return {
+        info: noop, warn: noop, error: noop, debug: noop, trace: noop, fatal: noop,
+        child: () => makeLogger()
+    } as unknown as Logger
 }
 
 async function startForTest(overrides: Partial<Parameters<typeof startHttpGateway>[0]> = {}): Promise<{
-  handle: HttpGatewayHandle
-  baseUrl: string
-  close: () => Promise<void>
+    handle: HttpGatewayHandle
+    baseUrl: string
+    close: () => Promise<void>
 }> {
-  const registry = overrides.registry ?? new ServiceRegistry()
-  const handle = startHttpGateway({
-    host: '127.0.0.1',
-    port: 0,
-    createMcpServer: () => {
-      throw new Error('createMcpServer not expected to be called in this test')
-    },
-    registry,
-    logger: makeLogger(),
-    ...overrides
-  })
-  await new Promise<void>(resolve => handle.server.once('listening', () => resolve()))
-  const { port } = handle.server.address() as AddressInfo
-  return {
-    handle,
-    baseUrl: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolve, reject) => {
-      handle.server.close(err => err ? reject(err) : resolve())
+    const registry = overrides.registry ?? new ServiceRegistry()
+    const handle = startHttpGateway({
+        host: '127.0.0.1',
+        port: 0,
+        createMcpServer: () => {
+            throw new Error('createMcpServer not expected to be called in this test')
+        },
+        registry,
+        logger: makeLogger(),
+        ...overrides
     })
-  }
+    await new Promise<void>(resolve => handle.server.once('listening', () => resolve()))
+    const {port} = handle.server.address() as AddressInfo
+    return {
+        handle,
+        baseUrl: `http://127.0.0.1:${port}`,
+        close: () => new Promise<void>((resolve, reject) => {
+            handle.server.close(err => err ? reject(err) : resolve())
+        })
+    }
 }
 
 describe('startHttpGateway', () => {
-  let cleanup: (() => Promise<void>) | null = null
+    let cleanup: (() => Promise<void>) | null = null
 
-  afterEach(async () => {
-    mockNodeMcpHandler.mockReset()
-    mockCreateMcpHandler.mockClear()
-    mockToNodeHandler.mockClear()
-    if (cleanup) {
-      await cleanup()
-      cleanup = null
-    }
-  })
-
-  it('constructs the MCP handler with { legacy: "reject" } — the PR\'s headline breaking change (C-1)', async () => {
-    const { close } = await startForTest()
-    cleanup = close
-
-    expect(mockCreateMcpHandler).toHaveBeenCalledTimes(1)
-    const [, options] = mockCreateMcpHandler.mock.calls[0] as [unknown, { legacy?: string }]
-    expect(options).toMatchObject({ legacy: 'reject' })
-  })
-
-  it('GET /health returns 200 with service registry snapshot', async () => {
-    const registry = new ServiceRegistry()
-    const { baseUrl, close } = await startForTest({ registry })
-    cleanup = close
-
-    const res = await fetch(`${baseUrl}/health`)
-    expect(res.status).toBe(200)
-    expect(res.headers.get('content-type')).toContain('application/json')
-    const body = await res.json() as { status: string; protocolVersion: string; services: string[] }
-    expect(body.status).toBe('ok')
-    expect(body.services).toEqual([])
-  })
-
-  it('GET /health advertises the single supported protocol version (spec §20)', async () => {
-    const { baseUrl, close } = await startForTest()
-    cleanup = close
-
-    const res = await fetch(`${baseUrl}/health`)
-    const body = await res.json() as { protocolVersion: string }
-    expect(body.protocolVersion).toBe(MCP_PROTOCOL_VERSION)
-    expect(body.protocolVersion).toBe('2026-07-28')
-  })
-
-  it('unknown route returns 404 with the gateway error envelope', async () => {
-    const { baseUrl, close } = await startForTest()
-    cleanup = close
-
-    const res = await fetch(`${baseUrl}/does-not-exist`)
-    expect(res.status).toBe(404)
-    const body = await res.json() as { error: string; code: string }
-    expect(body.code).toBe(ERR.NOT_FOUND)
-  })
-
-  it('POST /mcp without Authorization is rejected before MCP dispatch', async () => {
-    const { baseUrl, close } = await startForTest()
-    cleanup = close
-
-    const res = await fetch(`${baseUrl}/mcp`, { method: 'POST' })
-    expect(res.status).toBeGreaterThanOrEqual(400)
-    expect(res.status).toBeLessThan(500)
-    expect(mockNodeMcpHandler).not.toHaveBeenCalled()
-    const body = await res.json() as { code: string }
-    expect(body.code).toBe(ERR.MISSING_TOKEN)
-  })
-
-  it('bearer failures include the reason enum in the response body', async () => {
-    const { baseUrl, close } = await startForTest()
-    cleanup = close
-
-    const res = await fetch(`${baseUrl}/mcp`, {
-      method: 'POST',
-      headers: { Authorization: 'Basic not-a-bearer' }
-    })
-    expect(res.status).toBe(401)
-    const body = await res.json() as { code: string; reason: string; error: string }
-    expect(body.code).toBe(ERR.MISSING_TOKEN)
-    expect(typeof body.reason).toBe('string')
-    expect(body.reason.length).toBeGreaterThan(0)
-  })
-
-  it('last-resort 500 fires when the handler throws before headers are sent', async () => {
-    // Start with a working registry, then swap the method to throw *after* the
-    // listen() log line has already run — that way only the request handler's
-    // call to serviceNames() blows up, exercising the outer try/catch.
-    const registry = new ServiceRegistry()
-    const { baseUrl, close } = await startForTest({ registry })
-    cleanup = close
-
-    registry.serviceNames = () => { throw new Error('boom') }
-
-    const res = await fetch(`${baseUrl}/health`)
-    expect(res.status).toBe(500)
-    const body = await res.json() as { code: string }
-    expect(body.code).toBe(ERR.INTERNAL)
-  })
-
-  it('POST /mcp with valid bearer attaches authInfo and delegates to the MCP handler', async () => {
-    mockNodeMcpHandler.mockImplementation(async (req, res) => {
-      res.statusCode = 200
-      res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ ok: true }))
+    afterEach(async () => {
+        mockNodeMcpHandler.mockReset()
+        mockCreateMcpHandler.mockClear()
+        mockToNodeHandler.mockClear()
+        if (cleanup) {
+            await cleanup()
+            cleanup = null
+        }
     })
 
-    let factoryCalled = false
-    const { baseUrl, close } = await startForTest({
-      createMcpServer: (ctx) => {
-        factoryCalled = true
-        expect(ctx.authInfo?.token).toBeDefined()
-        return {} as never
-      }
-    })
-    cleanup = close
+    it('constructs the MCP handler with { legacy: "reject" } — the PR\'s headline breaking change (C-1)', async () => {
+        const {close} = await startForTest()
+        cleanup = close
 
-    const testToken = 'abcdefghijklmnopqrstuvwxyz0123456789AB'
-    const res = await fetch(`${baseUrl}/mcp`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${testToken}` }
+        expect(mockCreateMcpHandler).toHaveBeenCalledTimes(1)
+        const [, options] = mockCreateMcpHandler.mock.calls[0] as [unknown, { legacy?: string }]
+        expect(options).toMatchObject({legacy: 'reject'})
     })
 
-    expect(res.status).toBe(200)
-    expect(mockNodeMcpHandler).toHaveBeenCalledTimes(1)
+    it('GET /health returns 200 with service registry snapshot', async () => {
+        const registry = new ServiceRegistry()
+        const {baseUrl, close} = await startForTest({registry})
+        cleanup = close
 
-    const [req] = mockNodeMcpHandler.mock.calls[0] as [{ auth?: AuthInfo }]
-    expect(req.auth?.token).toBe(testToken)
-    // Factory is invoked by createMcpHandler at handler construction time in
-    // production; here we only assert auth passthrough on the Node request.
-    expect(factoryCalled).toBe(false)
-  })
+        const res = await fetch(`${baseUrl}/health`)
+        expect(res.status).toBe(200)
+        expect(res.headers.get('content-type')).toContain('application/json')
+        const body = await res.json() as { status: string; protocolVersion: string; services: string[] }
+        expect(body.status).toBe('ok')
+        expect(body.services).toEqual([])
+    })
 
-  it('wires onerror into createMcpHandler and logs a distinguishing event for legacy client rejection (H-11)', async () => {
-    // `createMcpHandler`/`toNodeHandler` catch every internal failure
-    // themselves and never throw back to the caller (confirmed against the
-    // installed SDK source) — so the only way to observe a legacy-rejected
-    // request is the `onerror` hook passed at construction time. This test
-    // invokes that real callback directly rather than mocking a throw the
-    // SDK never actually produces.
-    const warnSpy = vi.fn()
-    const logger = { ...makeLogger(), warn: warnSpy } as unknown as Logger
-    const { close } = await startForTest({ logger })
-    cleanup = close
+    it('GET /health advertises the single supported protocol version (spec §20)', async () => {
+        const {baseUrl, close} = await startForTest()
+        cleanup = close
 
-    expect(mockCreateMcpHandler).toHaveBeenCalledTimes(1)
-    const [, options] = mockCreateMcpHandler.mock.calls[0] as [unknown, { onerror?: (error: Error) => void }]
-    expect(options.onerror).toBeInstanceOf(Function)
+        const res = await fetch(`${baseUrl}/health`)
+        const body = await res.json() as { protocolVersion: string }
+        expect(body.protocolVersion).toBe(MCP_PROTOCOL_VERSION)
+        expect(body.protocolVersion).toBe('2026-07-28')
+    })
 
-    const { UnsupportedProtocolVersionError } = await import('@modelcontextprotocol/server')
-    options.onerror?.(new UnsupportedProtocolVersionError({} as never))
+    it('unknown route returns 404 with the gateway error envelope', async () => {
+        const {baseUrl, close} = await startForTest()
+        cleanup = close
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'legacy_client_rejected' }),
-      'MCP handler dispatch failed'
-    )
-  })
+        const res = await fetch(`${baseUrl}/does-not-exist`)
+        expect(res.status).toBe(404)
+        const body = await res.json() as { error: string; code: string }
+        expect(body.code).toBe(ERR.NOT_FOUND)
+    })
 
-  it('wires onerror into toNodeHandler for adapter-level errors (request conversion / fetch throw)', async () => {
-    const errorSpy = vi.fn()
-    const logger = { ...makeLogger(), error: errorSpy } as unknown as Logger
-    const { close } = await startForTest({ logger })
-    cleanup = close
+    it('POST /mcp without Authorization is rejected before MCP dispatch', async () => {
+        const {baseUrl, close} = await startForTest()
+        cleanup = close
 
-    expect(mockToNodeHandler).toHaveBeenCalledTimes(1)
-    const [, options] = mockToNodeHandler.mock.calls[0] as [unknown, { onerror?: (error: Error) => void }]
-    expect(options.onerror).toBeInstanceOf(Function)
+        const res = await fetch(`${baseUrl}/mcp`, {method: 'POST'})
+        expect(res.status).toBeGreaterThanOrEqual(400)
+        expect(res.status).toBeLessThan(500)
+        expect(mockNodeMcpHandler).not.toHaveBeenCalled()
+        const body = await res.json() as { code: string }
+        expect(body.code).toBe(ERR.MISSING_TOKEN)
+    })
 
-    options.onerror?.(new Error('adapter boom'))
+    it('bearer failures include the reason enum in the response body', async () => {
+        const {baseUrl, close} = await startForTest()
+        cleanup = close
 
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ error: expect.stringContaining('adapter boom') }),
-      'MCP node adapter error before response written'
-    )
-  })
+        const res = await fetch(`${baseUrl}/mcp`, {
+            method: 'POST',
+            headers: {Authorization: 'Basic not-a-bearer'}
+        })
+        expect(res.status).toBe(401)
+        const body = await res.json() as { code: string; reason: string; error: string }
+        expect(body.code).toBe(ERR.MISSING_TOKEN)
+        expect(typeof body.reason).toBe('string')
+        expect(body.reason.length).toBeGreaterThan(0)
+    })
+
+    it('last-resort 500 fires when the handler throws before headers are sent', async () => {
+        // Start with a working registry, then swap the method to throw *after* the
+        // listen() log line has already run — that way only the request handler's
+        // call to serviceNames() blows up, exercising the outer try/catch.
+        const registry = new ServiceRegistry()
+        const {baseUrl, close} = await startForTest({registry})
+        cleanup = close
+
+        registry.serviceNames = () => {
+            throw new Error('boom')
+        }
+
+        const res = await fetch(`${baseUrl}/health`)
+        expect(res.status).toBe(500)
+        const body = await res.json() as { code: string }
+        expect(body.code).toBe(ERR.INTERNAL)
+    })
+
+    it('POST /mcp with valid bearer attaches authInfo and delegates to the MCP handler', async () => {
+        mockNodeMcpHandler.mockImplementation(async (req, res) => {
+            res.statusCode = 200
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ok: true}))
+        })
+
+        let factoryCalled = false
+        const {baseUrl, close} = await startForTest({
+            createMcpServer: (ctx) => {
+                factoryCalled = true
+                expect(ctx.authInfo?.token).toBeDefined()
+                return {} as never
+            }
+        })
+        cleanup = close
+
+        const testToken = 'abcdefghijklmnopqrstuvwxyz0123456789AB'
+        const res = await fetch(`${baseUrl}/mcp`, {
+            method: 'POST',
+            headers: {Authorization: `Bearer ${testToken}`}
+        })
+
+        expect(res.status).toBe(200)
+        expect(mockNodeMcpHandler).toHaveBeenCalledTimes(1)
+
+        const [req] = mockNodeMcpHandler.mock.calls[0] as [{ auth?: AuthInfo }]
+        expect(req.auth?.token).toBe(testToken)
+        // Factory is invoked by createMcpHandler at handler construction time in
+        // production; here we only assert auth passthrough on the Node request.
+        expect(factoryCalled).toBe(false)
+    })
+
+    it('wires onerror into createMcpHandler and logs a distinguishing event for legacy client rejection (H-11)', async () => {
+        // `createMcpHandler`/`toNodeHandler` catch every internal failure
+        // themselves and never throw back to the caller (confirmed against the
+        // installed SDK source) — so the only way to observe a legacy-rejected
+        // request is the `onerror` hook passed at construction time. This test
+        // invokes that real callback directly rather than mocking a throw the
+        // SDK never actually produces.
+        const warnSpy = vi.fn()
+        const logger = {...makeLogger(), warn: warnSpy} as unknown as Logger
+        const {close} = await startForTest({logger})
+        cleanup = close
+
+        expect(mockCreateMcpHandler).toHaveBeenCalledTimes(1)
+        const [, options] = mockCreateMcpHandler.mock.calls[0] as [unknown, { onerror?: (error: Error) => void }]
+        expect(options.onerror).toBeInstanceOf(Function)
+
+        const {UnsupportedProtocolVersionError} = await import('@modelcontextprotocol/server')
+        options.onerror?.(new UnsupportedProtocolVersionError({} as never))
+
+        expect(warnSpy).toHaveBeenCalledWith(
+            expect.objectContaining({event: 'legacy_client_rejected'}),
+            'MCP handler dispatch failed'
+        )
+    })
+
+    it('wires onerror into toNodeHandler for adapter-level errors (request conversion / fetch throw)', async () => {
+        const errorSpy = vi.fn()
+        const logger = {...makeLogger(), error: errorSpy} as unknown as Logger
+        const {close} = await startForTest({logger})
+        cleanup = close
+
+        expect(mockToNodeHandler).toHaveBeenCalledTimes(1)
+        const [, options] = mockToNodeHandler.mock.calls[0] as [unknown, { onerror?: (error: Error) => void }]
+        expect(options.onerror).toBeInstanceOf(Function)
+
+        options.onerror?.(new Error('adapter boom'))
+
+        expect(errorSpy).toHaveBeenCalledWith(
+            expect.objectContaining({error: expect.stringContaining('adapter boom')}),
+            'MCP node adapter error before response written'
+        )
+    })
+})
+
+describe('startHttpGateway — request body limits', () => {
+    let cleanup: (() => Promise<void>) | undefined
+    afterEach(async () => {
+        await cleanup?.();
+        cleanup = undefined
+    })
+    const token = 'abcdefghijklmnopqrstuvwxyz0123456789AB'
+
+    it('refuses a /mcp body over the limit with 413 before the MCP handler sees it, declared or streamed', async () => {
+        mockNodeMcpHandler.mockReset()
+        const {baseUrl, close} = await startForTest({maxBodyBytes: 1024})
+        cleanup = close
+        const declared = await fetch(`${baseUrl}/mcp`, {
+            method: 'POST',
+            headers: {Authorization: `Bearer ${token}`, 'Content-Type': 'application/json'},
+            body: 'x'.repeat(4096)
+        })
+        expect(declared.status).toBe(413)
+        expect((await declared.json() as { code: string }).code).toBe('PAYLOAD_TOO_LARGE')
+        const stream = new ReadableStream({
+            start(c) {
+                for (let i = 0; i < 8; i++) c.enqueue(new TextEncoder().encode('y'.repeat(512)));
+                c.close()
+            }
+        })
+        const streamed = await fetch(`${baseUrl}/mcp`, {
+            method: 'POST',
+            headers: {Authorization: `Bearer ${token}`},
+            body: stream,
+            duplex: 'half'
+        } as RequestInit)
+        expect(streamed.status).toBe(413)
+        expect(mockNodeMcpHandler).not.toHaveBeenCalled()
+    })
+
+    it('hands a body within the limit to the MCP handler already parsed; invalid JSON gets the JSON-RPC parse error', async () => {
+        mockNodeMcpHandler.mockReset()
+        mockNodeMcpHandler.mockImplementation(async (_req, res) => {
+            res.statusCode = 200;
+            res.end('{}')
+        })
+        const {baseUrl, close} = await startForTest({maxBodyBytes: 1024})
+        cleanup = close
+        const ok = await fetch(`${baseUrl}/mcp`, {
+            method: 'POST',
+            headers: {Authorization: `Bearer ${token}`},
+            body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+        })
+        expect(ok.status).toBe(200)
+        expect(mockNodeMcpHandler.mock.calls[0]?.[2]).toEqual({jsonrpc: '2.0', id: 1, method: 'tools/list'})
+        const bad = await fetch(`${baseUrl}/mcp`, {
+            method: 'POST',
+            headers: {Authorization: `Bearer ${token}`},
+            body: '{"jsonrpc":'
+        })
+        expect(bad.status).toBe(400)
+        expect(await bad.json()).toMatchObject({jsonrpc: '2.0', id: null, error: {code: -32700}})
+    })
 })

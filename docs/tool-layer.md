@@ -1,6 +1,6 @@
 # Tool Layer
 
-This document covers the MCP protocol implementation, transport options, session lifecycle, the five tools, the V8 sandbox execution model, and the `api.request()` contract.
+This document covers the MCP protocol implementation, transport options, the per-request lifecycle, the five tools, the V8 sandbox execution model, and the `api.request()` contract.
 
 ---
 
@@ -15,14 +15,14 @@ The AI client connects via HTTP POST to `http://<host>:<port>/mcp`.
 **Headers the client must send on every request:**
 - `Content-Type: application/json`
 - `Accept: application/json, text/event-stream`
-- `Authorization: Bearer <token>` — required on every request
+- `Authorization: Bearer <token>` — required on every request, exactly once. The token must be a JWT or an opaque token of at least 32 base64url characters (≤ 8192 characters, no control characters)
 - `MCP-Protocol-Version: 2026-07-28`
 - `Mcp-Method: <json-rpc-method>` — must match the body's `method` field
 - `Mcp-Name: <tool-name>` — required for `tools/call` (must match `params.name`)
 
 **Stateless request flow (2026-07-28):**
 
-Harbor 1.0 serves MCP protocol revision **2026-07-28** only (`legacy: 'reject'`). Each `POST /mcp` request carries a per-request `_meta` envelope and gets a fresh `McpServer` from the SDK v2 `createMcpHandler` entry. The bearer token is validated on every request — no session header is issued or required.
+Harbor 1.0 serves MCP protocol revision **2026-07-28** only (`legacy: 'reject'`). Each `POST /mcp` request carries a per-request `_meta` envelope and gets a fresh `McpServer` from the SDK v2 `createMcpHandler` entry. No session header is issued or required.
 
 Every request body's `params` must include:
 
@@ -61,17 +61,17 @@ When the client accepts only `application/json`, the response is plain JSON.
 
 ### stdio
 
-The AI client spawns the gateway process and communicates via stdin/stdout.
+The AI client spawns the gateway process and communicates via stdin/stdout. There is no `Authorization` header on stdio: every tool call presents `MCP_TOKEN` as its bearer, so it is **required**. Boot exits when it is unset, or when it would fail the bearer format check above (a JWT, or ≥ 32 base64url characters) — see `src/runtime/server-factory.ts`.
 
 ```bash
 # Direct launch
-MCP_TRANSPORT=stdio node dist/index.js
+MCP_TRANSPORT=stdio MCP_TOKEN=<token> node dist/index.js
 
 # Via claude_desktop_config.json
 {
   "command": "node",
   "args": ["/path/to/dist/index.js"],
-  "env": { "MCP_TRANSPORT": "stdio" }
+  "env": { "MCP_TRANSPORT": "stdio", "MCP_TOKEN": "<token>" }
 }
 ```
 
@@ -79,10 +79,19 @@ All structured logs go to **stderr**. Stdout is reserved for the MCP protocol st
 
 ### Per-request lifecycle (HTTP)
 
-Each HTTP request creates a fresh `McpServer` with the client's bearer token bound into the tool handlers. Request-scoped state includes:
-- The raw bearer token from the `Authorization` header (via `ctx.authInfo` in the SDK v2 factory)
-- A `correlationId` for request tracing (from the MCP request id in `ServerContext`)
-- Active sandbox isolates for concurrent calls within that request
+Nothing is kept between requests. For each `POST /mcp` (`src/runtime/http/http-gateway.ts`):
+
+1. **Bearer format.** The `Authorization` header is parsed (`src/runtime/auth/bearer-authorization.ts`): missing, duplicated, malformed, too long, or too weak ⇒ HTTP 401 (`MISSING_TOKEN` or `TOKEN_INVALID`, with a machine-readable `reason`, plus `WWW-Authenticate: Bearer resource_metadata="…"` when `HARBOR_RESOURCE_URI` is set). This checks the format only — it does not ask the auth server whether the token is valid.
+2. **Bounded body.** Harbor reads the body itself, up to `MCP_MAX_BODY_BYTES` (default 4 MiB). A larger declared or streamed body ⇒ HTTP 413 `PAYLOAD_TOO_LARGE` with `Connection: close`; a body that is not JSON ⇒ HTTP 400 with JSON-RPC error `-32700`.
+3. **Fresh server.** The SDK calls the factory in `src/runtime/http/mcp-server-factory.ts`, which builds a new `McpServer` with the five tools registered and the request's bearer (`ctx.authInfo.token`) bound into their handlers.
+4. **Token validation per tool.** Every tool except `discover_services` validates the bearer against the named service's auth strategy (token cache, then introspection / JWT verification). An invalid or expired token is a tool error (`isError`, `TOKEN_INVALID` / `TOKEN_EXPIRED`) inside an HTTP 200 response, not a 401 — see [`mcp-2026-07-28-compatibility.md`](mcp-2026-07-28-compatibility.md).
+
+Request-scoped state:
+- The raw bearer token (via `ctx.authInfo` in the SDK v2 factory)
+- A `correlationId` for Harbor's own logs and backend calls (the MCP request id), shared by all API calls in this sandbox run; each approval resume gets a new one. The durable execution id is tracked separately across runs.
+- `X-Harbor-Execution-ID` on governed backend calls carries that durable ID across approval turns; it is absent when the legacy, non-governed execution path is used.
+- The caller's optional `X-Harbor-Client-ID` request header, forwarded to backend calls when it is a safe header value
+- The sandbox isolates of the tool calls running in that request
 
 When the HTTP response closes, the transport and `McpServer` are torn down.
 
@@ -92,6 +101,8 @@ Because HTTP transport is stateless, **any pod can serve any request**. No stick
 
 The shared token cache (`TOKEN_CACHE_TYPE=memcache` or `couchbase`) still allows fast auth across pods — validated tokens are cached centrally so each request does not re-hit the auth backend unnecessarily.
 
+Code Mode executions are the exception: a paused `api_execute` run lives in the execution store. With `EXECUTION_STORE_TYPE=memcache` (and the same `GOVERNANCE_REQUEST_STATE_KEY` on every pod) any pod can resume it; with the default `in-memory` or `file` store only the pod that paused it can.
+
 ---
 
 ## The Five Tools
@@ -100,9 +111,7 @@ The shared token cache (`TOKEN_CACHE_TYPE=memcache` or `couchbase`) still allows
 
 **No parameters. No sandbox.**
 
-Harbor validates the `Authorization: Bearer <token>` header on every request — including this one — before any tool logic runs. It checks RFC 6750 format: header presence, Bearer scheme, non-empty token, ≤ 8 KB, no control characters. Malformed or missing tokens receive a 401 immediately. This is Harbor's own protection layer; it does not call any backend auth endpoint.
-
-For `discover_services` specifically, the RFC 6750 check is all that happens. The service catalog is read from the local registry — no introspection call is made. This prevents unauthenticated enumeration of your services while avoiding an unnecessary round-trip to your auth server for a read-only local operation.
+Over HTTP the bearer format check above runs on every request, including this one. For `discover_services` it is all that happens: the catalog is read from the local registry, and the token is never validated against any auth server. Any well-formed bearer can list the services (and `GET /health` lists their names without one) — an open item recorded in [`mcp-2026-07-28-compatibility.md`](mcp-2026-07-28-compatibility.md).
 
 ```json
 {
@@ -128,7 +137,7 @@ The AI reads descriptions and maps the user's intent to the right service.
 
 **Parameters:** `service` (string), `code` (string — JavaScript function)
 
-Runs AI-written code in a V8 sandbox with the service's `skills` array injected. No network access.
+Validates the bearer against the service's auth strategy, then runs AI-written code in a V8 sandbox with the service's `skills` array injected. The sandbox has no network access.
 
 ```json
 {
@@ -148,11 +157,14 @@ Runs AI-written code in a V8 sandbox with the service's `skills` array injected.
 
 ```typescript
 skills: Array<{
-  id: string       // filename without extension — used as skill_id in get_skill_details
-  filename: string // full filename
-  title: string    // title from frontmatter or first # heading
-  tags: string[]   // tags array from frontmatter (empty array if none)
-  content: string  // full markdown text including frontmatter
+  name: string
+  filename: string
+  description: string
+  content: string
+  license?: string
+  compatibility?: string
+  metadata?: Record<string, string>
+  "allowed-tools"?: string
 }>
 ```
 
@@ -160,8 +172,8 @@ skills: Array<{
 ```javascript
 async () => {
   return skills
-    .filter(s => s.content.toLowerCase().includes('task'))
-    .map(s => ({ skill_id: s.id, title: s.title }))
+    .filter(s => s.description.toLowerCase().includes('task'))
+    .map(s => ({ skill_name: s.name, description: s.description }))
 }
 ```
 
@@ -169,25 +181,29 @@ async () => {
 
 ### Tool 3: `get_skill_details`
 
-**Parameters:** `service` (string), `skill_id` (string)
+**Parameters:** `service` (string), `skill_name` (string returned by
+`discover_skills`)
 
-Direct lookup — no sandbox, no network. Returns full Markdown content.
+Direct lookup — no sandbox, no backend call. The bearer is validated against
+the service's auth strategy first (which may reach the auth server on a
+token-cache miss). The `skill_name` value is the standard Agent Skill `name`.
+An unknown value returns `UNKNOWN_SKILL` with the available names.
 
 ```json
 {
   "name": "get_skill_details",
   "inputSchema": {
     "type": "object",
-    "required": ["service", "skill_id"],
+    "required": ["service", "skill_name"],
     "properties": {
       "service":  { "type": "string" },
-      "skill_id": { "type": "string" }
+      "skill_name": { "type": "string" }
     }
   }
 }
 ```
 
-**Response:** Raw Markdown text of the skill file.
+**Response:** Raw Markdown instruction body with frontmatter removed.
 
 ---
 
@@ -195,7 +211,7 @@ Direct lookup — no sandbox, no network. Returns full Markdown content.
 
 **Parameters:** `service` (string), `code` (string — JavaScript function)
 
-Runs AI-written code in a V8 sandbox with the service's OpenAPI `spec` injected. No network access.
+Validates the bearer, then runs AI-written code in a V8 sandbox with the service's OpenAPI `spec` injected. The sandbox has no network access.
 
 ```json
 {
@@ -214,10 +230,10 @@ Runs AI-written code in a V8 sandbox with the service's OpenAPI `spec` injected.
 **What's injected:**
 
 ```typescript
-spec: OpenAPIV3.Document   // fully parsed, dereferenced OpenAPI spec
+spec: OpenAPIV3.Document   // parsed, dereferenced OpenAPI spec, after the permission guard's filterSpec
 ```
 
-The spec is deep-copied into the sandbox via `ivm.ExternalCopy`. The AI cannot modify the live spec.
+The spec first passes through the service's `PermissionGuard.filterSpec` (the default `forward-token` guard returns it unchanged), then is deep-copied into the sandbox via `ivm.ExternalCopy`. The AI cannot modify the live spec.
 
 **Example code:**
 ```javascript
@@ -255,13 +271,20 @@ Runs AI-written code in a V8 sandbox with `api.request()` injected. `api.request
 }
 ```
 
-Every `api.request()` call goes through:
-1. Argument validation (method, path required)
-2. Permission guard check
-3. Circuit breaker check
-4. `ConnectorAPI.request()` → idempotency check → outbound HTTP
-5. Circuit breaker `recordSuccess` / `recordFailure`
-6. Audit collection
+**Per tool call** (`src/tools/execute-api.tool.ts` → `src/tools/execute-api-run.ts`): read the request at the SDK boundary (`src/tools/mcp-request-view.ts`) → resolve the service → validate the bearer → create a durable execution, or resume one (an MCP retry carrying `requestState`, `_meta["harbor/execution-id"]`, or both when they name the same execution) → take the execution's run lock → run the program — the persisted original on a resume — in a fresh isolate → wait for the calls it started to finish → record the run's outcome → return the result, an `input_required` approval request, or an error. Once the execution exists, every result carries `harbor/execution-id` and `harbor/execution-status` in `_meta`.
+
+**Per `api.request()` call** (`src/runtime/sandbox/bridge-request-handler.ts`), in this order:
+
+1. **Limits.** Refused if the run has already stopped (paused, denied, diverged, cancelled, outcome unknown — the refusal carries that code), if it would exceed `maxApiCalls`, or if `maxConcurrentCalls` are already in flight.
+2. **Validate and canonicalise.** `method` must be one of GET, POST, PUT, PATCH, DELETE; `path` a non-empty string; `params` an object. The path is canonicalised once (`src/runtime/sandbox/request-path.ts`): URLs, `//`, `.`/`..` segments, backslashes, fragments, encoded `/` or control characters, malformed escapes and repeated query keys are refused; a query string in the path moves into `params`. Governance, the journal and the connector all see this one spelling. Any refusal is `INVALID_API_REQUEST` — nothing is sent or journaled.
+3. **Resolve.** The endpoint identity is the OpenAPI template the path matches (`src/runtime/governance/operation-resolver.ts`); a path the spec does not have falls back to the digit-collapsing heuristic.
+4. **Admit — one call at a time per run.** Concurrent calls (`Promise.all`) are admitted in arrival order under the run's admission lock; their HTTP calls still overlap. Inside it: the stop check again → `ActivityGate.admit` (`src/runtime/execution/activity-gate.ts`) looks the call up in the journal (a completed activity is **replayed** from its stored response with no external call; one waiting, denied, cancelled or failed stops the run) and asks governance about a new activity (ALLOW / DENY / REQUIRE_APPROVAL) → the permission guard → the circuit breaker check → the activity is journaled `EXECUTING`.
+5. **Execute.** `ConnectorAPI.request()` → idempotency strategy → outbound HTTP (`src/runtime/api-client/api-client.ts`).
+6. **Record.** The response (any status) is journaled `COMPLETED`, then `circuitBreaker.recordSuccess`. A thrown error journals the activity `FAILED` with an unknown outcome and reaches the program as a bridge error.
+
+Limit, permission, invalid-request, circuit-open and run-stopping violations are promoted to the tool's error after the isolate settles, even if the program caught the bridge error. Calls the program started without awaiting get the rest of the run's time budget and are then aborted; after the program returns, no new call is accepted.
+
+With no Code Mode runtime wired (an embedding without an execution store), step 4 is only the permission guard and circuit breaker, and nothing is journaled. The gateway always wires one.
 
 ---
 
@@ -278,7 +301,7 @@ Normal `eval()` or `new Function()` share the Node.js process context — the AI
 ```
 Host (Node.js process)
 │
-├── Creates ivm.Isolate({ memoryLimit: 64 })   ← brand new V8 engine
+├── Creates ivm.Isolate({ memoryLimit })        ← brand new V8 engine (SANDBOX_MEMORY_MB, default 64)
 │
 ├── Creates context (empty global)              ← no fetch, no require, nothing
 │
@@ -325,10 +348,10 @@ const api = {
 // Arguments
 interface ApiRequest {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'  // required
-  path:   string                                          // required, non-empty
+  path:   string                                          // required, non-empty, a path on the service (never a URL)
   params?: Record<string, unknown>   // query string params
   body?:   unknown                   // request body (POST / PUT / PATCH)
-  headers?: Record<string, string>   // extra headers merged with default headers
+  headers?: Record<string, string>   // extra headers — see below
 }
 
 // Return value
@@ -339,7 +362,14 @@ interface ApiResponse {
 }
 ```
 
-**Critical:** `ok: false` for 4xx is NOT an error. The function returns normally. Only 5xx (after retries exhausted) or policy violations throw.
+**Critical:** `ok: false` for 4xx is NOT an error. The function returns normally (a 401 also evicts the caller's cached token). What throws:
+- a 5xx or a transport error (timeout, connection failure). GET, PUT and DELETE are retried first, up to the service's `api.maxRetries` (default 1) with backoff `500·2^n ms` + jitter; POST and PATCH are sent once and never retried, since the first attempt may have taken effect. The activity is journaled `FAILED` (outcome unknown), so a resume stops with `ACTIVITY_OUTCOME_UNKNOWN` rather than repeat it;
+- a policy or limit refusal (governance, permission, circuit breaker, call limits, invalid request).
+
+A policy/limit bridge error is promoted with its own code even if user code catches it. A
+governed non-GET transport failure is promoted as `ACTIVITY_OUTCOME_UNKNOWN`; an ordinary
+uncaught program error, or an escaped governed GET/legacy transport error, is
+`SANDBOX_RUNTIME`.
 
 ```javascript
 // Correct pattern
@@ -353,23 +383,33 @@ return data
 const { body } = await api.request(...)   // undefined!
 ```
 
+**Headers.** A program may add its own headers (`Accept`, `Content-Type`, custom `X-…`), but the following are dropped in any letter case, and Harbor's own headers are applied after the program's:
+
+- Harbor's own: `Authorization`, `X-Request-Source`, `X-MCP-Tool`, `X-MCP-Service`, `X-MCP-Version`, `X-Idempotency-Key`, `X-Correlation-ID`, `X-Harbor-Server-ID`, `X-Harbor-Client-ID`, `X-Harbor-Execution-ID` — and `X-MCP-Session-ID`, which Harbor no longer sends (MCP 2026-07-28 has no sessions) but keeps reserved;
+- routing and framing: `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Upgrade`, `TE`, `Trailer`, `Proxy-Authorization`, `Proxy-Connection`, `Cookie`, `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-Port`, `X-Forwarded-Prefix`, `X-Real-IP`, `X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override`, `X-Original-URL`, `X-Rewrite-URL`, `X-Original-Method`.
+
+The list is `PROGRAM_FORBIDDEN_HEADERS` in `src/runtime/api-client/api-client.ts`.
+
 ### Sandbox limits
 
 Configurable per global env:
 
 | Variable | Default | Applies to |
 |----------|---------|-----------|
-| `SANDBOX_MEMORY_MB` | `64` | Both search and execute |
+| `SANDBOX_MEMORY_MB` | `64` | All three sandboxes |
 | `SANDBOX_EXECUTE_TIMEOUT_MS` | `8000` | `api_execute` only |
 | `SANDBOX_SEARCH_TIMEOUT_MS` | `3000` | `search_code` and `discover_skills` |
+| `SANDBOX_MAX_API_CALLS` | `50` | `api.request()` calls per `api_execute` run |
+| `SANDBOX_MAX_CONCURRENT_CALLS` | `5` | Simultaneous in-flight `api.request()` calls |
 
-Per-service overrides via `config.json`:
+Per-service overrides via `config.json` (any subset; unset fields keep the global value):
 
 ```json
 {
   "sandbox": {
     "memoryLimitMb": 128,
     "executeTimeoutMs": 15000,
+    "searchTimeoutMs": 5000,
     "maxApiCalls": 50,
     "maxConcurrentCalls": 10
   }
@@ -378,10 +418,11 @@ Per-service overrides via `config.json`:
 
 | Limit | What it controls |
 |-------|-----------------|
-| `memoryLimitMb` | V8 isolate memory; isolate is disposed on OOM |
-| `executeTimeoutMs` | Wall-clock timeout; `SandboxTimeoutError` thrown |
-| `maxApiCalls` | Total `api.request()` calls per execution |
-| `maxConcurrentCalls` | Simultaneous in-flight `api.request()` calls |
+| `memoryLimitMb` | V8 isolate memory; exceeding it ⇒ `SANDBOX_MEMORY` |
+| `executeTimeoutMs` | Wall-clock budget of an `api_execute` run, CPU and awaits alike; the isolate is disposed ⇒ `SANDBOX_TIMEOUT` |
+| `searchTimeoutMs` | The same for `search_code` and `discover_skills` |
+| `maxApiCalls` | Total `api.request()` calls per run ⇒ `CALL_LIMIT_EXCEEDED` |
+| `maxConcurrentCalls` | Simultaneous in-flight `api.request()` calls ⇒ `CONCURRENT_LIMIT_EXCEEDED` |
 
 ### What sandbox code can and cannot do
 
@@ -390,7 +431,7 @@ Per-service overrides via `config.json`:
 - Read `spec` (search sandbox only)
 - Read `skills` (discover_skills sandbox only)
 - Use standard JavaScript (objects, arrays, async/await, promises)
-- Use built-in globals (`JSON`, `Math`, `Date`, `console`)
+- Use the ECMAScript built-ins (`JSON`, `Math`, `Date`, …)
 
 **Cannot:**
 - Access `process`, `require`, `import`, `fetch`, `XMLHttpRequest`
@@ -403,7 +444,7 @@ Per-service overrides via `config.json`:
 
 ## Error Codes
 
-Errors from the sandbox and bridge are returned as structured objects in the tool response:
+Tool errors are returned as structured objects in the tool response (`isError: true`); `api_execute` errors may add `progress` and `executionId`:
 
 ```json
 {
@@ -413,45 +454,66 @@ Errors from the sandbox and bridge are returned as structured objects in the too
 }
 ```
 
-| Code | Retryable | When thrown |
-|------|-----------|-------------|
-| `SANDBOX_TIMEOUT` | Yes | Code exceeded the time limit |
+| Code | Retryable | When |
+|------|-----------|------|
+| `UNKNOWN_SERVICE` | No | `service` names no registered service |
+| `UNKNOWN_SKILL` | No | `get_skill_details`: no skill with that `skill_name` |
+| `MISSING_TOKEN` | No | No bearer (over HTTP this is a 401 before any tool runs) |
+| `TOKEN_INVALID` | No | The auth strategy rejected the token (inactive, bad signature or claims, wrong audience, unverifiable) |
+| `TOKEN_EXPIRED` | No | The token has expired |
+| `SESSION_EXPIRED` | No | Both the access token and its refresh token are exhausted |
+| `INTROSPECTION_FAILED` | Yes | The auth server is unreachable or answered 5xx |
+| `AUTH_FAILED` | Per cause | An auth failure that carries no code of its own |
 | `SANDBOX_SYNTAX` | No | JavaScript syntax error in submitted code |
-| `SANDBOX_MEMORY` | Yes | Isolate hit memory limit |
-| `SANDBOX_EXECUTION` | No | Code threw an uncaught exception |
+| `SANDBOX_TIMEOUT` | Yes | The run exceeded its wall-clock budget |
+| `SANDBOX_MEMORY` | No | The isolate hit its memory limit |
+| `SANDBOX_RUNTIME` | No | The code threw an ordinary uncaught exception; a governed GET/legacy `api.request()` error can reach this classification |
+| `SANDBOX_INTERNAL_ERROR` | Yes | Unexpected host-side failure (details logged, not returned) |
 | `CALL_LIMIT_EXCEEDED` | No | Too many `api.request()` calls |
 | `CONCURRENT_LIMIT_EXCEEDED` | No | Too many concurrent `api.request()` calls |
-| `INVALID_API_REQUEST` | No | Bad method/path in `api.request()` argument |
+| `INVALID_API_REQUEST` | No | Bad `api.request()` argument, or a path refused by canonicalisation |
 | `CIRCUIT_OPEN` | Yes | Circuit breaker open for the endpoint |
-| `PERMISSION_DENIED` | No | Token lacks permission for the endpoint |
-| `API_ERROR` | No | Backend returned 5xx after retries |
+| `PERMISSION_DENIED` | No | The permission guard refused the endpoint |
+
+`API_ERROR` (a 5xx or transport failure after retries) or the transport's own code is what the *program* sees from `api.request()`. For a governed non-GET call, Harbor promotes the failed, outcome-unknown activity to `ACTIVITY_OUTCOME_UNKNOWN` after the isolate settles, even if the program caught the bridge error. The governance codes are listed under [Code Mode governance](#code-mode-governance-durable-executions-approvals). A retryable error leaves the execution `INTERRUPTED` (resumable); a non-retryable one ends it `FAILED`.
 
 ---
 
 ## Audit Logging
 
-Every `api_execute` call produces a structured audit record at `info` level:
+Every `api_execute` call produces one audit record (`AuditRecord`, `src/core/types/audit.types.ts`). With the default `console` sink it is one structured `info` line on the service's logger:
 
 ```json
 {
   "level": "info",
-  "type": "audit",
-  "auditId": "a1b2c3d4-...",
+  "time": "2026-09-27T10:15:02.114Z",
   "service": "tasks",
+  "environment": "dev",
+  "auditId": "a1b2c3d4-...",
+  "timestamp": "2026-09-27T10:15:02.114Z",
+  "userIdHash": "3f9a...",
+  "correlationId": "7",
   "tool": "api_execute",
   "authStrategy": "oauth-introspection",
+  "idempotencyStrategy": "noop",
+  "circuitBreakerStrategy": "count-based",
   "codeSubmitted": "async () => { const { data } = await api.request(...); return data; }",
   "endpointsAccessed": ["GET /api/v1/tasks", "POST /api/v1/tasks"],
   "apiCallCount": 2,
   "durationMs": 312,
   "outcome": "success",
-  "correlationId": "abc-123"
+  "executionId": "0b6c2f4e-...",
+  "msg": "audit"
 }
 ```
 
-Disable in development: `ENABLE_AUDIT=false`
+- `endpointsAccessed` / `apiCallCount` count the calls that went out in this run; replayed activities are not counted.
+- `codeSubmitted` is the program that ran — the persisted original on a resume.
+- Failed calls add `errorType` and `errorCode`; `outcome` is one of `success`, `error`, `circuit_open`, `permission_denied`, `call_limit_exceeded`, `concurrent_limit_exceeded`, `approval_required`, `governance_denied`, `replay_diverged`, `execution_cancelled`. Every record — error, approval-pause and refused-resume paths included — carries the authenticated principal's `userIdHash`; `"unknown"` only when the call failed before authentication finished.
 
-Audit records are written to stderr as structured JSON and can be forwarded to any log aggregator (ELK, Splunk, CloudWatch, etc.).
+`ENABLE_AUDIT` accepts `true`, `false`, `1` or `0` (default `true`; any other value stops boot). `false` or `0` turns off every audit record and execution-state event.
+
+Records go to every sink listed in `AUDIT_SINKS` (default `console`: the line above, written to stderr as structured JSON for any log aggregator — ELK, Splunk, CloudWatch, etc.). With audit on, an empty `AUDIT_SINKS` or an unknown sink name stops boot. Each execution state change is published too (`execution-state`: statuses, approvals, decisions; no request or response bodies). Other destinations — S3, a SIEM — plug in with `registerAuditSinkBackend` (see `src/spi/observability/audit-sink.ts`).
 
 ---
 
@@ -468,19 +530,76 @@ Audit records are written to stderr as structured JSON and can be forwarded to a
 
 ### Metrics
 
-`MetricsCollector` tracks counters per service:
-- Tool call counts by tool name and outcome
-- Sandbox error counts by error type
-- Circuit breaker open events
+`MetricsRegistry` (`src/runtime/observability/metrics.ts`) keeps in-process counters — one registry per service plus one for the gateway:
+- Tool call counts by tool and outcome (`tool_calls_total`; a `service` argument naming no registered service is counted as `service="unknown"`, never under the caller's string)
+- Sandbox error counts by error type (`sandbox_errors_total`)
+- Circuit breaker open events (`circuit_breaker_opens_total`)
+- Store writes that failed after their outcome was decided (`execution_persistence_failures_total{operation}` — `activity.recordFailure`, `execution.endRun`; each is also an error log line with `event: "persistence_failure"`, see `docs/code-mode-governance.md` §12)
+- Token cache hits/misses and refresh attempts (`auth_cache_total`, `auth_refresh_*`)
 
-The `MetricsCollector` interface is pluggable — implement it to export to Prometheus, StatsD, or any backend.
+Counters are flushed as one `metrics_flush` log line every 60 s and on shutdown. They are not pluggable: the gateway constructs `MetricsRegistry` directly and there is no hook to substitute an exporter (Prometheus, StatsD) without changing the code.
 
 ### Non-production caller info
 
-In non-production environments (`ENVIRONMENT` not set to `prod`), every log line includes a `caller` field:
+In non-production environments (`ENVIRONMENT` not set to `prod`), every log line includes a `caller` field when the optional `pino-caller` dev dependency is installed:
 
 ```json
 { "level":"warn", "caller":"auth-middleware.ts:84", "msg":"Auth validation failed" }
 ```
 
-Powered by `pino-caller`. Automatically disabled in production.
+Automatically disabled in production.
+
+## Code Mode governance (durable executions, approvals)
+
+`api_execute` runs under the Code Mode governance layer when the gateway is
+started with an execution store (always, since `EXECUTION_STORE_TYPE` defaults
+to `in-memory`):
+
+- every call creates a **durable execution** (`_meta["harbor/execution-id"]`
+  on the result) whose original program is persisted;
+- every `api.request()` is a journaled **activity**; on resume, completed
+  activities are replayed from their stored responses and never re-executed;
+- **Governance Rules** (each service's configured rule source, defaulting to
+  `services/<name>/governance/rules/`) decide `ALLOW` / `DENY` /
+  `REQUIRE_APPROVAL` per activity before the external call;
+- `REQUIRE_APPROVAL` returns an MCP 2026-07-28 `input_required` result with a
+  form elicitation and a sealed `requestState` when the client advertises
+  `elicitation`; the client retries the same call with `inputResponses` after
+  the human decides, and Harbor resumes the program in a fresh isolate. Clients
+  without elicitation get `APPROVAL_REQUIRED`, decide over
+  `POST /executions/{id}/approvals/{approvalId}`, then call `api_execute`
+  again with `_meta["harbor/execution-id"]`.
+
+Additional error codes:
+
+| Code | Retryable | When |
+|------|-----------|------|
+| `APPROVAL_REQUIRED` | No | Paused for a human decision (clients without elicitation) |
+| `GOVERNANCE_DENIED` | No | A rule denied the activity, or the human rejected it |
+| `REPLAY_DIVERGED` | No | On resume the program issued a different request at a journaled position |
+| `EXECUTION_LOCKED` | Yes | Another run of the execution is in progress |
+| `EXECUTION_NOT_FOUND` | No | Unknown execution id |
+| `EXECUTION_NOT_RESUMABLE` | No | Finished, owned by another principal, or bound to another service |
+| `EXECUTION_CANCELLED` | No | The human cancelled the approval |
+| `ACTIVITY_OUTCOME_UNKNOWN` | No | A call failed without a known backend outcome in this run, or a failed/in-flight non-GET call is found on resume; Harbor will not repeat it |
+| `RUN_OUTCOME_NOT_RECORDED` | Yes | The program completed but read-back could not confirm completion. Inspect persistence and any retained lock; if resumable, resume with `_meta["harbor/execution-id"]` to replay journaled calls, not a fresh execution. Metadata reports observed status or omits it if unreadable. Confirmed `COMPLETED` instead returns the recorded result |
+| `APPROVAL_NOT_FOUND` | No | Unknown approval, or one of another execution |
+| `APPROVAL_ALREADY_DECIDED` | No | A different answer was already recorded |
+
+### `/executions` (HTTP)
+
+`GET /executions/{id}` returns the execution, its activities, approvals, decisions and history; `POST /executions/{id}/approvals/{approvalId}` takes `{ "action": "accept" | "decline" | "cancel", "approve"?: boolean | word, "comment"?: string }` (`accept` needs `approve: true` — or `yes`, `sure`, `proceed`, `approve`, `approved` — to approve; `approve: false`, or `no`, `reject`, `rejected`, `deny`, `denied`, `decline`, `declined`, rejects) and returns `{ approval, outcome, executionStatus }`. Both validate the bearer against the execution's service and require the execution's owner (`src/runtime/http/execution-routes.ts`):
+
+| Status | Code | When |
+|--------|------|------|
+| 401 | `MISSING_TOKEN` / `TOKEN_INVALID` / `TOKEN_EXPIRED` | Missing, malformed or rejected bearer |
+| 403 | `AUTH_FAILED` | A valid bearer of another principal |
+| 503 | `INTROSPECTION_FAILED` | The auth service is unreachable |
+| 400 | `INVALID_API_REQUEST` / `EXECUTION_NOT_RESUMABLE` | Body not a JSON object, bad `action`, `accept` whose `approve` is missing or not a recognised answer; an approval that can no longer be decided |
+| 404 | `EXECUTION_NOT_FOUND` / `APPROVAL_NOT_FOUND` | Unknown execution; unknown approval, or one belonging to another execution |
+| 409 | `EXECUTION_LOCKED` / `APPROVAL_ALREADY_DECIDED` | The execution is running or another decision holds its lock; already decided |
+| 413 | `PAYLOAD_TOO_LARGE` | Body over 64 KiB |
+
+The principal is `sha256(metadata.userId)` when the auth strategy maps a scalar `userId`, else `sha256` of the raw bearer. The approver is the requester's own principal; there is no separate approver role.
+
+Full description: [`code-mode-governance.md`](code-mode-governance.md).

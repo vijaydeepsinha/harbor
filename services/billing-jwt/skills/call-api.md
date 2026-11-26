@@ -1,7 +1,8 @@
 ---
-id: call-api
-title: Call the billing API (jwt-validation)
-tags: [billing, invoices, jwt-validation, api]
+name: call-api
+description: Call the billing API and inspect invoices using locally validated JWT access tokens.
+metadata:
+  tags: "billing, invoices, jwt-validation, api"
 ---
 
 # Call Billing API (jwt-validation)

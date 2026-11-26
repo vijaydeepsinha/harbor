@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Contributors to the Harbor project.
+
+import {z} from 'zod'
+import type {AuthResult, TokenPayload} from '../core/types/auth.types.js'
+import {SessionExpiredError} from '../core/types/auth.types.js'
+import type {ServiceRegistry, ServiceResources} from '../runtime/registry/service-registry.js'
+import type {Logger} from '../runtime/observability/logger.js'
+import type {MetricsCollector} from '../core/types/metrics.types.js'
+import {
+    AUTH_SCHEME,
+    CLIENT_CAPABILITIES_META_KEY,
+    CLIENT_INFO_META_KEY,
+    ERR,
+    GATEWAY_NAME,
+    GATEWAY_VERSION,
+    LOG_PREFIX,
+    METRIC,
+    OUTCOME,
+    PROTOCOL_VERSION_META_KEY,
+    SERVER_INFO_META_KEY
+} from '../core/constants.js'
+import {ensureError, errorCode, errorRetryable} from '../core/utils/errors.js'
+import type {ServerContext} from '@modelcontextprotocol/server'
+
+/** Server identity emitted in every response `_meta` (spec §10, recommended). */
+const SERVER_INFO = Object.freeze({name: GATEWAY_NAME, version: GATEWAY_VERSION})
+
+/**
+ * Application-level metadata a tool may attach to a response `_meta` channel
+ * (spec §11). This is transport for the MCP client/application — correlation
+ * ids, audit ids, downstream ids — and is kept strictly out of model-visible
+ * `content`. It is NOT Human-in-the-Loop: no approval/elicitation/task state.
+ */
+export type AppMeta = Record<string, unknown>
+
+/**
+ * Builds a response `_meta` object. Server identity under the reserved
+ * `io.modelcontextprotocol/serverInfo` key is always present and always wins:
+ * application metadata is merged first so it can never spoof server identity.
+ */
+export function buildResponseMeta(appMeta?: AppMeta): Record<string, unknown> {
+    return {...(appMeta ?? {}), [SERVER_INFO_META_KEY]: SERVER_INFO}
+}
+
+/** MCP tool handlers expect `Record<string, unknown>`-compatible objects. */
+export type ToolResponse = {
+    content: Array<{ type: 'text'; text: string }>
+    isError?: boolean
+    _meta?: Record<string, unknown>
+} & Record<string, unknown>
+
+/**
+ * Builds the standard `isError` MCP tool response. The on-wire payload always
+ * carries `error`, `code`, and `retryable`; optional `extra` is shallow-merged
+ * into the payload so callers can attach structured diagnostics (e.g. partial
+ * `progress` from `api_execute`) without breaking existing consumers that
+ * only read the three core fields.
+ *
+ * Reserved keys (`error`, `code`, `retryable`) cannot be overridden by `extra`.
+ *
+ * `appMeta` is carried on the response `_meta` channel (spec §11), alongside
+ * serverInfo — never mixed into the model-visible error `content`.
+ */
+export function mcpError(
+    message: string,
+    code: string,
+    retryable = false,
+    extra?: Record<string, unknown>,
+    appMeta?: AppMeta
+): ToolResponse {
+    const payload: Record<string, unknown> = {...(extra ?? {}), error: message, code, retryable}
+    return {
+        content: [{
+            type: 'text' as const,
+            text: JSON.stringify(payload)
+        }],
+        isError: true,
+        _meta: buildResponseMeta(appMeta)
+    }
+}
+
+export function mcpSuccess(data: unknown, appMeta?: AppMeta): ToolResponse {
+    return {
+        content: [{
+            type: 'text' as const,
+            text: typeof data === 'string' ? data : JSON.stringify(data, null, 2)
+        }],
+        _meta: buildResponseMeta(appMeta)
+    }
+}
+
+/**
+ * Reads the request-scoped correlation id from the MCP handler context.
+ * This is the trace id for the current tool call, distinct from a durable
+ * execution id. When the SDK does not provide one, a fresh UUID is generated
+ * so every request still has a stable log/telemetry identifier.
+ */
+export function extractCorrelationId(ctx: ServerContext | undefined): string {
+    const id = ctx?.mcpReq?.id
+    if (id !== undefined && id !== null) return String(id)
+    return crypto.randomUUID()
+}
+
+/**
+ * Advisory-only view of per-request MCP metadata (spec §9): the negotiated
+ * protocol version, client implementation info, and client capabilities. The
+ * SDK lifts the reserved `io.modelcontextprotocol/*` envelope keys out of the
+ * params `_meta` the handler sees and onto `ctx.mcpReq.envelope`; this reads
+ * both, envelope-first.
+ *
+ * Untrusted, client-supplied — for logging/telemetry only. MUST NOT be used
+ * for authentication or authorization; auth flows through the validated
+ * bearer token (see {@link validateAuth}).
+ */
+export interface AdvisoryRequestMeta {
+    protocolVersion?: string
+    clientInfo?: { name?: string; version?: string } & Record<string, unknown>
+    clientCapabilities?: Record<string, unknown>
+}
+
+export function readRequestMeta(ctx: ServerContext | undefined): AdvisoryRequestMeta {
+    const mcpReq = ctx?.mcpReq
+    const src: Record<string, unknown> = {
+        ...((mcpReq?._meta as Record<string, unknown> | undefined) ?? {}),
+        ...((mcpReq?.envelope as Record<string, unknown> | undefined) ?? {})
+    }
+    const view: AdvisoryRequestMeta = {}
+    const pv = src[PROTOCOL_VERSION_META_KEY]
+    if (typeof pv === 'string') view.protocolVersion = pv
+    const ci = src[CLIENT_INFO_META_KEY]
+    if (ci !== null && typeof ci === 'object') view.clientInfo = ci as AdvisoryRequestMeta['clientInfo']
+    const cc = src[CLIENT_CAPABILITIES_META_KEY]
+    if (cc !== null && typeof cc === 'object') view.clientCapabilities = cc as Record<string, unknown>
+    return view
+}
+
+/**
+ * Shared `{ service, code }` input schema for the sandboxed-code tools
+ * (`discover_skills`, `search_code`, `api_execute`). Kept in one place so the
+ * contract only needs to change in a single spot.
+ */
+export const serviceCodeSchema = z.object({service: z.string(), code: z.string()})
+
+/**
+ * Resolves a configured service by name.
+ * Returns the bound service resources when the service exists; otherwise it
+ * returns the canonical unknown-service MCP error payload so the caller can
+ * report the valid service names without continuing into the runtime.
+ */
+export function resolveService(
+    registry: ServiceRegistry,
+    service: string,
+    serviceNames: string[]
+): ServiceResources | ToolResponse {
+    const resources = registry.get(service)
+    if (!resources) {
+        // Not retryable: the registry is fixed at boot, so the same name fails every time —
+        // `true` invited an agent to loop on it instead of picking a listed service.
+        return mcpError(
+            `Unknown service "${service}". Available: ${serviceNames.join(', ')}`,
+            ERR.UNKNOWN_SERVICE,
+            false
+        )
+    }
+    return resources
+}
+
+/**
+ * Type guard for tool error responses.
+ * `isError` is the standard marker used by MCP handlers to distinguish a
+ * failure payload from a normal result object without relying on the caller to
+ * inspect the shape manually.
+ */
+export function isToolError(result: unknown): result is ToolResponse {
+    return typeof result === 'object' && result !== null && 'isError' in result
+}
+
+/**
+ * Standard auth path for all tools: missing token is a hard error surfaced
+ * back to the client.
+ */
+export async function validateAuth(
+    resources: ServiceResources,
+    clientToken: string | undefined,
+    correlationId: string,
+    logger: Logger,
+    toolName: string
+): Promise<AuthResult | ToolResponse> {
+    const authHeader = clientToken ? `${AUTH_SCHEME} ${clientToken}` : undefined
+    return runValidation(resources, authHeader, correlationId, logger, toolName)
+}
+
+async function runValidation(
+    resources: ServiceResources,
+    authHeader: string | undefined,
+    correlationId: string,
+    logger: Logger,
+    toolName: string
+): Promise<AuthResult | ToolResponse> {
+    try {
+        return await resources.authMiddleware.validateRequest(authHeader, correlationId)
+    } catch (err) {
+        if (err instanceof SessionExpiredError) {
+            logger.warn({correlationId, service: resources.name}, `${toolName} session expired`)
+            return mcpError(err.message, err.code, false)
+        }
+        const errObj = ensureError(err)
+        logger.warn({correlationId, service: resources.name, error: errObj.message}, `${toolName} auth failed`)
+        return mcpError(
+            errObj.message,
+            errorCode(err, ERR.AUTH_FAILED),
+            errorRetryable(err)
+        )
+    }
+}
+
+/**
+ * Higher-order pipeline for sandbox-backed tools (currently `search_code`
+ * and `discover_skills`). Consolidates the steps every such tool repeats:
+ *
+ *   validateAuth → run the body → wrap in `mcpSuccess`
+ *                 ↘ on failure: log + TOOL_CALLS (outcome=error)
+ *                              + SANDBOX_ERRORS + `mcpError`
+ *
+ * Service resolution stays in the caller because the "unknown service"
+ * error message includes the set of known names — forcing it through the
+ * HOF would muddy the early-return path. `api_execute` has enough bespoke
+ * logic (audit records, circuit-breaker outcomes, permission enforcement
+ * inside the sandbox bridge) that it is intentionally *not* migrated to
+ * this HOF; it calls {@link validateAuth} directly.
+ */
+export async function runSandboxTool<T>(
+    opts: {
+        tool: string
+        service: string
+        resources: ServiceResources
+        clientToken: string | undefined
+        correlationId: string
+        logger: Logger
+        metrics: MetricsCollector
+    },
+    body: (tokenPayload: TokenPayload) => Promise<T>
+): Promise<ToolResponse> {
+    const {tool, service, resources, clientToken, correlationId, logger, metrics} = opts
+
+    const authResult = await validateAuth(resources, clientToken, correlationId, logger, tool)
+    if (isToolError(authResult)) return authResult
+
+    try {
+        const result = await body(authResult.payload)
+        metrics.increment(METRIC.TOOL_CALLS, {tool, service, outcome: OUTCOME.SUCCESS})
+        logger.info(
+            {correlationId, tool, service, response: JSON.stringify(result, null, 2)},
+            `${LOG_PREFIX.MCP_OUT} ${tool} — response sent to AI client`
+        )
+        return mcpSuccess(result)
+    } catch (err) {
+        const errObj = ensureError(err)
+        const code = errorCode(err)
+        logger.warn({correlationId, service, error: errObj.message, code}, `${tool} failed`)
+        metrics.increment(METRIC.TOOL_CALLS, {tool, service, outcome: OUTCOME.ERROR})
+        metrics.increment(METRIC.SANDBOX_ERRORS, {tool, errorType: code})
+        return mcpError(errObj.message, code, errorRetryable(err))
+    }
+}

@@ -4,13 +4,16 @@
   "description": "TypeScript framework that connects AI agents to backend APIs via the Model Context Protocol",
   "author": "Vijaydeep Sinha",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/vdssinha/harbor#readme",
+  "homepage": "https://github.com/vijaydeepsinha/harbor#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vdssinha/harbor.git"
+    "url": "https://github.com/vijaydeepsinha/harbor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vijaydeepsinha/harbor/issues"
   },
   "bin": {
-    "harbor-gateway": "./dist/index.js"
+    "harbor-gateway": "./bin/harbor-gateway.js"
   },
   "keywords": [
     "mcp",
@@ -22,20 +25,29 @@
     "api"
   ],
   "files": [
+    "bin/",
     "dist/",
+    "governance/rules/",
     "services/README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "NOTICE",
-    "README.md"
+    "README.md",
+    "SECURITY.md",
+    "SUPPORT.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
   },
   "dependencies": {
     "@apidevtools/swagger-parser": "^10.1.1",
-    "@modelcontextprotocol/node": "2.0.0",
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/node": "2.1.2",
+    "@modelcontextprotocol/server": "2.4.0",
     "axios": "^1.7.9",
     "dotenv": "^17.4.2",
     "gray-matter": "^4.0.3",
@@ -45,7 +57,7 @@
     "memjs": "^1.3.2",
     "pino": "^9.6.0",
     "uuid": "^11.1.0",
-    "zod": "^4.2.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
@@ -58,15 +70,24 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^3.2.7"
+    "vitest": "^5.0.3"
   },
   "scripts": {
+    "prepack": "npm run build",
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx watch index.ts",
+    "dev": "tsx watch src/index.ts",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "node tests/e2e/setup/run-governance.mjs e2e",
+    "test:postman": "node tests/e2e/setup/run-governance.mjs postman",
+    "test:governance": "node tests/e2e/setup/run-governance.mjs run",
+    "governance:up": "node tests/e2e/setup/run-governance.mjs up",
+    "governance:down": "node tests/e2e/setup/run-governance.mjs down",
+    "governance:logs": "node tests/e2e/setup/run-governance.mjs logs",
+    "typecheck:e2e": "tsc --noEmit -p tests/e2e/tsconfig.json",
+    "postman:build": "node --import tsx tests/postman/build-collection.mts"
   }
 }

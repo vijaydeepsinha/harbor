@@ -11,18 +11,10 @@
     "resolveJsonModule": true,
     "noUncheckedIndexedAccess": true,
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "src",
     "declaration": true,
     "sourceMap": true
   },
-  "include": [
-    "core/**/*",
-    "runtime/**/*",
-    "tools/**/*",
-    "spi/**/*",
-    "adapters/**/*",
-    "wiring/**/*",
-    "index.ts"
-  ],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests", "examples"]
 }

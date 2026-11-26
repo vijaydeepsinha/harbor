@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish
+        required: true
+        type: string
+      publish_npm:
+        description: Publish the package to npm
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: Verify and publish ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify release tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          git show-ref --verify --quiet "refs/tags/$TAG"
+          test "$(node -p "require('./package.json').version")" = "${TAG#v}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm run typecheck
+          npm run lint
+          npm test
+
+      - name: Build release package
+        id: package
+        run: |
+          package="$(npm pack --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].filename))')"
+          echo "filename=$package" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to npm
+        if: ${{ inputs.publish_npm }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          test -n "$NODE_AUTH_TOKEN"
+          npm publish --provenance --access public
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          PACKAGE: ${{ steps.package.outputs.filename }}
+        run: |
+          gh release create "$TAG" "$PACKAGE" \
+            --verify-tag \
+            --generate-notes \
+            --title "$TAG"

@@ -1,0 +1,60 @@
+# Service-owned examples for the order service. Put these rules in the
+# governance source configured for the service named `order`.
+#
+# The runnable demo uses `services/order/governance/rules/` for its INR
+# threshold. These examples illustrate additional rule operators; `amount`,
+# `currency`, and `items` below are not the active demo contract.
+rules:
+  - name: high-value-order
+    description: Orders over 1000 require human approval
+    match: { service: order, operation: placeOrder }
+    conditions:
+      amount:
+        greater_than: 1000
+    action:
+      type: REQUIRE_APPROVAL
+      reason: Order amount exceeds the approval threshold
+
+  - name: usd-order-review
+    description: Every order charged in USD requires human approval
+    match: { service: order, operation: placeOrder }
+    conditions:
+      currency:
+        equals: USD
+    action:
+      type: REQUIRE_APPROVAL
+      reason: USD orders require review
+
+  - name: expensive-first-item
+    description: Deny an order whose first item exceeds the unit-price limit
+    match: { service: order, operation: placeOrder }
+    conditions:
+      body.items.0.unitPrice:
+        greater_than: 500
+    action:
+      type: DENY
+      reason: An order item exceeds the unit-price limit
+
+  - name: complex-order-review
+    description: Review large orders or orders with a costly first item unless pre-approved
+    match: { service: order, operation: placeOrder }
+    conditions:
+      allOf:
+        - anyOf:
+            - field: body.amount
+              greater_than: 750
+            - field: body.items.0.unitPrice
+              greater_than: 250
+        - not:
+            field: query.preApproved
+            equals: 'true'
+    action:
+      type: REQUIRE_APPROVAL
+      reason: Order amount or item price requires review
+
+  # Service baseline: allow ordinary placeOrder calls that are not denied or
+  # held for approval by the more-specific rules above.
+  - name: order-service-baseline
+    match: { service: order }
+    action:
+      type: ALLOW

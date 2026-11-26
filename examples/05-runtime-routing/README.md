@@ -14,11 +14,11 @@ The AI targets `tasks-write` for mutations and `tasks-read` for queries. The bac
 |---------|-----------|-----------|
 | Circuit breaker | 3 failures → open, 60s recovery | disabled |
 | Idempotency | 10-minute deduplication window | disabled |
-| Retries | 1 retry | 2 retries |
+| Retries (`api.maxRetries`) | 1 retry | 2 retries |
 
 ## When to use this pattern
 
 - Keep mutations safe from cascading failures without blocking read traffic
 - Prevent duplicate charges or order submissions on write endpoints
-- Allow reads to retry freely without idempotency overhead
+- Allow reads to retry freely without idempotency overhead — only `GET`, `PUT` and `DELETE` are ever retried, so `maxRetries` on the write service affects its `PUT`/`DELETE` calls, never a `POST` or `PATCH`
 - Apply tighter sandbox limits to sensitive operations

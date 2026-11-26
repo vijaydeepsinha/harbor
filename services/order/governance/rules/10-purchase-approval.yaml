@@ -1,0 +1,24 @@
+rules:
+  - name: allow-orders-up-to-5000-inr
+    description: Orders of 5000 INR or less may execute directly.
+    match:
+      service: order
+      operation: placeOrder
+    conditions:
+      amountInr:
+        less_than_or_equal: 5000
+    action:
+      type: ALLOW
+      reason: Order is within the direct-purchase limit
+
+  - name: approve-orders-over-5000-inr
+    description: Orders above 5000 INR require human approval.
+    match:
+      service: order
+      operation: placeOrder
+    conditions:
+      amountInr:
+        greater_than: 5000
+    action:
+      type: REQUIRE_APPROVAL
+      reason: Order amount exceeds the 5000 INR direct-purchase limit

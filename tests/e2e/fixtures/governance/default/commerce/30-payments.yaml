@@ -1,0 +1,11 @@
+# Multi-step workflow: charging is reviewed, notifying is not.
+rules:
+  - name: charge-payment-requires-approval
+    version: 1
+    match: { service: commerce, operation: createPayment }
+    action: { type: REQUIRE_APPROVAL, reason: Charging a payment moves money }
+
+  - name: allow-notifications
+    version: 1
+    match: { service: commerce, operation: sendNotification }
+    action: { type: ALLOW }

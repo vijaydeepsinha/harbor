@@ -1,7 +1,8 @@
 ---
-id: manage-tasks
-title: Create, update, and track tasks
-tags: [task, todo, project, assign, status, priority]
+name: manage-tasks
+description: Create, update, assign, list, and track tasks with validated status and priority values.
+metadata:
+  tags: "task, todo, project, assign, status, priority"
 ---
 
 # Manage Tasks

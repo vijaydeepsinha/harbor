@@ -1,0 +1,18 @@
+{
+  "_comment": "Deterministic test identities. Every token is an opaque bearer of >=32 base64url characters so Harbor's transport-level format check admits it; the mock API accepts only the ones listed under `accepted`. Test-only credentials — never real.",
+  "tokens": {
+    "alice": "e2e-alice-token-0123456789abcdefghijklmnopqrstuv",
+    "bob": "e2e-bob-token-0123456789abcdefghijklmnopqrstuvwx",
+    "admin": "e2e-admin-token-0123456789abcdefghijklmnopqrstuv",
+    "readonly-user": "e2e-readonly-user-token-0123456789abcdefghijklmn",
+    "finance-user": "e2e-finance-user-token-0123456789abcdefghijklmno",
+    "untrusted-user": "e2e-untrusted-user-token-0123456789abcdefghijklm"
+  },
+  "accepted": [
+    "alice",
+    "bob",
+    "admin",
+    "readonly-user",
+    "finance-user"
+  ]
+}

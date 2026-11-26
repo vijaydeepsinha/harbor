@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "types": [
+      "node"
+    ],
+    "allowImportingTsExtensions": false
+  },
+  "include": [
+    "./**/*.ts",
+    "../../vitest.e2e.config.ts"
+  ],
+  "exclude": []
+}

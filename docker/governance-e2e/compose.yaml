@@ -1,0 +1,99 @@
+# Governance E2E environment for the Harbor MCP gateway.
+#
+#   npm run governance:up      # build + start + wait for health
+#   npm run test:e2e           # real MCP calls against :3333 / :3334 with the mock API on :4010
+#   npm run test:postman       # the Postman collection against the same environment
+#   npm run governance:down
+#
+# Three containers, nothing else: the policy engine, execution store and
+# approval channel are embedded in the gateway on this branch, so they are
+# tested as shipped rather than split into separate services.
+name: harbor-governance-e2e
+
+x-harbor-common: &harbor-common
+  image: ${HARBOR_IMAGE:-harbor-governance-e2e:local}
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  depends_on:
+    mock-api:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3333/health"]
+    interval: 2s
+    timeout: 3s
+    retries: 45
+    start_period: 20s
+
+services:
+  mock-api:
+    image: node:22-alpine
+    command: ["node", "/srv/mock-api/server.mjs"]
+    environment:
+      PORT: "4010"
+      HOST: "0.0.0.0"
+      IDENTITIES_FILE: /srv/fixtures/identities.json
+    volumes:
+      - ../../tests/e2e/mock-api:/srv/mock-api:ro
+      - ../../tests/e2e/fixtures:/srv/fixtures:ro
+    ports:
+      - "${E2E_MOCK_API_PORT:-4010}:4010"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4010/health"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  # Main instance: default ALLOW, file-backed execution store (survives a
+  # restart), fixed requestState key so a state minted before a restart is
+  # still verifiable afterwards.
+  harbor:
+    <<: *harbor-common
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "3333"
+      SERVICES_DIR: /app/e2e/services
+      GATEWAY_GOVERNANCE_RULES_DIR: /app/e2e/gateway-governance
+      GOVERNANCE_DEFAULT_DECISION: ALLOW
+      GOVERNANCE_APPROVAL_TTL_SEC: "600"
+      GOVERNANCE_REQUEST_STATE_KEY: e2e-request-state-key-0123456789abcdef0123456789
+      EXECUTION_STORE_TYPE: file
+      EXECUTION_STORE_DIR: /app/var/executions
+      ENABLE_AUDIT: "true"
+      LOG_LEVEL: info
+      ENVIRONMENT: dev
+    volumes:
+      - ../../tests/e2e/fixtures/services:/app/e2e/services:ro
+      - ../../tests/e2e/fixtures/governance/default/commerce:/app/e2e/services/commerce/governance/rules:ro
+      - ../../tests/e2e/fixtures/governance/default/ops:/app/e2e/services/ops/governance/rules:ro
+      - ../../tests/e2e/fixtures/governance/gateway:/app/e2e/gateway-governance:ro
+      # Bind mount (not a named volume) so the runner can archive the store on
+      # failure and so the non-root `harbor` user can write to it (the
+      # orchestrator creates the directory world-writable before `up`).
+      - ../../artifacts/executions:/app/var/executions
+    ports:
+      - "${E2E_HARBOR_PORT:-3333}:3333"
+
+  # Fail-closed instance: default DENY with a small rule set, short requestState
+  # TTL so expiry is testable, in-memory store.
+  harbor-strict:
+    <<: *harbor-common
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "3333"
+      SERVICES_DIR: /app/e2e/services
+      GATEWAY_GOVERNANCE_RULES_DIR: /app/e2e/gateway-governance
+      GOVERNANCE_DEFAULT_DECISION: DENY
+      GOVERNANCE_APPROVAL_TTL_SEC: "3"
+      GOVERNANCE_REQUEST_STATE_KEY: e2e-strict-request-state-key-0123456789abcdef01234
+      EXECUTION_STORE_TYPE: in-memory
+      ENABLE_AUDIT: "true"
+      LOG_LEVEL: info
+      ENVIRONMENT: dev
+    volumes:
+      - ../../tests/e2e/fixtures/services:/app/e2e/services:ro
+      - ../../tests/e2e/fixtures/governance/strict/commerce:/app/e2e/services/commerce/governance/rules:ro
+      - ../../tests/e2e/fixtures/governance/strict/ops:/app/e2e/services/ops/governance/rules:ro
+      - ../../tests/e2e/fixtures/governance/gateway:/app/e2e/gateway-governance:ro
+    ports:
+      - "${E2E_HARBOR_STRICT_PORT:-3334}:3333"

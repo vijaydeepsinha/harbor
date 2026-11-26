@@ -1,7 +1,8 @@
 ---
-id: call-api
-title: Call the billing API (oauth-introspection)
-tags: [billing, invoices, oauth-introspection, api]
+name: call-api
+description: Call the billing API and inspect invoices using opaque-token introspection.
+metadata:
+  tags: "billing, invoices, oauth-introspection, api"
 ---
 
 # Call Billing API (oauth-introspection)

@@ -1,0 +1,9 @@
+name: deny-all-delete
+version: 1
+description: Test-only gateway policy denying DELETE requests across services.
+match:
+  method: DELETE
+action:
+  type: DENY
+  reason: Gateway policy forbids all DELETE requests.
+final: true

@@ -1,0 +1,5 @@
+name: Harbor production CodeQL configuration
+
+paths-ignore:
+  - tests/**
+  - postman/**

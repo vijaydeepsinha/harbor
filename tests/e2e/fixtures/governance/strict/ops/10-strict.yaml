@@ -1,0 +1,6 @@
+# The former shared ping policy is copied into each owning service's policy set.
+rules:
+  - name: strict-allow-ping
+    version: 1
+    match: { operation: ping }
+    action: { type: ALLOW }

@@ -1,0 +1,31 @@
+{
+  "description": "E2E ops service — administrative user management backed by the deterministic mock API. Exists so cross-service resume and admin-operation denial can be tested.",
+  "api": {
+    "protocol": "http",
+    "host": "mock-api",
+    "port": 4010,
+    "basePath": "",
+    "requestTimeoutMs": 2000,
+    "maxRetries": 1
+  },
+  "enabled": true,
+  "auth": {
+    "type": "static-token",
+    "token": "e2e-fallback-token-never-used-0123456789abcdef"
+  },
+  "spec": {
+    "source": "file"
+  },
+  "serviceRefreshIntervalMs": 0,
+  "circuitBreaker": {
+    "type": "noop"
+  },
+  "idempotency": {
+    "type": "noop"
+  },
+  "sandbox": {
+    "executeTimeoutMs": 8000,
+    "maxApiCalls": 12,
+    "maxConcurrentCalls": 3
+  }
+}

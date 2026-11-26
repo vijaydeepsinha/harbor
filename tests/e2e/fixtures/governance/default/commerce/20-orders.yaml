@@ -1,0 +1,36 @@
+# Orders: value-based approval, hard deny on delete, and deliberately conflicting update rules.
+rules:
+  - name: high-value-order-requires-approval
+    version: 3
+    description: Orders above 10,000 need a human
+    match: { service: commerce, operation: createOrder }
+    conditions:
+      amount: { greater_than: 10000 }
+    action: { type: REQUIRE_APPROVAL, reason: Order amount exceeds the approval threshold }
+
+  - name: deny-delete-order
+    version: 1
+    description: Agents may never delete orders (matched by method + path template)
+    match: { service: commerce, method: DELETE, path: "/orders/{orderId}" }
+    action: { type: DENY, reason: Order deletion is not permitted through agents }
+
+  - name: allow-update-order
+    version: 1
+    match: { service: commerce, operation: updateOrder }
+    action: { type: ALLOW }
+
+  - name: deny-cancel-via-update
+    version: 1
+    description: Conflicts with allow-update-order when status is cancelled — DENY must win
+    match: { operation: updateOrder }
+    conditions:
+      status: { equals: cancelled }
+    action: { type: DENY, reason: Cancelling an order requires the cancellation workflow }
+
+  - name: expedite-requires-approval
+    version: 1
+    description: Conflicts with allow-update-order when expedite is true — REQUIRE_APPROVAL must win over ALLOW
+    match: { operation: updateOrder }
+    conditions:
+      body.expedite: { equals: true }
+    action: { type: REQUIRE_APPROVAL, reason: Expedited shipping has a cost impact }
