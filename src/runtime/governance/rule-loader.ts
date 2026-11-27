@@ -2,7 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import {createHash} from 'node:crypto'
-import yaml from 'js-yaml'
+import * as yaml from 'js-yaml'
 import type {Logger} from '../../core/types/logger.types.js'
 import type {GovernanceRuleDocument} from '../../spi/governance/rule-source.js'
 import {readRuleDirectory} from '../../wiring/strategy-builders.js'

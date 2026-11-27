@@ -118,16 +118,14 @@ _introspection_proc: Optional[subprocess.Popen] = None
 
 
 def _find_node() -> str:
-    for candidate in [
-        os.path.expanduser("~/.nvm/versions/node/v22.22.1/bin/node"),
-        "node",
-    ]:
+    for candidate in ["node", *sorted(Path("~/.nvm/versions/node").expanduser().glob("v*/bin/node"), reverse=True)]:
         try:
-            subprocess.run([candidate, "--version"], capture_output=True, check=True)
-            return candidate
-        except (FileNotFoundError, subprocess.CalledProcessError):
+            version = subprocess.run([str(candidate), "--version"], capture_output=True, check=True, text=True).stdout
+            if int(version.strip().lstrip("v").split(".")[0]) >= 24:
+                return str(candidate)
+        except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
             continue
-    sys.exit(f"{RED}node not found — install Node 22+{RESET}")
+    sys.exit(f"{RED}Node 24+ not found — install Node 24 or later{RESET}")
 
 
 def start_services(extra_env: Optional[dict] = None):
@@ -616,6 +614,37 @@ def api_exec(service: str, code: str, req_id: int) -> dict:
     return call_tool("api_execute", {"service": service, "code": code}, req_id)
 
 
+def api_exec_elicitation(service: str, code: str, req_id: int, extra: Optional[dict] = None) -> dict:
+    """api_execute from a client that supports form elicitation (approval over MCP).
+
+    Returns the raw tool result so the approval round trip can be inspected.
+    """
+    envelope = {**_mcp_envelope(), MCP_META_CLIENT_CAPS: {"elicitation": {"form": {}}}}
+    payload = {
+        "jsonrpc": "2.0", "id": req_id, "method": "tools/call",
+        "params": {"name": "api_execute", "arguments": {"service": service, "code": code}, **(extra or {}), "_meta": envelope},
+    }
+    req = urllib.request.Request(
+        GATEWAY_URL,
+        data=json.dumps(payload).encode(),
+        headers=_mcp_headers("tools/call", BEARER_TOKEN, "api_execute"),
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = _parse_mcp_response(resp.read().decode())
+    except Exception as e:
+        return {"_error": str(e)}
+    if "error" in body:
+        return {"_error": body["error"].get("message", str(body["error"]))}
+    result = body.get("result", {})
+    try:
+        result["_payload"] = json.loads(result["content"][0]["text"])
+    except Exception:
+        result["_payload"] = None
+    return result
+
+
 def api_exec_jwt(service: str, code: str, req_id: int, jwt: str) -> dict:
     """Run api_execute over a JWT-authenticated MCP call.
 
@@ -763,10 +792,11 @@ def test_product_service():
                  300)
     if assert_no_error(r, "GET /products succeeded"):
         products = r.get("products", [])
-        assert_eq(len(products), 4, "4 products returned")
+        assert_eq(len(products), 12, "12 catalog products returned")
         ids = [p["id"] for p in products]
-        for pid in ("p001", "p002", "p003", "p004"):
+        for pid in ("p001", "p002", "p003", "p004", "p012"):
             assert_in(pid, ids, f"product {pid} present")
+        assert_eq({p["category"] for p in products}, {"electronics", "home", "office", "travel"}, "all four categories present")
 
     r = api_exec("product",
                  'async () => { const r = await api.request({ method: "GET", path: "/products", params: { category: "electronics" } }); return r.data; }',
@@ -774,6 +804,18 @@ def test_product_service():
     if assert_no_error(r, "GET /products?category=electronics succeeded"):
         cats = [p["category"] for p in r.get("products", [])]
         assert_true(all(c == "electronics" for c in cats), "all results are electronics")
+
+    r = api_exec("product",
+                 'async () => { const r = await api.request({ method: "GET", path: "/products", params: { q: "office chair" } }); return r.data; }',
+                 304)
+    if assert_no_error(r, "GET /products?q=office chair succeeded"):
+        assert_eq([p["id"] for p in r.get("products", [])], ["p005"], "search by words finds the office chair")
+
+    r = api_exec("product",
+                 'async () => { const r = await api.request({ method: "GET", path: "/products", params: { inStock: false } }); return r.data; }',
+                 305)
+    if assert_no_error(r, "GET /products?inStock=false succeeded"):
+        assert_eq([p["id"] for p in r.get("products", [])], ["p004"], "only the out-of-stock product is returned")
 
     r = api_exec("product",
                  'async () => { const r = await api.request({ method: "GET", path: "/products/p001" }); return r.data; }',
@@ -817,6 +859,25 @@ def test_order_service():
             assert_eq(r.get("orderId"), order_id, "orderId matches")
             assert_eq(r.get("status"), "confirmed", "status confirmed")
             assert_eq(r.get("productId"), "p001", "productId matches")
+            assert_eq(r.get("productName"), "Wireless Headphones", "productName is resolved from the catalog")
+            assert_true(str(r.get("customerId", "")).startswith("cust-"), "customer is derived from the caller")
+
+        r = api_exec("order",
+                     'async () => { const r = await api.request({ method: "GET", path: "/orders" }); return r.data; }',
+                     406)
+        if assert_no_error(r, "GET /orders lists the caller's orders"):
+            assert_in(order_id, [o.get("orderId") for o in r.get("orders", [])], "placed order appears in my orders")
+
+        r = api_exec("order",
+                     f'async () => {{ const r = await api.request({{ method: "DELETE", path: "/orders/{order_id}" }}); return r.status; }}',
+                     407)
+        assert_eq(r.get("code"), "GOVERNANCE_DENIED", "DELETE /orders is denied by gateway policy")
+
+        r = api_exec("order",
+                     f'async () => {{ const r = await api.request({{ method: "GET", path: "/orders/{order_id}" }}); return r.data; }}',
+                     408)
+        if assert_no_error(r, "order is still readable after the denied DELETE"):
+            assert_eq(r.get("orderId"), order_id, "denied DELETE left the order in place")
 
     r = api_exec("order",
                  'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p002", quantity: 1, amountInr: 7999 } }); return r.data; }',
@@ -840,6 +901,64 @@ def test_order_service():
                  405)
     if assert_no_error(r, "GET /orders/ord-9999 returns 404"):
         assert_eq(r.get("status"), 404, "status is 404")
+
+
+def _answer_approval(code: str, paused: dict, approve: bool, req_id: int) -> dict:
+    return api_exec_elicitation("order", code, req_id, {
+        "requestState": paused.get("requestState"),
+        "inputResponses": {"approval": {"action": "accept", "content": {"approve": approve}}},
+    })
+
+
+def test_shopping_workflow():
+    section("shopping workflow → product + order, approval yes / no")
+
+    r = api_exec("product",
+                 'async () => (await api.request({ method: "GET", path: "/products/p005" })).data',
+                 450)
+    if assert_no_error(r, "product service returns price and stock for the chair"):
+        assert_eq((r.get("price"), r.get("inStock")), (12999, True), "chair costs 12999 INR and is in stock")
+        assert_true(r.get("stock", 0) >= 1, "chair has stock available")
+
+    chair = 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p005", quantity: 1, amountInr: 12999 } }); return { status: r.status, order: r.data }; }'
+    paused = api_exec_elicitation("order", chair, 452)
+    assert_eq(paused.get("resultType"), "input_required", "order above 5000 INR pauses for approval")
+    assert_eq(((paused.get("inputRequests") or {}).get("approval") or {}).get("method"), "elicitation/create",
+              "approval is requested through MCP elicitation")
+    done = _answer_approval(chair, paused, True, 453)
+    payload = done.get("_payload") or {}
+    assert_eq(payload.get("status"), 201, "approval Yes places the same order")
+    approved_id = (payload.get("order") or {}).get("orderId")
+    assert_eq((done.get("_meta") or {}).get("harbor/execution-id"), (paused.get("_meta") or {}).get("harbor/execution-id"),
+              "the approved order resumed the paused execution")
+
+    monitor = 'async () => { const r = await api.request({ method: "POST", path: "/orders", body: { productId: "p007", quantity: 1, amountInr: 18999 } }); return { status: r.status, order: r.data }; }'
+    paused = api_exec_elicitation("order", monitor, 454)
+    assert_eq(paused.get("resultType"), "input_required", "second high-value order pauses for approval")
+    rejected = _answer_approval(monitor, paused, False, 455)
+    assert_eq((rejected.get("_payload") or {}).get("code"), "GOVERNANCE_DENIED", "approval No denies the order")
+
+    r = api_exec("order", 'async () => (await api.request({ method: "GET", path: "/orders" })).data', 456)
+    if assert_no_error(r, "GET /orders after approval decisions"):
+        orders = r.get("orders", [])
+        assert_in(approved_id, [o.get("orderId") for o in orders], "approved order is listed")
+        assert_true("p007" not in [o.get("productId") for o in orders], "rejected order was never placed")
+
+
+def test_shopping_postman_collection():
+    section("Postman → postman/shopping-demo.postman_collection.json")
+    result = subprocess.run(
+        [_find_node(), "tests/postman/run-collection.mjs",
+         "--collection", "postman/shopping-demo.postman_collection.json",
+         "--env-var", f"baseUrl={GATEWAY_BASE}"],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=120,
+    )
+    summary = [line for line in result.stdout.splitlines() if line.startswith("requests:")]
+    info(summary[-1] if summary else "no summary from the collection runner")
+    if result.returncode != 0:
+        print(result.stdout[-4000:])
+        print(result.stderr[-2000:])
+    assert_eq(result.returncode, 0, "every shopping demo Postman assertion passed")
 
 
 def test_task_service():
@@ -1256,6 +1375,8 @@ def main():
         test_discover_skills()
         test_product_service()
         test_order_service()
+        test_shopping_workflow()
+        test_shopping_postman_collection()
         test_task_service()
         if args.oauth:
             test_oauth_metadata(args.oauth_resource_uri)

@@ -1,18 +1,45 @@
 openapi: 3.0.3
 info:
   title: Order Service
-  version: 1.0.0
-  description: Order management — place and track orders
+  version: 1.1.0
+  description: >-
+    Orders for a caller-token-derived demo customer partition. The customer
+    is identified from the caller's bearer token, so no customer ID is sent. Product IDs and
+    INR prices come from the product service.
 
 servers:
   - url: http://localhost:3002
 
 paths:
   /orders:
+    get:
+      operationId: listOrders
+      summary: List my orders
+      description: Returns the caller-token-derived demo customer's orders, newest first.
+      responses:
+        '200':
+          description: The caller's orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+                  total:
+                    type: integer
+        '401':
+          description: No caller identity was supplied
     post:
       operationId: placeOrder
       summary: Place a new order
-      description: Creates a new order for a product. Returns the order ID and confirmation details.
+      description: >-
+        Places an order for the caller-token-derived demo customer. Do not send a customer ID.
+        Look up the product's current INR price and stock with the product
+        service first; amountInr must equal that price times quantity, and
+        quantity cannot exceed stock.
       requestBody:
         required: true
         content:
@@ -41,23 +68,25 @@ paths:
                 $ref: '#/components/schemas/Order'
         '400':
           description: Missing required fields or amount does not match product price times quantity
+        '401':
+          description: No caller identity was supplied
         '404':
           description: Product not found
         '409':
-          description: Product is out of stock
+          description: Product is out of stock, or quantity exceeds the fixed demo stock limit
 
   /orders/{orderId}:
     get:
       operationId: getOrder
       summary: Get order status
-      description: Returns current status and details for an existing order.
+      description: Returns one of the caller-token-derived demo customer's orders.
       parameters:
         - name: orderId
           in: path
           required: true
           schema:
             type: string
-          description: Order ID returned when order was placed (e.g. ord-0001)
+          description: Order ID returned when the order was placed (e.g. ord-0001)
       responses:
         '200':
           description: Order details
@@ -65,8 +94,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Order'
+        '401':
+          description: No caller identity was supplied
         '404':
-          description: Order not found
+          description: Order not found for this customer
+    delete:
+      operationId: deleteOrder
+      summary: Delete an order
+      description: >-
+        Permanently removes one of the caller-token-derived demo customer's orders. Harbor's
+        default gateway policy denies every DELETE before it reaches this API.
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Order ID to delete
+      responses:
+        '204':
+          description: Order deleted
+        '401':
+          description: No caller identity was supplied
+        '404':
+          description: Order not found for this customer
 
 components:
   schemas:
@@ -75,9 +126,16 @@ components:
       properties:
         orderId:
           type: string
+        customerId:
+          type: string
+          description: Demo customer partition derived from the caller's token
         productId:
           type: string
+        productName:
+          type: string
         quantity:
+          type: integer
+        unitPriceInr:
           type: integer
         amountInr:
           type: integer

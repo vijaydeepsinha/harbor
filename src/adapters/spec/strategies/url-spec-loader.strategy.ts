@@ -3,7 +3,7 @@
 
 import axios from 'axios'
 import SwaggerParser from '@apidevtools/swagger-parser'
-import yaml from 'js-yaml'
+import * as yaml from 'js-yaml'
 import type {OpenAPISpec} from '../../../core/types/spec.types.js'
 import {SpecLoadError} from '../../../core/types/spec.types.js'
 import type {SpecLoaderStrategy} from '../../../spi/spec/spec-loader.js'

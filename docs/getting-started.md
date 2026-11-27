@@ -8,7 +8,7 @@ This guide walks you from zero to a running MCP gateway connected to your AI cli
 
 | Requirement | Check |
 |-------------|-------|
-| Node.js 22+ | `node --version` |
+| Node.js 24+ | `node --version` |
 | npm 10+ | `npm --version` |
 | Native build tools | Xcode CLT on macOS: `xcode-select --install`; `build-essential` on Debian/Ubuntu |
 
@@ -28,7 +28,7 @@ Verify everything compiles:
 
 ```bash
 npm run typecheck    # must exit 0
-npm test             # 838 passing, 1 skipped — none may fail
+npm test             # 839 passing, 1 skipped — none may fail
 ```
 
 ---
@@ -72,11 +72,20 @@ Starting Harbor on :3333 ...
 
 The `billing*` services are disabled (`"enabled": false`) and are skipped; they belong to the OAuth mode (`examples/demo/start-oauth-mode.sh`, see [`examples/07-oauth/README.md`](../examples/07-oauth/README.md)).
 
-The order service demonstrates service-owned governance. It reads the current
-INR price from the product service and requires the request's `amountInr` to
-equal price times quantity. The policy in
+The product and order services form a shopping demo. The product service has
+a 12-item INR catalog with word search, category and stock filters. The order
+service uses the same catalog, derives the customer from the caller's bearer
+token, lists only that customer's orders, and requires the request's
+`amountInr` to equal the current price times quantity. The `tasks` service is
+deliberately unrelated, so an agent can show that it ignores services a request
+does not need.
+
+The order service also demonstrates service-owned governance. The policy in
 `services/order/governance/rules/10-purchase-approval.yaml` allows totals up to
-₹5,000 and returns `REQUIRE_APPROVAL` above that amount.
+₹5,000 and returns `REQUIRE_APPROVAL` above that amount. If one Code Mode
+program submits multiple orders, Harbor pauses and resumes each order as a
+separate activity: completed orders are replayed, and only the next pending
+order is approved and executed.
 
 **Run the smoke test** (requires Python 3.9+; `--start-services` boots the product, order and task backends and the gateway itself, so stop `start.sh` first):
 

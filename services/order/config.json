@@ -1,5 +1,5 @@
 {
-  "description": "Commerce order service — place and track INR orders. Orders up to 5000 INR are allowed directly; higher-value orders require human approval.",
+  "description": "Order service — buy catalog products and list or track INR orders for a caller-token-derived demo customer. Resolve product names and current prices with the product service; the API does not take a customer ID.",
   "api": {
     "protocol": "http",
     "host": "localhost",

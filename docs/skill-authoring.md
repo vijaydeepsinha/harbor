@@ -5,6 +5,13 @@ Skills are Markdown files that tell the AI model how to use a specific service. 
 the agent (`discover_skills`, `get_skill_details`); it never runs. What runs is the JavaScript
 program the agent then sends to `api_execute`.
 
+Keep business workflow in Skills and policy enforcement in Governance Rules. A Skill may explain
+how to identify a resource, validate request inputs, calculate derived values, and call the API.
+Do not put approval thresholds, human-approval instructions, `REQUIRE_APPROVAL` handling,
+`GOVERNANCE_DENIED` workarounds, or execution resume mechanics in a Skill. The MCP client and
+gateway surface those outcomes; the agent should report the result rather than decide policy or
+ask for a policy decision itself.
+
 ## File structure
 
 ```
@@ -120,6 +127,9 @@ const { body } = await api.request(...)  // undefined
 
 ## Error handling
 
+This section describes the runtime contract for skill authors. Do not copy governance-specific
+codes, approval thresholds, pause/resume behavior, or policy decisions into a service Skill.
+
 `api.request()` does not throw on 4xx responses — it returns `ok: false`.
 Otherwise it throws an `Error` whose message starts with a code (`CODE: message`):
 
@@ -143,11 +153,10 @@ the bridge records `outcomeKnown: false`, and the promoted error is
 unknown outcome) every further `api.request()` in that run is refused. An ordinary uncaught
 program error fails the run (`SANDBOX_RUNTIME`).
 
-**Approvals re-run the program.** When a call needs approval, the agent should retry the *same*
-`api_execute` call after the human decides — not rewrite it. Harbor runs the original program again
-from the top in a fresh isolate and replays the calls that already completed instead of re-sending
-them. So a program must make the same calls in the same order each time: base each call on earlier
-responses, not on `Date.now()` or `Math.random()`, or the resume stops with `REPLAY_DIVERGED`.
+Approval pauses and resumes are protocol behavior, not Skill instructions. A Skill must not tell the
+agent when approval is required or how to manufacture a resume. The gateway and MCP client return
+the required continuation data. Keep the business program deterministic: base later calls on
+earlier responses rather than `Date.now()` or `Math.random()`.
 
 ```javascript
 const response = await api.request({ method: 'POST', path: '/api/v1/tasks', body: { title } })
@@ -220,9 +229,11 @@ skills/
 ## Tips
 
 - Write steps in imperative voice: "Call `GET /...`", "Return the `id` field"
-- Name required vs optional fields explicitly — the AI will prompt the user for required ones
+- Name required vs optional fields explicitly; ask only for missing business input that the workflow actually needs
 - Describe the shape of the response the AI should surface to the user
-- For destructive operations (DELETE, bulk update), tell the AI to confirm with the user first
+- Do not duplicate Governance Rule thresholds, approval prompts, deny rules, or resume mechanics
+- For business-level destructive or irreversible operations, ask for product UX confirmation when
+  the workflow requires it; do not use that question as a substitute for gateway policy
 - Keep each skill file focused: one cluster of related operations per file
 
 ## See also

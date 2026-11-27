@@ -8,7 +8,7 @@ under `tests/unit` and `tests/integration`; "Postman" = folders of
 `postman/mcp-governance.postman_collection.json`; "CI" = the workflow that runs it.
 Status reflects the release-readiness local run on 2026-11-21: E2E 157/157
 (15 files), Postman 118 requests / 232 assertions, 389 passed in total; the
-current `npm test` baseline is 73 files, 838 passed + 1 skipped.
+current `npm test` baseline is 73 files, 839 passed + 1 skipped.
 
 PR #8 follow-up regressions: `tests/integration/persistence-failures.test.ts`
 covers RG-003/RG-005 settlement failures before and after completion writes,

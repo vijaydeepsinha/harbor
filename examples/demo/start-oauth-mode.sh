@@ -60,7 +60,7 @@ sleep 0.5
 echo ""
 echo "Starting Harbor on :3333 (OAuth mode) ..."
 cd "$ROOT"
-nvm use 22 --silent 2>/dev/null || true
+nvm use 24 --silent 2>/dev/null || true
 HARBOR_RESOURCE_URI="http://127.0.0.1:3333" \
 HARBOR_AUTH_SERVERS="http://localhost:8080/default" \
 HARBOR_SCOPES_SUPPORTED="api:read,api:write" \

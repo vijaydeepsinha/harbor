@@ -24,9 +24,9 @@ review of main.
 Release-readiness rerun on 2026-11-21 (`--local`): 157 governance E2E tests and
 232 Postman assertions passed.
 
-Current validation on 2026-11-26: 73 unit/integration files reported 838 passed
-and 1 skipped; the production-image governance run reported 157 E2E tests and
-232 Postman assertions passed, 389/389 in total.
+Current validation on 2026-11-27: 73 unit/integration files reported 839 passed
+and 1 skipped; the production-image governance run reported 158 E2E tests and
+232 Postman assertions passed, 390/390 in total.
 
 | Suite | Then (2026-09-21) | Now (2026-09-27) |
 |---|--:|--:|
@@ -151,7 +151,7 @@ All files live in `tests/e2e/governance/`; each names its requirement ids at the
 | `allow.test.ts` | 7 | one downstream call with decision, rule version tag, journal record and forwarded identity asserted; default ALLOW with `NO_MATCHING_RULE`; identity forwarded per caller; normal order allowed; the 10 000 boundary is not high value; method + wildcard-path rule; update allowed when only the allow rule matches |
 | `deny.test.ts` | 8 | delete stops before the call, execution `DENIED`, zero DELETE requests, order still present; restricted `customer-002` denied though a broader allow matches; the unrestricted resource works; admin user creation denied; DENY wins over ALLOW; REQUIRE_APPROVAL wins over ALLOW; a denied execution is not resumable; declined high-value order executes nothing |
 | `approval.test.ts` | 12 | elicitation form, message contents and sealed state; accept executes exactly once and completes with `runCount` 2; decline, cancel and `approve:false` execute nothing and end the execution; retry without an answer re-asks with the same approval; approval bound to the activity's operation and values; HTTP fallback: `APPROVAL_REQUIRED` with ids, accept then resume by id, decline then refused resume, resume refused while pending, body validation |
-| `multi-step.test.ts` | 6 | the four-step workflow with approvals at steps 2 and 3, asserted from the MCP result, the store and the backend log at every pause (see §E); deny first; approve then deny; step 3 denied by rule after step 2 was approved; approval at the final step; two principals' workflows independent under concurrency |
+| `multi-step.test.ts` | 7 | the four-step workflow with approvals at steps 2 and 3, asserted from the MCP result, the store and the backend log at every pause (see §E); deny first; approve then deny; step 3 denied by rule after step 2 was approved; approval at the final step; two approval-gated orders in one program continue without repeating the first; two principals' workflows independent under concurrency |
 | `lifecycle.test.ts` | 8 | one execution id across every round trip; fresh-isolate proof; refused calls after a swallowed pause; empty program; every lifecycle state visible; restart survival with the file store; SIGKILL mid-POST → `ACTIVITY_OUTCOME_UNKNOWN`, no repeat; SIGKILL mid-GET → safe re-execution |
 | `replay.test.ts` | 8 | completed GET and POST replayed without backend calls; a recorded 404 replays as is; replacement code ignored on both resume paths; a completed execution is not re-run and exposes its persisted result; query/body/path params journaled, headers never; `REPLAY_DIVERGED` from a clock-branching program with nothing executed; a FAILED activity never repeated |
 | `idempotency.test.ts` | 7 | duplicate MRTR answer, duplicate HTTP decision (409), duplicate resume; two simultaneous answers and two simultaneous resumes yield one run and one side effect; distinct idempotency keys per activity; identical submissions are separate executions by design |

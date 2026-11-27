@@ -1,27 +1,35 @@
 ---
 name: browse-products
-description: Browse and search the product catalog, inspect product details, and report availability and pricing.
+description: Browse, search and compare the INR product catalog. Use it first when a shopper wants to buy something but has not chosen one exact product.
 metadata:
-  tags: "product, catalog, search, list"
+  tags: "product, catalog, search, browse, shop, buy, price, stock"
 ---
 
 # Browse Products
 
-Use this skill to help users discover and explore available products.
+Use this skill when the user wants to see what is available, find or compare
+products, or wants to buy something without naming one exact product.
 
-## Steps
+## Finding products
 
-1. Call `GET /products` to list all available products
-2. If the user asks about a specific category (electronics, home), use the `category` query parameter
-3. For full details on a specific item, call `GET /products/{id}` with the product ID
-4. Always surface the price and inStock status so the user can make an informed choice
-5. If a product is out of stock (`inStock: false`), mention it clearly and suggest alternatives
+1. Call `GET /products` for the full catalog.
+2. Narrow it when the user gives a hint:
+   - `q` searches names, descriptions and categories, for example `q=headphones` or `q=office chair`
+   - `category` is one of `electronics`, `home`, `office` or `travel`
+   - `inStock=true` shows only products that can be ordered
+3. Call `GET /products/{id}` for one product's current details.
+4. Show each product's name, INR price, category and demo stock limit (`stock`). Keep product IDs
+   for API calls; never ask the user to type a product ID.
+5. If a product is out of stock, say so and suggest in-stock alternatives from the same category.
 
-## Example flow
+## Helping a shopper choose
 
-- User: "What products do you have?"
-  → Call `GET /products`, present the list with names and prices
-- User: "Tell me more about the headphones"
-  → Call `GET /products/p001`, return full details
-- User: "I want to buy this"
-  → Hand off to the order service using the product ID
+- **"I want to order something"** with no product: show the in-stock catalog grouped
+  by category, or ask what kind of product they want, and ask which item and how many.
+- **A description** such as "headphones" or "a chair for my office": search with `q` or
+  `category`. If exactly one in-stock product fits, continue with that product; if
+  several fit, show them and let the user choose.
+- **Once the user has chosen**: continue with the `order` service's `place-order` Skill,
+  using the product ID, current INR price and quantity.
+
+This catalog is read-only. It does not place orders and does not need customer details.

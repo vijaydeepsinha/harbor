@@ -1,5 +1,5 @@
 {
-  "description": "Product catalog service — browse and search available products. Use this service to list products, filter by category eg electronics, home etc, and retrieve product details including price and stock availability.",
+  "description": "Product catalog service — browse, search and compare INR products by name, category (electronics, home, office, travel), price and stock. Use it first when a shopper has not chosen an exact product. Read-only: it does not place orders.",
   "api": {
     "protocol": "http",
     "host": "localhost",

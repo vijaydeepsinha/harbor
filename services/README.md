@@ -6,14 +6,20 @@ Six demo services are included — three enabled so the framework works out of t
 
 | Service | Backend port | Auth | Enabled | What it does |
 |---------|-------------|------|---------|--------------|
-| `product/` | 3001 | static-token | ✅ | Product catalog — browse and search |
-| `order/` | 3002 | static-token | ✅ | INR commerce orders — ≤ ₹5,000 direct, above ₹5,000 approval |
+| `product/` | 3001 | static-token | ✅ | 12-product INR catalog — browse, search, compare and check stock |
+| `order/` | 3002 | static-token | ✅ | Caller-token-derived demo customer's INR orders — ≤ ₹5,000 direct, above ₹5,000 approval; DELETE denied by default |
 | `tasks/` | 3003 | static-token | ✅ | Task CRUD — create, assign, complete |
 | `billing/` | 3004 | oauth-2.1 | — | Billing — demonstrates OAuth 2.1 JWT validation with AS discovery |
 | `billing-jwt/` | 3004 | jwt-validation | — | Same billing backend, JWT verified against a JWKS URI |
 | `billing-introspection/` | 3004 | oauth-introspection | — | Same billing backend, token checked by the mock introspection server (:3008) |
 
 Start the token-mode demo backends and the gateway: `bash examples/demo/start.sh`.
+
+The product and order services form the shopping demo. Both backends read the
+same catalog from `examples/demo/catalog.js`. The order backend derives the
+customer from the forwarded bearer token, so placing, listing and reading orders
+needs no customer ID. The `tasks` service is unrelated to shopping and helps
+show that an agent chooses only the services a request needs.
 
 The npm package ships this directory's README as configuration guidance but
 does not bundle the demo services. Installed-package users must set

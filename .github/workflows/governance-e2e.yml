@@ -52,11 +52,11 @@ jobs:
     timeout-minutes: 40
 
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -70,12 +70,12 @@ jobs:
       - name: Lint (E2E suite, mock API, runners)
         run: npx eslint tests/e2e tests/postman vitest.e2e.config.ts
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # The production Dockerfile, cached by layer in the GitHub Actions cache
       # (isolated-vm compiles from source on alpine — the cache saves minutes).
       - name: Build the gateway image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile
@@ -107,7 +107,7 @@ jobs:
 
       - name: Upload artifacts (JUnit, JSON, logs, failure diagnostics)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: governance-e2e-artifacts
           path: |

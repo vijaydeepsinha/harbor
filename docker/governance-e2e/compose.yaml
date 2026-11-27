@@ -27,7 +27,7 @@ x-harbor-common: &harbor-common
 
 services:
   mock-api:
-    image: node:22-alpine
+    image: node:24-alpine
     command: ["node", "/srv/mock-api/server.mjs"]
     environment:
       PORT: "4010"
