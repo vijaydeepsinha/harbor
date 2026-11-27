@@ -45,7 +45,7 @@ default state on `Ctrl+C`.
 
 ## Prerequisites
 
-- Node 22+, `npm install` already run at the repo root.
+- Node 24+, `npm install` already run at the repo root.
 - Docker running (only needed for the OAuth-mode script — it starts
   `navikt/mock-oauth2-server` via `examples/07-oauth/docker-compose.yml`).
 - [Postman](https://www.postman.com/downloads/) (GUI) and/or

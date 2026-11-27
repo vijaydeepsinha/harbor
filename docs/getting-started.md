@@ -8,7 +8,7 @@ This guide walks you from zero to a running MCP gateway connected to your AI cli
 
 | Requirement | Check |
 |-------------|-------|
-| Node.js 22+ | `node --version` |
+| Node.js 24+ | `node --version` |
 | npm 10+ | `npm --version` |
 | Native build tools | Xcode CLT on macOS: `xcode-select --install`; `build-essential` on Debian/Ubuntu |
 

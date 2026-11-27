@@ -23,6 +23,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Live E2E coverage for OAuth 2.1 resource binding via `api_execute` on the billing service (`tests/demo_e2e.py --docker-oauth`): a correct-audience JWT reaches the backend; a same-issuer, same-signature, wrong-audience JWT is rejected (`TOKEN_INVALID`, no data leak).
 
 ### Changed
+- **Node 24 by default:** `engines.node` is now `>=24.0.0`; `.nvmrc`, the Docker image, the E2E mock container, demo scripts and every CI workflow use Node 24. `isolated-vm` is upgraded to 7.0.2 (required for Node 24, with upstream memory-safety fixes).
+- **Dependency upgrades:** `jose` 6, `js-yaml` 5 (namespace import; no default export), `uuid` 14, `pino` 10, `@apidevtools/swagger-parser` 13, ESLint 10, TypeScript 6.0, `typescript-eslint` 8.74, `tsx` 4.23, Vitest 5.1 and `@types/node` 24; the `@types/js-yaml` and `@types/uuid` stubs are removed because both packages ship their own types. `npm audit` reports no vulnerabilities. GitHub Actions move to Node 24 runtimes (`checkout` 7, `setup-node` 7, `upload-artifact` 7, CodeQL 4, `setup-buildx` 4, `build-push` 7, `gitleaks` 3), all pinned to commit SHAs. TypeScript 7 is deferred until `typescript-eslint` supports it.
+- **Dependabot:** minor and patch updates are grouped (npm production, npm development, GitHub Actions); `@types/node` majors, TypeScript 7 and Node image majors are ignored so they follow deliberate runtime changes.
 - **URL spec sources now load at startup:** `url` services fetch and register
   the latest remote spec immediately, while `url-with-fallback` tries the URL
   first and uses the local file only when the remote load fails. URL-only

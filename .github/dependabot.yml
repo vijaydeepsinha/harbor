@@ -6,16 +6,39 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    # One PR per group for routine updates; majors still arrive one per package
+    # so their breaking changes can be reviewed individually.
+    groups:
+      npm-production:
+        dependency-type: production
+        update-types: [minor, patch]
+      npm-development:
+        dependency-type: development
+        update-types: [minor, patch]
+    ignore:
+      # Typings track the Node runtime major (Node 24), not the newest Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # typescript-eslint supports TypeScript < 6.1 and TypeScript 7 drops the
+      # compiler API it uses; remove once typescript-eslint supports 7.
+      - dependency-name: typescript
+        versions: [">=7.0.0"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns: ["*"]
 
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-
+    ignore:
+      # The Node major is chosen deliberately with package.json engines.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]

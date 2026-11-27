@@ -103,7 +103,7 @@ execution lifecycle, replay contract, approval protocol, and threat model.
 
 ## Quick Start
 
-**Prerequisites:** Node.js 22+, npm 10+, native build tools (Xcode CLT on macOS / `build-essential` on Linux)
+**Prerequisites:** Node.js 24+, npm 10+, native build tools (Xcode CLT on macOS / `build-essential` on Linux)
 
 ```bash
 git clone https://github.com/vijaydeepsinha/harbor

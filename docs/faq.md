@@ -37,18 +37,21 @@ Check:
 
 ---
 
-**`node --version` shows 18 or 20, not 22**
+**`node --version` shows 22 or earlier, not 24**
 
-Node 22+ is required (`engines` in `package.json`; CI and the Docker image run Node 22).
+Node 24+ is required (`engines` in `package.json`; CI and the Docker image run Node 24).
+The `isolated-vm` sandbox addon requires Node 24 or later.
 
 ```bash
 # With nvm:
-nvm install 22
-nvm use 22
+nvm install 24
+nvm use 24
 
 # Verify:
-node --version  # must be v22.x.x or higher
+node --version  # must be v24.x.x or higher
 ```
+
+After switching Node versions, run `npm ci` again so native addons are rebuilt.
 
 ---
 

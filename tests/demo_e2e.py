@@ -118,16 +118,14 @@ _introspection_proc: Optional[subprocess.Popen] = None
 
 
 def _find_node() -> str:
-    for candidate in [
-        os.path.expanduser("~/.nvm/versions/node/v22.22.1/bin/node"),
-        "node",
-    ]:
+    for candidate in ["node", *sorted(Path("~/.nvm/versions/node").expanduser().glob("v*/bin/node"), reverse=True)]:
         try:
-            subprocess.run([candidate, "--version"], capture_output=True, check=True)
-            return candidate
-        except (FileNotFoundError, subprocess.CalledProcessError):
+            version = subprocess.run([str(candidate), "--version"], capture_output=True, check=True, text=True).stdout
+            if int(version.strip().lstrip("v").split(".")[0]) >= 24:
+                return str(candidate)
+        except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
             continue
-    sys.exit(f"{RED}node not found — install Node 22+{RESET}")
+    sys.exit(f"{RED}Node 24+ not found — install Node 24 or later{RESET}")
 
 
 def start_services(extra_env: Optional[dict] = None):

@@ -38,7 +38,7 @@ echo "  Bearer token for client: configure a JWT or a >=32-char opaque token in 
 echo ""
 
 cd "$ROOT"
-nvm use 22 --silent 2>/dev/null || true
+nvm use 24 --silent 2>/dev/null || true
 npm run dev &
 MCP_PID=$!
 

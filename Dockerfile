@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG NODE_VERSION=22
+ARG NODE_VERSION=24
 
 # ── Stage 1: build ────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-alpine AS builder

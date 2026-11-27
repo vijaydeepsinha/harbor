@@ -3,7 +3,7 @@
 
 import {readFile} from 'node:fs/promises'
 import path from 'node:path'
-import yaml from 'js-yaml'
+import * as yaml from 'js-yaml'
 import SwaggerParser from '@apidevtools/swagger-parser'
 import type {OpenAPISpec} from '../../../core/types/spec.types.js'
 import {SpecLoadError} from '../../../core/types/spec.types.js'
