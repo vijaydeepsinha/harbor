@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: Product Service
-  version: 1.0.0
-  description: Product catalog — list and retrieve products
+  version: 1.1.0
+  description: Read-only INR product catalog — browse, search and compare products before ordering
 
 servers:
   - url: http://localhost:3001
@@ -11,19 +11,35 @@ paths:
   /products:
     get:
       operationId: listProducts
-      summary: List all products
-      description: Returns all available products. Optionally filter by category.
+      summary: List or search products
+      description: >-
+        Returns catalog products. Without parameters it returns the full catalog.
+        Use q to search product names, descriptions and categories by words
+        (for example "headphones" or "office chair"), category to browse one
+        category, and inStock=true to show only products that can be ordered.
       parameters:
         - name: category
           in: query
           required: false
           schema:
             type: string
-            enum: [electronics, home]
+            enum: [electronics, home, office, travel]
           description: Filter products by category
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search words; every word must appear in the product name, description or category (case-insensitive)
+        - name: inStock
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Filter by availability; true returns only orderable products
       responses:
         '200':
-          description: List of products
+          description: Matching products
           content:
             application/json:
               schema:
@@ -35,19 +51,21 @@ paths:
                       $ref: '#/components/schemas/Product'
                   total:
                     type: integer
+        '400':
+          description: Unknown category or invalid inStock value
 
   /products/{id}:
     get:
       operationId: getProduct
       summary: Get product by ID
-      description: Returns full details for a single product including price and stock status.
+      description: Returns full details for a single product, including its current INR price and demo per-order stock limit.
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-          description: Product ID (e.g. p001)
+          description: Product ID returned by listProducts (e.g. p001)
       responses:
         '200':
           description: Product details
@@ -65,16 +83,24 @@ components:
       properties:
         id:
           type: string
+          description: Product ID used by the order service
         name:
           type: string
+        description:
+          type: string
         price:
-          type: number
-          description: Product price in INR
+          type: integer
+          description: Unit price in INR
         currency:
           type: string
           enum: [INR]
           description: Currency used for price
         category:
           type: string
+          enum: [electronics, home, office, travel]
+        stock:
+          type: integer
+          description: Demo maximum units accepted by one order; inventory is not decremented
         inStock:
           type: boolean
+          description: True when stock is above zero; only in-stock products can be ordered

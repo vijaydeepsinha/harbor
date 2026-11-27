@@ -66,8 +66,9 @@ in a fresh isolate and replays completed activities from the journal, so an
 already-completed `POST` is not sent twice. A changed request, divergent replay,
 or unknown side-effect outcome fails closed.
 
-For example, the included commerce service executes orders at or below
-₹5,000 directly and requires approval above ₹5,000. Harbor's active
+For example, the included shopping demo uses a product catalog service and an
+order service: orders at or below ₹5,000 execute directly, while orders above
+₹5,000 require approval. Harbor's active
 gateway-owned [`deny-all-delete.yaml`](governance/rules/deny-all-delete.yaml)
 also blocks every `DELETE` by default.
 
@@ -122,16 +123,27 @@ SERVICES_DIR=/absolute/path/to/services npx harbor-gateway
 Each child folder must contain the service `config.json` and OpenAPI spec; see
 [`services/README.md`](services/README.md).
 
-**Run the demo** (three local commerce/task backends plus the MCP gateway):
+**Run the demo** (product, order and task backends plus the MCP gateway):
 
 ```bash
 bash examples/demo/start.sh
 ```
 
-The commerce demo uses INR. Its service-owned governance policy lets an order of
-₹5,000 or less execute directly, while an order above ₹5,000 pauses with
-`REQUIRE_APPROVAL`; the order backend rejects totals that do not match the
-product price multiplied by quantity.
+The shopping demo uses INR. An agent finds products with the `product`
+service, orders them with the `order` service, and has no reason to call the
+unrelated `tasks` service. The order service derives the customer from the
+caller's bearer token, so agents do not ask for a customer ID. Its
+service-owned governance policy lets an order of ₹5,000 or less execute
+directly, while an order above ₹5,000 pauses with `REQUIRE_APPROVAL`; the order
+backend rejects totals that do not match the product price multiplied by
+quantity. A single Code Mode program may contain multiple order calls: each
+call is an independent governed activity, so every qualifying order gets its
+own approval round while already-completed orders replay without being sent
+again.
+
+The governance E2E environment (`npm run governance:up`) also uses port 3333,
+but serves test-only `commerce` and `ops` fixtures. Stop it with
+`npm run governance:down` before connecting a client to the demo.
 
 **Verify** (E2E smoke test, stdlib only):
 
@@ -210,7 +222,7 @@ protocol edge cases — plus a Postman collection. See [`TESTING.md`](TESTING.md
 
 ```bash
 npm run dev          # tsx watch — live reload
-npm test             # vitest — unit + integration (838 passing, 1 skipped)
+npm test             # vitest — unit + integration (839 passing, 1 skipped)
 npm run typecheck    # tsc --noEmit (strict)
 npm run lint         # eslint
 npm run build        # tsc → dist/

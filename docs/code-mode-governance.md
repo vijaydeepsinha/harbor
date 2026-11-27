@@ -350,6 +350,13 @@ elicitation**. No custom MCP methods.
 An approval is bound to **one activity**. If a later activity needs approval,
 the run pauses again with a new elicitation and a new `requestState` —
 **multiple approval rounds** are simply repeated `input_required` results.
+For example, one program that places two high-value orders pauses at the
+first `POST`, records and resumes that activity after approval, then pauses
+at the second `POST` for a separate approval. Completed activities are
+replayed on each resume, so the first order is not placed twice and the two
+orders are each placed exactly once after their respective decisions. This is
+not an atomic transaction: if a later approval is declined or a later call
+fails, earlier completed orders remain in effect and must be reported.
 
 **Stale and conflicting answers change nothing.** Under the execution lock,
 `ApprovalService.decide` (`src/runtime/execution/approval-service.ts`)

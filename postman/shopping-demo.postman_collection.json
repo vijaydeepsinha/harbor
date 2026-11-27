@@ -1,0 +1,882 @@
+{
+  "info": {
+    "name": "Harbor — Shopping Demo Workflow",
+    "description": "The shopping demo end to end over MCP 2026-07-28: three services are registered (product, order, tasks); the workflow uses only product and order.\n\n1. Discover the services. 2. Browse products with INR prices and stock. 3. Read one product. 4. Order within the INR 5,000 limit (runs directly). 5–6. Order above the limit: Harbor pauses for approval; answering Yes places the same order. 7–8. Another order above the limit; answering No places nothing. 9. List my orders. 10. Try to delete an order: the gateway policy denies it. 11. The order still exists.\n\nThe order service derives the customer from the bearer, so no customer ID is sent. Run with examples/demo/start.sh (gateway on :3333) and run the requests top to bottom; they chain ids through collection variables. CI runs this collection through tests/postman/run-collection.mjs from tests/demo_e2e.py.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:3333",
+      "type": "string"
+    },
+    {
+      "key": "demoBearer",
+      "value": "ShoppingDemoBearerToken-0123456789abcdef",
+      "type": "string"
+    },
+    {
+      "key": "smallOrderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "approvedOrderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "approveRequestState",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "approveExecutionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rejectRequestState",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rejectExecutionId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. discover_services — product, order and tasks are available",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "discover_services"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"discover_services\",\n    \"arguments\": {},\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "The gateway exposes three services. Only product and order are relevant to shopping; tasks is unrelated."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "[\"smallOrderId\",\"approvedOrderId\",\"approveRequestState\",\"approveExecutionId\",\"rejectRequestState\",\"rejectExecutionId\"].forEach(key => pm.collectionVariables.unset(key));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('product, order and tasks are registered', () => { const names = payload.map(s => s.service); ['product', 'order', 'tasks'].forEach(n => pm.expect(names).to.include(n)); });"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "2. product — browse prices and inventory",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "api_execute"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 2,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"product\",\n      \"code\": \"async () => { const r = await api.request({ method: 'GET', path: '/products' }); return r.data.products.map(p => ({ id: p.id, name: p.name, price: p.price, stock: p.stock, inStock: p.inStock })); }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "GET /products returns every product with its INR price, stock and availability."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('tool call completed', () => { pm.expect(rpc.result.resultType).to.eql('complete'); pm.expect(rpc.result.isError).to.not.eql(true); });",
+              "pm.test('12 products with price and stock', () => { pm.expect(payload).to.have.length(12); payload.forEach(p => { pm.expect(p.price).to.be.a('number'); pm.expect(p.stock).to.be.a('number'); }); });",
+              "pm.test('the USB-C Hub is out of stock', () => pm.expect(payload.find(p => p.id === 'p004').inStock).to.eql(false));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "3. product — read one product before ordering",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "api_execute"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 3,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"product\",\n      \"code\": \"async () => (await api.request({ method: 'GET', path: '/products/p009' })).data\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "GET /products/{id} gives the current price and stock for the order."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('tool call completed', () => { pm.expect(rpc.result.resultType).to.eql('complete'); pm.expect(rpc.result.isError).to.not.eql(true); });",
+              "pm.test('water bottle costs INR 899 and is in stock', () => { pm.expect(payload.price).to.eql(899); pm.expect(payload.stock).to.be.above(2); pm.expect(payload.inStock).to.eql(true); });"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "4. order — 2 water bottles (INR 1,798) run directly",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "api_execute"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 4,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"order\",\n      \"code\": \"async () => { const r = await api.request({ method: 'POST', path: '/orders', body: { productId: 'p009', quantity: 2, amountInr: 1798 } }); return { status: r.status, order: r.data }; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "An order within INR 5,000 is allowed without approval. No customer ID is sent."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('tool call completed', () => { pm.expect(rpc.result.resultType).to.eql('complete'); pm.expect(rpc.result.isError).to.not.eql(true); });",
+              "pm.test('order confirmed for the caller-token-derived demo customer', () => { pm.expect(payload.status).to.eql(201); pm.expect(payload.order.amountInr).to.eql(1798); pm.expect(payload.order.customerId).to.match(/^cust-/); });",
+              "if (payload && payload.status === 201) pm.collectionVariables.set('smallOrderId', payload.order.orderId);"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "5. order — office chair (INR 12,999) needs approval",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "api_execute"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 5,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"order\",\n      \"code\": \"async () => { const r = await api.request({ method: 'POST', path: '/orders', body: { productId: 'p005', quantity: 1, amountInr: 12999 } }); return { status: r.status, order: r.data }; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Above INR 5,000 Harbor pauses before the order reaches the backend."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('order paused for human approval', () => { pm.expect(rpc.result.resultType).to.eql('input_required'); pm.expect(rpc.result._meta['harbor/execution-status']).to.eql('WAITING_APPROVAL'); pm.expect(rpc.result.inputRequests.approval.method).to.eql('elicitation/create'); });",
+              "pm.test('approval message names the order rule', () => pm.expect(rpc.result.inputRequests.approval.params.message).to.include('5000 INR'));",
+              "if (rpc.result && rpc.result.resultType === 'input_required') { pm.collectionVariables.set('approveRequestState', rpc.result.requestState); pm.collectionVariables.set('approveExecutionId', rpc.result._meta['harbor/execution-id']); }"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "6. approval — Yes: the same order is placed",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "api_execute"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 6,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"order\",\n      \"code\": \"async () => { const r = await api.request({ method: 'POST', path: '/orders', body: { productId: 'p005', quantity: 1, amountInr: 12999 } }); return { status: r.status, order: r.data }; }\"\n    },\n    \"requestState\": \"{{approveRequestState}}\",\n    \"inputResponses\": {\n      \"approval\": {\n        \"action\": \"accept\",\n        \"content\": {\n          \"approve\": true,\n          \"comment\": \"Yes, place it\"\n        }\n      }\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "The human answers Yes (approve: true). Harbor resumes the original program and places the order once."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('approveRequestState')) throw new Error('Run step 5 first.');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('tool call completed', () => { pm.expect(rpc.result.resultType).to.eql('complete'); pm.expect(rpc.result.isError).to.not.eql(true); });",
+              "pm.test('same execution completed', () => { pm.expect(rpc.result._meta['harbor/execution-id']).to.eql(pm.collectionVariables.get('approveExecutionId')); pm.expect(rpc.result._meta['harbor/execution-status']).to.eql('COMPLETED'); });",
+              "pm.test('office chair order created', () => { pm.expect(payload.status).to.eql(201); pm.expect(payload.order.productName).to.eql('Ergonomic Office Chair'); pm.expect(payload.order.amountInr).to.eql(12999); });",
+              "if (payload && payload.status === 201) pm.collectionVariables.set('approvedOrderId', payload.order.orderId);"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "7. order — 4K monitor (INR 18,999) needs approval",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "api_execute"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 7,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"order\",\n      \"code\": \"async () => { const r = await api.request({ method: 'POST', path: '/orders', body: { productId: 'p007', quantity: 1, amountInr: 18999 } }); return { status: r.status, order: r.data }; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "A second high-value order pauses for approval."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('order paused for human approval', () => { pm.expect(rpc.result.resultType).to.eql('input_required'); pm.expect(rpc.result._meta['harbor/execution-status']).to.eql('WAITING_APPROVAL'); pm.expect(rpc.result.inputRequests.approval.method).to.eql('elicitation/create'); });",
+              "pm.test('approval message names the order rule', () => pm.expect(rpc.result.inputRequests.approval.params.message).to.include('5000 INR'));",
+              "if (rpc.result && rpc.result.resultType === 'input_required') { pm.collectionVariables.set('rejectRequestState', rpc.result.requestState); pm.collectionVariables.set('rejectExecutionId', rpc.result._meta['harbor/execution-id']); }"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "8. approval — No: nothing is ordered",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "api_execute"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 8,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"order\",\n      \"code\": \"async () => { const r = await api.request({ method: 'POST', path: '/orders', body: { productId: 'p007', quantity: 1, amountInr: 18999 } }); return { status: r.status, order: r.data }; }\"\n    },\n    \"requestState\": \"{{rejectRequestState}}\",\n    \"inputResponses\": {\n      \"approval\": {\n        \"action\": \"accept\",\n        \"content\": {\n          \"approve\": false,\n          \"comment\": \"No, too expensive\"\n        }\n      }\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "The human answers No (approve: false). The execution is denied and the order is never sent."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('rejectRequestState')) throw new Error('Run step 7 first.');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('rejected by the human', () => { pm.expect(rpc.result.isError).to.eql(true); pm.expect(payload.code).to.eql('GOVERNANCE_DENIED'); pm.expect(rpc.result._meta['harbor/execution-status']).to.eql('DENIED'); });"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "9. order — list my orders",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "api_execute"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 9,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"order\",\n      \"code\": \"async () => (await api.request({ method: 'GET', path: '/orders' })).data\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "GET /orders returns only this customer's orders: the approved chair is there, the rejected monitor is not."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('approvedOrderId')) throw new Error('Run step 6 first.');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('tool call completed', () => { pm.expect(rpc.result.resultType).to.eql('complete'); pm.expect(rpc.result.isError).to.not.eql(true); });",
+              "pm.test('both placed orders are listed', () => { const ids = payload.orders.map(o => o.orderId); pm.expect(ids).to.include(pm.collectionVariables.get('smallOrderId')); pm.expect(ids).to.include(pm.collectionVariables.get('approvedOrderId')); });",
+              "pm.test('the rejected monitor was never ordered', () => pm.expect(payload.orders.map(o => o.productId)).to.not.include('p007'));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "10. order — DELETE is denied by gateway policy",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "api_execute"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 10,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"order\",\n      \"code\": \"async () => (await api.request({ method: 'DELETE', path: '/orders/{{approvedOrderId}}' })).status\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "The order API supports DELETE, but deny-all-delete blocks it before the backend is called."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('approvedOrderId')) throw new Error('Run step 6 first.');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('denied by deny-all-delete', () => { pm.expect(rpc.result.isError).to.eql(true); pm.expect(payload.code).to.eql('GOVERNANCE_DENIED'); pm.expect(payload.error).to.include('deny-all-delete'); });"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "11. order — the order still exists",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json, text/event-stream"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{demoBearer}}"
+          },
+          {
+            "key": "MCP-Protocol-Version",
+            "value": "2026-07-28"
+          },
+          {
+            "key": "Mcp-Method",
+            "value": "tools/call"
+          },
+          {
+            "key": "Mcp-Name",
+            "value": "api_execute"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/mcp",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "mcp"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 11,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"api_execute\",\n    \"arguments\": {\n      \"service\": \"order\",\n      \"code\": \"async () => { const r = await api.request({ method: 'GET', path: '/orders/{{approvedOrderId}}' }); return { status: r.status, order: r.data }; }\"\n    },\n    \"_meta\": {\n      \"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\",\n      \"io.modelcontextprotocol/clientInfo\": {\n        \"name\": \"postman-shopping-demo\",\n        \"version\": \"1.0\"\n      },\n      \"io.modelcontextprotocol/clientCapabilities\": {\n        \"elicitation\": {\n          \"form\": {}\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "A separate read proves the denied DELETE changed nothing."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('approvedOrderId')) throw new Error('Run step 6 first.');"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rpc = pm.response.json();",
+              "pm.test('no JSON-RPC error', () => pm.expect(rpc.error).to.be.undefined);",
+              "let payload; try { payload = JSON.parse(rpc.result.content[0].text) } catch (e) { payload = undefined }",
+              "pm.test('tool call completed', () => { pm.expect(rpc.result.resultType).to.eql('complete'); pm.expect(rpc.result.isError).to.not.eql(true); });",
+              "pm.test('approved order unchanged', () => { pm.expect(payload.status).to.eql(200); pm.expect(payload.order.orderId).to.eql(pm.collectionVariables.get('approvedOrderId')); pm.expect(payload.order.status).to.eql('confirmed'); });"
+            ]
+          }
+        }
+      ],
+      "response": []
+    }
+  ]
+}

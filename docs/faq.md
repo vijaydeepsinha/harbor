@@ -210,7 +210,7 @@ Correct behavior. Circuit state is kept per endpoint: the OpenAPI path template 
 **Which calls are governed?**
 
 The product and task demos have no active service policy, so their calls are
-allowed as `NO_GOVERNANCE`. The order demo includes a service-owned rule:
+allowed as `NO_GOVERNANCE` unless they use `DELETE`. The order demo includes a service-owned rule:
 `amountInr <= 5000` is allowed and `amountInr > 5000` requires approval. Put
 YAML/JSON policy under a service's `governance/rules/` directory, or configure
 its URL/custom source and refresh interval in `config.json`. The service's

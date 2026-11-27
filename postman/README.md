@@ -1,10 +1,11 @@
 # Testing Harbor with Postman
 
-Two collections live here:
+Three collections live here:
 
 | Collection | Covers | Environment |
 |---|---|---|
 | `mcp-governance.postman_collection.json` + `environments/local.postman_environment.json` | the Code Mode governance lifecycle — allow / deny / approval-required, MRTR approve + resume, the HTTP fallback approval, a multi-step workflow with two approvals, denial, replay, idempotency, error cases, security, audit, review hardening (15 folders, 118 requests, 232 assertions). Generated from the vitest E2E fixtures by `npm run postman:build`. | `npm run governance:up` (Docker) or `npm run governance:up -- --local`; run with `npm run test:postman`, `npx newman`, or the Postman GUI (folders top to bottom — they chain ids through collection variables). Runs in CI (`governance-e2e.yml`) through the dependency-free runner `tests/postman/run-collection.mjs`, see [`TESTING.md`](../TESTING.md). |
+| `shopping-demo.postman_collection.json` | the shopping demo: discover the product, order and tasks services; browse prices and stock; order within ₹5,000; order above ₹5,000 and answer the approval Yes (placed) or No (not placed); list my orders; a denied `DELETE`; the order still exists (11 requests) | `examples/demo/start.sh`; run top to bottom in Postman, or `node tests/postman/run-collection.mjs --collection postman/shopping-demo.postman_collection.json`. CI runs it from `tests/demo_e2e.py`. |
 | `Harbor.postman_collection.json` | the four auth strategies (below) | `examples/demo/start.sh` / `start-oauth-mode.sh` — manual only |
 
 Folder `15 - Review Hardening` of the governance collection replays the corner

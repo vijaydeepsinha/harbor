@@ -2,6 +2,7 @@
 // Copyright 2026 Contributors to the Harbor project.
 
 import {describe, expect, it} from 'vitest'
+import {readFileSync} from 'node:fs'
 import {parseSkillFile} from '../../src/runtime/registry/skill-parser.js'
 
 describe('parseSkillFile', () => {
@@ -65,5 +66,20 @@ Step one.
         ]
     ])('rejects %s', (_case, raw, message) => {
         expect(() => parseSkillFile('manage-tasks.md', raw)).toThrow(message)
+    })
+})
+
+describe('demo order skill', () => {
+    it('describes business workflow without duplicating governance policy', () => {
+        const parsed = parseSkillFile(
+            'place-order.md',
+            readFileSync('services/order/skills/place-order.md', 'utf8')
+        )
+
+        expect(parsed.description).toContain('calculates the order total')
+        expect(parsed.content).toContain('GET /products/{id}')
+        expect(parsed.content).toContain('amountInr = price × quantity')
+        expect(parsed.content).toContain('POST /orders')
+        expect(parsed.content).not.toMatch(/5,?000|approval|REQUIRE_APPROVAL|GOVERNANCE_DENIED|requestState/i)
     })
 })

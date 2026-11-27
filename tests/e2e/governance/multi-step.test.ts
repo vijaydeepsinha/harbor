@@ -184,6 +184,56 @@ describe('multi-step workflow with two approval points', () => {
         expect(await s().mock.calls()).toEqual([CALLS.customer, CALLS.order, CALLS.payment])
     })
 
+    it('should_approve_two_orders_separately_in_one_program_without_repeating_the_first', async () => {
+        const c = s().client('alice')
+        const program = `async () => {
+  const first = await api.request({
+    method: 'POST',
+    path: '/orders',
+    body: { customerId: '${RESOURCES.customerAllowed}', amount: 50000, items: ['sku-1'] }
+  })
+  const second = await api.request({
+    method: 'POST',
+    path: '/orders',
+    body: { customerId: '${RESOURCES.customerAllowed}', amount: 60000, items: ['sku-2'] }
+  })
+  return [first.data.id, second.data.id]
+}`
+
+        const firstPause = expectPaused(await c.apiExecute('commerce', program))
+        s().track(firstPause.executionId)
+        expect(await s().mock.count('POST', '/orders')).toBe(0)
+
+        const secondPause = expectPaused(await c.answerApproval(firstPause, {
+            action: 'accept',
+            approve: true
+        }))
+        expect(secondPause.executionId).toBe(firstPause.executionId)
+        expect(secondPause.approvalId).not.toBe(firstPause.approvalId)
+        expect(await s().mock.count('POST', '/orders')).toBe(1)
+
+        const done = expectCompleted(await c.answerApproval(secondPause, {
+            action: 'accept',
+            approve: true
+        }))
+        expect(done.value).toEqual(['order-001', 'order-002'])
+        expect(await s().mock.calls()).toEqual([CALLS.order, CALLS.order])
+
+        const inspection = await s().admin.inspect(firstPause.executionId)
+        expect(inspection.execution).toMatchObject({
+            status: EXECUTION_STATUS.COMPLETED,
+            runCount: 3
+        })
+        expect(inspection.activities.map(activity => activity.status)).toEqual([
+            ACTIVITY_STATUS.COMPLETED,
+            ACTIVITY_STATUS.COMPLETED
+        ])
+        expect(inspection.approvals.map(approval => approval.status)).toEqual([
+            APPROVAL_STATUS.APPROVED,
+            APPROVAL_STATUS.APPROVED
+        ])
+    })
+
     it('should_keep_two_concurrent_workflows_of_different_principals_independent', async () => {
         const alice = s().client('alice'), bob = s().client('bob')
         const [pa, pb] = await Promise.all([alice.apiExecute('commerce', program), bob.apiExecute('commerce', program)])
