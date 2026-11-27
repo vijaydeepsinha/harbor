@@ -48,7 +48,7 @@
     "@apidevtools/swagger-parser": "^13.1.0",
     "@modelcontextprotocol/node": "2.1.2",
     "@modelcontextprotocol/server": "2.4.0",
-    "axios": "^1.7.9",
+    "axios": "^1.21.1",
     "dotenv": "^17.4.2",
     "gray-matter": "^4.0.3",
     "isolated-vm": "^7.0.2",
